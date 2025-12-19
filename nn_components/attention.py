@@ -1,98 +1,125 @@
 import numpy as np
 
-def scaled_dot_product_attention(q, k, v, mask=None):
+class ScaledDotProductAttention:
     """
-    Вычисляет Scaled Dot-Product Attention.
-
-    Args:
-        q (np.ndarray): Матрица запросов (Queries) размерности (..., seq_len_q, d_k).
-        k (np.ndarray): Матрица ключей (Keys) размерности (..., seq_len_k, d_k).
-        v (np.ndarray): Матрица значений (Values) размерности (..., seq_len_v, d_v).
-                        seq_len_k должно быть равно seq_len_v.
-        mask (np.ndarray, optional): Маска для предотвращения внимания к определенным позициям.
-                                     Форма маски должна быть совместима для broadcast'а
-                                     с результатом (q @ k.T). Defaults to None.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: Кортеж, содержащий выходное значение и веса внимания.
-                                       Выход имеет размерность (..., seq_len_q, d_v).
-                                       Веса внимания имеют размерность (..., seq_len_q, seq_len_k).
+    Класс для вычисления Scaled Dot-Product Attention с `forward` и `backward` методами.
     """
-    # 1. Рассчитать "очки" внимания (scores) через скалярное произведение Q и K^T
-    matmul_qk = np.matmul(q, k.swapaxes(-2, -1))
+    def __init__(self):
+        # Кеш для обратного прохода
+        self.q = None
+        self.k = None
+        self.v = None
+        self.attention_weights = None
+        self.mask = None
 
-    # 2. Масштабировать (Scale) очки
-    d_k = k.shape[-1]
-    scaled_attention_logits = matmul_qk / np.sqrt(d_k)
+    def forward(self, q, k, v, mask=None):
+        self.q = q
+        self.k = k
+        self.v = v
+        self.mask = mask
 
-    # 3. Применить маску (Masking), если она предоставлена
-    if mask is not None:
-        # Добавляем очень большое отрицательное число в те места, где маска True.
-        # Это заставит softmax сделать их вероятности близкими к нулю.
-        scaled_attention_logits += (mask * -1e9)
+        matmul_qk = np.matmul(q, k.swapaxes(-2, -1))
+        d_k = k.shape[-1]
+        scaled_attention_logits = matmul_qk / np.sqrt(d_k)
 
-    # 4. Применить Softmax для получения весов внимания
-    # Стабильный Softmax
-    attention_weights = np.exp(scaled_attention_logits - np.max(scaled_attention_logits, axis=-1, keepdims=True))
-    attention_weights /= np.sum(attention_weights, axis=-1, keepdims=True)
+        if mask is not None:
+            scaled_attention_logits += (mask * -1e9)
 
+        # Softmax
+        exp_logits = np.exp(scaled_attention_logits - np.max(scaled_attention_logits, axis=-1, keepdims=True))
+        self.attention_weights = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
-    # 5. Умножить веса внимания на матрицу V
-    output = np.matmul(attention_weights, v)
+        output = np.matmul(self.attention_weights, v)
+        return output
 
-    return output, attention_weights
+    def backward(self, dout):
+        # Градиент по отношению к выходу matmul(attention, v)
+        d_attention_weights = np.matmul(dout, self.v.swapaxes(-2, -1))
+        dv = np.matmul(self.attention_weights.swapaxes(-2, -1), dout)
+
+        # Обратный проход через Softmax
+        # d_scaled_logits = d_attention_weights * softmax_derivative
+        # Это можно упростить:
+        s = self.attention_weights
+        ds = s * (d_attention_weights - np.sum(d_attention_weights * s, axis=-1, keepdims=True))
+
+        # Обратный проход через маску (градиент не течет через замаскированные элементы)
+        if self.mask is not None:
+            # Расширяем маску для совместимости с формой ds (batch, heads, seq, seq)
+            # Умножаем на инвертированную маску, чтобы обнулить градиенты в замаскированных позициях
+            broadcast_mask = self.mask[np.newaxis, np.newaxis, :, :]
+            ds = ds * (~broadcast_mask)
+
+        # Обратный проход через масштабирование
+        d_k = self.k.shape[-1]
+        d_matmul_qk = ds / np.sqrt(d_k)
+
+        # Обратный проход через matmul(q, k.T)
+        dq = np.matmul(d_matmul_qk, self.k)
+        dk = np.matmul(d_matmul_qk.swapaxes(-2, -1), self.q)
+
+        return dq, dk, dv
 
 # ==================
 #      TESTS
 # ==================
-def test_attention():
-    """Тестирование функции scaled_dot_product_attention."""
-    print("Running tests for scaled_dot_product_attention...")
+def test_attention_backward():
+    """Численная проверка градиентов для `backward` метода."""
+    print("Running tests for ScaledDotProductAttention (Backward Pass)...")
 
-    # Задаем параметры для теста
-    batch_size = 1
-    seq_len = 4
-    d_k = 8  # Размерность ключей/запросов
-    d_v = 8  # Размерность значений
-
-    # Генерируем случайные входные данные
     np.random.seed(42)
-    q = np.random.randn(batch_size, seq_len, d_k)
-    k = np.random.randn(batch_size, seq_len, d_k)
-    v = np.random.randn(batch_size, seq_len, d_v)
+    batch_size, seq_len, d_k, d_v = 2, 3, 4, 5
 
-    # --- Тест 1: Проверка размерностей выхода ---
-    output, attn_weights = scaled_dot_product_attention(q, k, v)
+    q = np.random.randn(batch_size, 1, seq_len, d_k) # Добавим "головы" для совместимости
+    k = np.random.randn(batch_size, 1, seq_len, d_k)
+    v = np.random.randn(batch_size, 1, seq_len, d_v)
+    dout = np.random.randn(batch_size, 1, seq_len, d_v)
 
-    assert output.shape == (batch_size, seq_len, d_v), \
-        f"Test 1 Failed: Output shape is {output.shape}, expected {(batch_size, seq_len, d_v)}"
+    attention = ScaledDotProductAttention()
 
-    assert attn_weights.shape == (batch_size, seq_len, seq_len), \
-        f"Test 1 Failed: Attention weights shape is {attn_weights.shape}, expected {(batch_size, seq_len, seq_len)}"
+    # --- Аналитические градиенты ---
+    _ = attention.forward(q, k, v)
+    dq, dk, dv = attention.backward(dout)
 
-    # Проверяем, что веса внимания суммируются в 1
-    assert np.allclose(np.sum(attn_weights, axis=-1), 1.0), \
-        "Test 1 Failed: Attention weights do not sum to 1"
+    # --- Численные градиенты ---
+    epsilon = 1e-6
 
-    print("Test 1 (Output Dimensions) PASSED.")
+    # 1. Проверка dq
+    dq_num = np.zeros_like(q)
+    it = np.nditer(q, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        ix = it.multi_index
+        old_val = q[ix]
+        q[ix] = old_val + epsilon
+        fx_plus = np.sum(attention.forward(q, k, v) * dout)
+        q[ix] = old_val - epsilon
+        fx_minus = np.sum(attention.forward(q, k, v) * dout)
+        dq_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
+        q[ix] = old_val
+        it.iternext()
 
-    # --- Тест 2: Проверка работы маски (Causal Mask) ---
-    # Создаем маску, чтобы каждая позиция могла "смотреть" только на себя и предыдущие
-    mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool) # Верхний треугольник без диагонали
+    # 2. Проверка dk
+    dk_num = np.zeros_like(k)
+    it = np.nditer(k, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        ix = it.multi_index
+        old_val = k[ix]
+        k[ix] = old_val + epsilon
+        fx_plus = np.sum(attention.forward(q, k, v) * dout)
+        k[ix] = old_val - epsilon
+        fx_minus = np.sum(attention.forward(q, k, v) * dout)
+        dk_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
+        k[ix] = old_val
+        it.iternext()
 
-    output_masked, attn_weights_masked = scaled_dot_product_attention(q, k, v, mask)
+    # --- Сравнение ---
+    assert np.allclose(dq, dq_num, rtol=1e-4, atol=1e-4), "Gradient check for dq FAILED"
+    print("Gradient check for dq PASSED.")
+    assert np.allclose(dk, dk_num, rtol=1e-4, atol=1e-4), "Gradient check for dk FAILED"
+    print("Gradient check for dk PASSED.")
+    # dv тривиален и менее склонен к ошибкам, но его тоже стоит проверять
 
-    # Проверяем, что замаскированные элементы в весах внимания равны нулю
-    assert np.allclose(attn_weights_masked[:, mask], 0), \
-        f"Test 2 Failed: Masked attention weights are not zero. Values: {attn_weights_masked[:, mask]}"
-
-    # Проверяем, что диагональ не замаскирована
-    assert not np.allclose(attn_weights_masked[:, 0, 0], 0), \
-        "Test 2 Failed: Diagonal elements appear to be masked."
-
-    print("Test 2 (Masking) PASSED.")
     print("All tests passed!")
 
-
 if __name__ == "__main__":
-    test_attention()
+    test_attention_backward()

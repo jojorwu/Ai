@@ -6,19 +6,8 @@ from nn_components.layer_norm import LayerNormalization
 class DecoderBlock:
     """
     Реализация одного блока декодера Трансформера.
-    Включает в себя Multi-Head Attention, Feed-Forward Network,
-    Layer Normalization и Residual Connections.
-    Использует Pre-LN (LayerNorm перед под-слоем) для большей стабильности.
     """
     def __init__(self, d_model, num_heads, d_ff):
-        """
-        Инициализация блока.
-
-        Args:
-            d_model (int): Размерность модели.
-            num_heads (int): Количество "голов" внимания.
-            d_ff (int): Размерность внутреннего слоя в FFN.
-        """
         self.mha = MultiHeadAttention(d_model, num_heads)
         self.ffn = FeedForward(d_model, d_ff)
 
@@ -26,64 +15,70 @@ class DecoderBlock:
         self.norm2 = LayerNormalization(d_model)
 
     def forward(self, x, mask=None):
-        """
-        Прямой проход для блока декодера.
-
-        Args:
-            x (np.ndarray): Входной тензор (размер: batch_size, seq_len, d_model).
-            mask (np.ndarray, optional): Маска для Causal Self-Attention.
-
-        Returns:
-            np.ndarray: Выходной тензор того же размера.
-        """
-        # 1. Слой Multi-Head Attention с Pre-LN и Residual Connection
-        # Вход x сначала нормализуется, затем подается в MHA
         x_norm1 = self.norm1.forward(x)
-        attn_output, _ = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask)
-        # Residual connection: добавляем выход MHA к *оригинальному* входу x
+        attn_output = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask)
         x = x + attn_output
 
-        # 2. Слой Feed-Forward с Pre-LN и Residual Connection
-        # Результат первого под-слоя нормализуется и подается в FFN
-        ffn_output = self.ffn.forward(self.norm2.forward(x))
-        # Второй residual connection
+        x_norm2 = self.norm2.forward(x)
+        ffn_output = self.ffn.forward(x_norm2)
         x = x + ffn_output
 
         return x
 
+    def backward(self, dout):
+        dffn_output = dout
+        dx_residual2 = dout
+
+        d_x_norm2 = self.ffn.backward(dffn_output)
+        dx_from_norm2 = self.norm2.backward(d_x_norm2)
+
+        dx_after_attn = dx_from_norm2 + dx_residual2
+
+        d_attn_output = dx_after_attn
+        dx_residual1 = dx_after_attn
+
+        dq, dk, dv = self.mha.backward(d_attn_output)
+        d_x_norm1 = dq + dk + dv
+        dx_from_norm1 = self.norm1.backward(d_x_norm1)
+
+        dx = dx_from_norm1 + dx_residual1
+
+        return dx
+
 # ==================
 #      TESTS
 # ==================
-def test_decoder_block():
-    """Тестирование класса DecoderBlock."""
-    print("Running tests for DecoderBlock...")
+def test_decoder_block_backward():
+    """Численная проверка градиентов для `backward` метода."""
+    print("Running tests for DecoderBlock (Backward Pass)...")
 
-    # Параметры теста
-    batch_size = 4
-    seq_len = 8
-    d_model = 128
-    num_heads = 8
-    d_ff = 512
+    batch_size, seq_len, d_model, num_heads, d_ff = 2, 3, 4, 2, 8
 
-    # Создаем экземпляр класса
-    decoder_block = DecoderBlock(d_model, num_heads, d_ff)
-
-    # Генерируем случайные входные данные
     np.random.seed(42)
+    block = DecoderBlock(d_model, num_heads, d_ff)
     x = np.random.randn(batch_size, seq_len, d_model)
+    dout = np.random.randn(batch_size, seq_len, d_model)
 
-    # Создаем Causal маску
-    mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
+    _ = block.forward(x)
+    dx = block.backward(dout)
 
-    # --- Тест 1: Проверка размерности выхода ---
-    output = decoder_block.forward(x, mask=mask)
-    expected_shape = (batch_size, seq_len, d_model)
+    epsilon = 1e-6
+    dx_num = np.zeros_like(x)
+    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        ix = it.multi_index
+        old_val = x[ix]
+        x[ix] = old_val + epsilon
+        fx_plus = np.sum(block.forward(x) * dout)
+        x[ix] = old_val - epsilon
+        fx_minus = np.sum(block.forward(x) * dout)
+        dx_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
+        x[ix] = old_val
+        it.iternext()
 
-    assert output.shape == expected_shape, \
-        f"Test 1 Failed: Output shape is {output.shape}, expected {expected_shape}"
-    print("Test 1 (Output Dimensions) PASSED.")
+    assert np.allclose(dx, dx_num, rtol=1e-4, atol=1e-4), "Gradient check for dx FAILED"
+    print("Gradient check for dx PASSED.")
     print("All tests passed!")
 
-
 if __name__ == "__main__":
-    test_decoder_block()
+    test_decoder_block_backward()

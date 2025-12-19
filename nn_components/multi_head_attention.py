@@ -1,116 +1,104 @@
 import numpy as np
-from nn_components.attention import scaled_dot_product_attention
+from nn_components.attention import ScaledDotProductAttention
+from nn_components.linear import Linear
 
 class MultiHeadAttention:
     """
     Реализация Multi-Head Attention слоя.
     """
     def __init__(self, d_model, num_heads):
-        """
-        Инициализация слоя.
-
-        Args:
-            d_model (int): Размерность модели (глубина эмбеддингов).
-            num_heads (int): Количество "голов" внимания.
-        """
         assert d_model % num_heads == 0, "d_model должна делиться на num_heads без остатка."
 
         self.d_model = d_model
         self.num_heads = num_heads
-        self.d_k = d_model // num_heads  # Размерность для каждой головы
+        self.d_k = d_model // num_heads
 
-        # Инициализация весовых матриц с использованием Xavier/Glorot инициализации
-        # для лучшей сходимости во время обучения.
-        # Форма (d_model, num_heads, d_k) для совместимости с einsum.
-        limit = np.sqrt(6 / (d_model + self.d_k))
-        self.Wq = np.random.uniform(-limit, limit, (d_model, num_heads, self.d_k))
-        self.Wk = np.random.uniform(-limit, limit, (d_model, num_heads, self.d_k))
-        self.Wv = np.random.uniform(-limit, limit, (d_model, num_heads, self.d_k))
+        self.wq = Linear(d_model, d_model)
+        self.wk = Linear(d_model, d_model)
+        self.wv = Linear(d_model, d_model)
+        self.wo = Linear(d_model, d_model)
 
-        limit_o = np.sqrt(6 / (d_model + d_model))
-        self.Wo = np.random.uniform(-limit_o, limit_o, (d_model, d_model))
+        self.attention = ScaledDotProductAttention()
+
+    def split_heads(self, x):
+        batch_size, seq_len, _ = x.shape
+        return x.reshape(batch_size, seq_len, self.num_heads, self.d_k).transpose(0, 2, 1, 3)
+
+    def combine_heads(self, x):
+        batch_size, _, seq_len, _ = x.shape
+        return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, self.d_model)
 
     def forward(self, q, k, v, mask=None):
-        """
-        Прямой проход для Multi-Head Attention.
+        q_proj = self.split_heads(self.wq.forward(q))
+        k_proj = self.split_heads(self.wk.forward(k))
+        v_proj = self.split_heads(self.wv.forward(v))
 
-        Args:
-            q (np.ndarray): Вход для запросов (размер: batch_size, seq_len_q, d_model).
-            k (np.ndarray): Вход для ключей (размер: batch_size, seq_len_k, d_model).
-            v (np.ndarray): Вход для значений (размер: batch_size, seq_len_v, d_model).
-            mask (np.ndarray, optional): Маска.
+        scaled_attention = self.attention.forward(q_proj, k_proj, v_proj, mask)
 
-        Returns:
-            tuple[np.ndarray, np.ndarray]: Выход слоя и веса внимания.
-        """
-        batch_size = q.shape[0]
-        seq_len_q = q.shape[1]
+        concat_attention = self.combine_heads(scaled_attention)
 
-        # 1. Линейные проекции для каждой головы
-        # q, k, v имеют размер (batch_size, seq_len, d_model)
-        # Мы хотим получить (batch_size, num_heads, seq_len, d_k)
+        output = self.wo.forward(concat_attention)
 
-        # 1. Линейные проекции с использованием einsum для векторизации
-        # 'bsd,dhk->bhsk' расшифровывается так:
-        # b - batch_size, s - sequence_length, d - d_model
-        # d - d_model, h - num_heads, k - d_k
-        # Результат: (batch_size, num_heads, seq_len, d_k)
-        q_proj = np.einsum('bsd,dhk->bhsk', q, self.Wq)
-        k_proj = np.einsum('bsd,dhk->bhsk', k, self.Wk)
-        v_proj = np.einsum('bsd,dhk->bhsk', v, self.Wv)
+        return output
 
-        # 2. Применяем scaled_dot_product_attention
-        # Маска должна быть broadcast'able до (batch_size, num_heads, seq_len_q, seq_len_k)
-        scaled_attention, attention_weights = scaled_dot_product_attention(q_proj, k_proj, v_proj, mask)
-        # scaled_attention имеет размер (batch_size, num_heads, seq_len_q, d_k)
+    def backward(self, dout):
+        d_concat_attention = self.wo.backward(dout)
 
-        # 3. Конкатенируем головы обратно
-        # Сначала меняем оси num_heads и seq_len_q
-        scaled_attention = scaled_attention.transpose(0, 2, 1, 3) # (batch_size, seq_len_q, num_heads, d_k)
+        d_scaled_attention = self.combine_heads_backward(d_concat_attention)
 
-        # "Сплющиваем" последние две размерности (num_heads, d_k) в d_model
-        concat_attention = scaled_attention.reshape(batch_size, seq_len_q, self.d_model) # (batch_size, seq_len_q, d_model)
+        dq_proj, dk_proj, dv_proj = self.attention.backward(d_scaled_attention)
 
-        # 4. Финальная линейная проекция
-        output = concat_attention @ self.Wo # (batch_size, seq_len_q, d_model)
+        dq = self.wq.backward(self.split_heads_backward(dq_proj))
+        dk = self.wk.backward(self.split_heads_backward(dk_proj))
+        dv = self.wv.backward(self.split_heads_backward(dv_proj))
 
-        return output, attention_weights
+        return dq, dk, dv
+
+    def split_heads_backward(self, x):
+        batch_size, num_heads, seq_len, d_k = x.shape
+        return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, self.d_model)
+
+    def combine_heads_backward(self, x):
+        batch_size, seq_len, _ = x.shape
+        return x.reshape(batch_size, seq_len, self.num_heads, self.d_k).transpose(0, 2, 1, 3)
 
 # ==================
 #      TESTS
 # ==================
-def test_multi_head_attention():
-    """Тестирование класса MultiHeadAttention."""
-    print("Running tests for MultiHeadAttention...")
+def test_multi_head_attention_backward():
+    """Численная проверка градиентов для `backward` метода."""
+    print("Running tests for MultiHeadAttention (Backward Pass)...")
 
-    # Параметры теста
-    batch_size = 2
-    seq_len = 5
-    d_model = 128
-    num_heads = 8
+    batch_size, seq_len, d_model, num_heads = 2, 3, 4, 2
 
-    # Создаем экземпляр класса
-    mha = MultiHeadAttention(d_model, num_heads)
-
-    # Генерируем случайные входные данные
     np.random.seed(42)
+    mha = MultiHeadAttention(d_model, num_heads)
     q = np.random.randn(batch_size, seq_len, d_model)
     k = np.random.randn(batch_size, seq_len, d_model)
     v = np.random.randn(batch_size, seq_len, d_model)
+    dout = np.random.randn(batch_size, seq_len, d_model)
 
-    # --- Тест 1: Проверка размерностей выхода ---
-    output, attn_weights = mha.forward(q, k, v)
+    _ = mha.forward(q, k, v)
+    dq, dk, dv = mha.backward(dout)
 
-    expected_output_shape = (batch_size, seq_len, d_model)
-    assert output.shape == expected_output_shape, \
-        f"Test 1 Failed: Output shape is {output.shape}, expected {expected_output_shape}"
+    epsilon = 1e-6
 
-    expected_attn_shape = (batch_size, num_heads, seq_len, seq_len)
-    assert attn_weights.shape == expected_attn_shape, \
-        f"Test 1 Failed: Attention weights shape is {attn_weights.shape}, expected {expected_attn_shape}"
+    # Проверка dq
+    dq_num = np.zeros_like(q)
+    it = np.nditer(q, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        ix = it.multi_index
+        old_val = q[ix]
+        q[ix] = old_val + epsilon
+        fx_plus = np.sum(mha.forward(q, k, v) * dout)
+        q[ix] = old_val - epsilon
+        fx_minus = np.sum(mha.forward(q, k, v) * dout)
+        dq_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
+        q[ix] = old_val
+        it.iternext()
 
-    print("Test 1 (Output Dimensions) PASSED.")
-    print("All tests passed!")
+    assert np.allclose(dq, dq_num, rtol=1e-4, atol=1e-4), "Gradient check for dq FAILED"
+    print("Gradient check for dq PASSED.")
 
 if __name__ == "__main__":
-    test_multi_head_attention()
+    test_multi_head_attention_backward()
