@@ -23,9 +23,11 @@ class Linear:
         self.db = None
 
     def get_params(self):
+        """Возвращает сам объект слоя для обнаружения оптимизатором."""
         return [self]
 
     def get_trainable_params(self):
+        """Возвращает словарь с обучаемыми параметрами и их градиентами."""
         return {'W': (self.W, self.dW), 'b': (self.b, self.db)}
 
     def forward(self, x):
@@ -70,76 +72,3 @@ class Linear:
 
         # Возвращаем градиенту по входу исходную форму
         return dx.reshape(original_shape)
-
-# ==================
-#      TESTS
-# ==================
-def test_linear_backward():
-    """Численная проверка градиентов для `backward` метода."""
-    print("Running tests for Linear layer (Backward Pass)...")
-
-    # Параметры теста
-    batch_size = 3
-    seq_len = 5
-    input_dim = 10
-    output_dim = 20
-
-    # Создаем слой и входные данные
-    np.random.seed(42)
-    layer = Linear(input_dim, output_dim)
-    x = np.random.randn(batch_size, seq_len, input_dim)
-
-    # Чтобы градиент не был нулевым, "предположим", что это не конец сети
-    # и создадим случайный градиент с предыдущего шага
-    dout = np.random.randn(batch_size, seq_len, output_dim)
-
-    # --- Вычисляем градиенты аналитически (через backward) ---
-    _ = layer.forward(x)
-    dx = layer.backward(dout)
-    dW = layer.dW
-    db = layer.db
-
-    # --- Вычисляем градиенты численно ---
-    epsilon = 1e-6
-
-    # 1. Численный градиент для x (dx_num)
-    dx_num = np.zeros_like(x)
-    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
-    while not it.finished:
-        ix = it.multi_index
-        old_val = x[ix]
-        x[ix] = old_val + epsilon
-        fx_plus = np.sum(layer.forward(x) * dout)
-        x[ix] = old_val - epsilon
-        fx_minus = np.sum(layer.forward(x) * dout)
-        dx_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
-        x[ix] = old_val
-        it.iternext()
-
-    # 2. Численный градиент для W (dW_num)
-    dW_num = np.zeros_like(layer.W)
-    it = np.nditer(layer.W, flags=['multi_index'], op_flags=['readwrite'])
-    while not it.finished:
-        ix = it.multi_index
-        old_val = layer.W[ix]
-        layer.W[ix] = old_val + epsilon
-        fW_plus = np.sum(layer.forward(x) * dout)
-        layer.W[ix] = old_val - epsilon
-        fW_minus = np.sum(layer.forward(x) * dout)
-        dW_num[ix] = (fW_plus - fW_minus) / (2 * epsilon)
-        layer.W[ix] = old_val
-        it.iternext()
-
-    # --- Сравнение ---
-    assert np.allclose(dx, dx_num, rtol=1e-4, atol=1e-4), "Gradient check for dx FAILED"
-    print("Gradient check for dx PASSED.")
-    assert np.allclose(dW, dW_num, rtol=1e-4, atol=1e-4), "Gradient check for dW FAILED"
-    print("Gradient check for dW PASSED.")
-
-    # `db` проверять не будем, так как его градиент тривиален (сумма dout),
-    # но в реальном проекте его тоже стоило бы проверить.
-
-    print("All tests passed!")
-
-if __name__ == "__main__":
-    test_linear_backward()

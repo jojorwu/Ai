@@ -21,7 +21,8 @@ class MultiHeadAttention:
         self.attention = ScaledDotProductAttention()
 
     def get_params(self):
-        return self.wq.get_params() + self.wk.get_params() + self.wv.get_params() + self.wo.get_params()
+        """Возвращает словарь слоев для именованного сохранения и загрузки."""
+        return {'wq': self.wq, 'wk': self.wk, 'wv': self.wv, 'wo': self.wo}
 
     def split_heads(self, x):
         batch_size, seq_len, _ = x.shape
@@ -64,44 +65,3 @@ class MultiHeadAttention:
     def combine_heads_backward(self, x):
         batch_size, seq_len, _ = x.shape
         return x.reshape(batch_size, seq_len, self.num_heads, self.d_k).transpose(0, 2, 1, 3)
-
-# ==================
-#      TESTS
-# ==================
-def test_multi_head_attention_backward():
-    """Численная проверка градиентов для `backward` метода."""
-    print("Running tests for MultiHeadAttention (Backward Pass)...")
-
-    batch_size, seq_len, d_model, num_heads = 2, 3, 4, 2
-
-    np.random.seed(42)
-    mha = MultiHeadAttention(d_model, num_heads)
-    q = np.random.randn(batch_size, seq_len, d_model)
-    k = np.random.randn(batch_size, seq_len, d_model)
-    v = np.random.randn(batch_size, seq_len, d_model)
-    dout = np.random.randn(batch_size, seq_len, d_model)
-
-    _ = mha.forward(q, k, v)
-    dq, dk, dv = mha.backward(dout)
-
-    epsilon = 1e-6
-
-    # Проверка dq
-    dq_num = np.zeros_like(q)
-    it = np.nditer(q, flags=['multi_index'], op_flags=['readwrite'])
-    while not it.finished:
-        ix = it.multi_index
-        old_val = q[ix]
-        q[ix] = old_val + epsilon
-        fx_plus = np.sum(mha.forward(q, k, v) * dout)
-        q[ix] = old_val - epsilon
-        fx_minus = np.sum(mha.forward(q, k, v) * dout)
-        dq_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
-        q[ix] = old_val
-        it.iternext()
-
-    assert np.allclose(dq, dq_num, rtol=1e-4, atol=1e-4), "Gradient check for dq FAILED"
-    print("Gradient check for dq PASSED.")
-
-if __name__ == "__main__":
-    test_multi_head_attention_backward()

@@ -65,7 +65,7 @@ def main():
 
     # Отделяем max_norm от параметров Adam
     max_norm = optim_config.pop('max_norm')
-    optimizer = Adam(model.get_params(), **optim_config)
+    optimizer = Adam(model.get_named_params(), **optim_config)
 
     mask = np.triu(np.ones((train_config['seq_len'], train_config['seq_len'])), k=1).astype(bool)
 
@@ -86,7 +86,7 @@ def main():
             model.backward(dlogits)
 
             # Обрезка градиентов
-            clip_gradients(model.get_params(), max_norm)
+            clip_gradients(model.get_named_params(), max_norm)
 
             optimizer.step()
 

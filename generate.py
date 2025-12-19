@@ -44,8 +44,9 @@ def main():
 
     generated_tokens = model.generate(
         start_tokens,
-        max_len=gen_config['max_len'],
-        temperature=gen_config['temperature']
+        max_len=gen_config.get('max_len', 50),
+        temperature=gen_config.get('temperature', 0.8),
+        top_k=gen_config.get('top_k', 0)  # Используем get для обратной совместимости
     )
 
     generated_text = tokenizer.decode(generated_tokens.tolist())

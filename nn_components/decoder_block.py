@@ -19,9 +19,13 @@ class DecoderBlock:
         self.dropout2 = Dropout(dropout_rate)
 
     def get_params(self):
-        # Dropout не имеет параметров, но остальные слои имеют
-        return self.mha.get_params() + self.ffn.get_params() + \
-               self.norm1.get_params() + self.norm2.get_params()
+        """Возвращает вложенный словарь слоев."""
+        return {
+            'mha': self.mha,
+            'ffn': self.ffn,
+            'norm1': self.norm1,
+            'norm2': self.norm2
+        }
 
     def forward(self, x, mask=None):
         x_norm1 = self.norm1.forward(x)
