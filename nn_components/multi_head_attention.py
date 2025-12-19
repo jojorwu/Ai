@@ -38,22 +38,36 @@ class MultiHeadAttention:
         batch_size, _, seq_len, _ = x.shape
         return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, self.d_model)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         seq_len = q.shape[1]
 
-        self.q_proj_no_rope = self.split_heads(self.wq.forward(q))
-        self.k_proj_no_rope = self.split_heads(self.wk.forward(k))
+        q_proj = self.split_heads(self.wq.forward(q))
+        k_proj = self.split_heads(self.wk.forward(k))
         v_proj = self.split_heads(self.wv.forward(v))
 
         if self.rotary_emb is not None:
-            # Применяем RoPE
-            cos = self.rotary_emb.cos_cached[:, :, :seq_len, :]
-            sin = self.rotary_emb.sin_cached[:, :, :seq_len, :]
-            q_proj = apply_rotary_pos_emb(self.q_proj_no_rope, cos, sin)
-            k_proj = apply_rotary_pos_emb(self.k_proj_no_rope, cos, sin)
-        else:
-            q_proj = self.q_proj_no_rope
-            k_proj = self.k_proj_no_rope
+            # Применяем RoPE. Важно делать это с учетом смещения для KV-кэша.
+            cos = self.rotary_emb.cos_cached[:, :, seq_offset:seq_offset + seq_len, :]
+            sin = self.rotary_emb.sin_cached[:, :, seq_offset:seq_offset + seq_len, :]
+            q_proj = apply_rotary_pos_emb(q_proj, cos, sin)
+            k_proj = apply_rotary_pos_emb(k_proj, cos, sin)
+
+        # Логика KV-кэширования (только для инференса)
+        if kv_cache is not None:
+            # Обновляем кэш новыми k и v
+            kv_cache.update(layer_idx, k_proj, v_proj, seq_offset)
+
+            # Получаем полные, кэшированные k и v
+            k_cached, v_cached = kv_cache.get(layer_idx)
+
+            # Обрезаем до текущей длины последовательности
+            total_seq_len = seq_offset + seq_len
+            k_proj = k_cached[:, :, :total_seq_len, :]
+            v_proj = v_cached[:, :, :total_seq_len, :]
+
+        # Для backward pass нам нужны проекции q и k до применения RoPE
+        self.q_proj_no_rope = q_proj
+        self.k_proj_no_rope = k_proj
 
         scaled_attention = self.attention.forward(q_proj, k_proj, v_proj, mask)
 

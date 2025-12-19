@@ -27,9 +27,15 @@ class DecoderBlock:
             'norm2': self.norm2
         }
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         x_norm1 = self.norm1.forward(x)
-        attn_output = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask)
+        attn_output = self.mha.forward(
+            q=x_norm1, k=x_norm1, v=x_norm1,
+            mask=mask,
+            kv_cache=kv_cache,
+            layer_idx=layer_idx,
+            seq_offset=seq_offset
+        )
         # Применяем Dropout и Residual Connection
         x = x + self.dropout1.forward(attn_output)
 

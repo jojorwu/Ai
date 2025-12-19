@@ -6,6 +6,7 @@ from nn_components.decoder_block import DecoderBlock
 from nn_components.rms_norm import RMSNorm
 from nn_components.linear import Linear
 from nn_components.utils import softmax
+from nn_components.kv_cache import KVCache
 
 class Transformer:
     """
@@ -115,16 +116,16 @@ class Transformer:
         print(f"Модель и веса загружены из {filepath}")
         return model, config
 
-    def forward(self, x, mask=None):
-        # Кешируем выход final_norm для backward pass
-        self.final_norm_output = self.embedding.forward(x)
-        self.final_norm_output *= np.sqrt(self.d_model)
-        # self.pos_encoding больше не используется. RoPE применяется внутри каждого MHA.
+    def forward(self, x, mask=None, kv_cache=None, seq_offset=0):
+        # Кешируем выход для backward pass (в режиме обучения)
+        h = self.embedding.forward(x)
+        h *= np.sqrt(self.d_model)
 
-        for block in self.decoder_blocks:
-            self.final_norm_output = block.forward(self.final_norm_output, mask)
+        for i, block in enumerate(self.decoder_blocks):
+            h = block.forward(h, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
 
-        self.final_norm_output = self.final_norm.forward(self.final_norm_output)
+        h = self.final_norm.forward(h)
+        self.final_norm_output = h # Сохраняем для backward
 
         # Weight Tying: Умножаем на транспонированную матрицу эмбеддингов
         logits = self.final_norm_output @ self.embedding.W.T
@@ -159,35 +160,48 @@ class Transformer:
         return dx
 
     def generate(self, start_tokens, max_len, temperature=1.0, top_k=0):
-        self.eval() # Переключаем модель в режим генерации
-        num_start_tokens = len(start_tokens)
-        tokens = np.array(start_tokens).reshape(1, -1)
+        self.eval()  # Переключаем модель в режим генерации
 
-        for _ in range(max_len):
-            # Обрезаем контекст, если он превышает max_seq_len
-            if tokens.shape[1] > self.max_seq_len:
-                tokens = tokens[:, -self.max_seq_len:]
+        batch_size = 1
+        d_k = self.d_model // self.num_heads
 
-            seq_len = tokens.shape[1]
-            mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
+        # 1. Инициализация KV-кэша
+        kv_cache = KVCache(self.num_layers, batch_size, self.num_heads, d_k, self.max_seq_len)
 
-            logits = self.forward(tokens, mask)
+        # 2. Обработка "затравки" (start_tokens)
+        prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
+        seq_len = prompt_tokens.shape[1]
+
+        # Первый forward pass для заполнения кэша
+        # Маска не нужна, так как нас интересует только последний логит
+        logits = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+
+        # Следующий токен - это тот, что идет после всей "затравки"
+        next_token = np.array([[0]], dtype=np.int64) # Временное значение
+
+        # 3. Цикл пошаговой генерации
+        generated_tokens = []
+        for i in range(max_len):
+            # Нас интересуют только логиты для последнего токена
             last_logits = logits[0, -1, :]
 
+            # Сэмплирование
             if temperature > 0:
-                # Top-k сэмплинг
                 if top_k > 0:
-                    # Находим k-ое по величине значение логита
                     kth_logit = np.sort(last_logits)[-top_k]
-                    # Зануляем все логиты, которые меньше k-го
                     last_logits[last_logits < kth_logit] = -np.inf
 
-                scaled_logits = last_logits / temperature
-                probs = softmax(scaled_logits)
-                next_token = np.random.choice(len(probs), p=probs)
-            else: # Жадный поиск
-                next_token = np.argmax(last_logits)
+                probs = softmax(last_logits / temperature)
+                token_id = np.random.choice(self.vocab_size, p=probs)
+            else:
+                token_id = np.argmax(last_logits)
 
-            tokens = np.hstack([tokens, [[next_token]]])
+            generated_tokens.append(token_id)
+            next_token[0, 0] = token_id
 
-        return tokens.flatten()[num_start_tokens:]
+            # Следующий forward pass будет только для одного нового токена
+            # seq_offset - это текущая длина последовательности
+            seq_offset = seq_len + i
+            logits = self.forward(next_token, kv_cache=kv_cache, seq_offset=seq_offset)
+
+        return np.array(generated_tokens)
