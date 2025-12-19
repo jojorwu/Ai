@@ -13,3 +13,6 @@ env/
 # IDE and editor directories
 .idea/
 .vscode/
+
+# Model weights
+*.npz

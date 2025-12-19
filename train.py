@@ -105,5 +105,10 @@ def main():
 
     print("\n[Шаг 4/4] Обучение завершено!")
 
+    # --- 5. Сохранение весов ---
+    weights_path = "model_weights.npz"
+    model.save_weights(weights_path)
+
+
 if __name__ == "__main__":
     main()

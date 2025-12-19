@@ -4,6 +4,7 @@ from nn_components.positional_encoding import PositionalEncoding
 from nn_components.decoder_block import DecoderBlock
 from nn_components.layer_norm import LayerNormalization
 from nn_components.linear import Linear
+from nn_components.utils import softmax
 
 class Transformer:
     """
@@ -27,6 +28,72 @@ class Transformer:
         params += self.final_norm.get_params()
         params += self.output_linear.get_params()
         return params
+
+    def _get_params_dict(self, params_list):
+        params_dict = {}
+        # Используем enumerate для создания уникальных ключей для каждого слоя
+        for i, layer in enumerate(params_list):
+            for attr_name in dir(layer):
+                # Сохраняем только обучаемые веса (не градиенты и не кеш)
+                if not attr_name.startswith('d') and not attr_name.startswith('x_') and \
+                   isinstance(getattr(layer, attr_name), np.ndarray) and attr_name != 'pe':
+                    params_dict[f'layer_{i}_{attr_name}'] = getattr(layer, attr_name)
+        return params_dict
+
+    def save_weights(self, filepath):
+        """Сохраняет все обучаемые веса модели в .npz файл."""
+        params_list = self.get_params()
+        params_dict = self._get_params_dict(params_list)
+        np.savez(filepath, **params_dict)
+        print(f"Веса модели сохранены в {filepath}")
+
+    def load_weights(self, filepath):
+        """Загружает веса из .npz файла."""
+        data = np.load(filepath)
+        params_list = self.get_params()
+
+        # Создаем словарь для быстрого доступа к слоям
+        layer_map = {i: layer for i, layer in enumerate(params_list)}
+
+        for key, value in data.items():
+            parts = key.split('_')
+            layer_idx = int(parts[1])
+            attr_name = parts[2]
+
+            if layer_idx in layer_map:
+                setattr(layer_map[layer_idx], attr_name, value)
+        print(f"Веса модели загружены из {filepath}")
+
+    def generate(self, start_tokens, max_len, temperature=1.0):
+        """
+        Генерирует последовательность токенов, начиная с start_tokens.
+        """
+        num_start_tokens = len(start_tokens)
+        tokens = np.array(start_tokens).reshape(1, -1)
+
+        for _ in range(max_len):
+            seq_len = tokens.shape[1]
+            # Создаем Causal маску для текущей длины последовательности
+            mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
+
+            # Forward pass
+            logits = self.forward(tokens, mask)
+
+            # Смотрим только на последний токен
+            last_logits = logits[0, -1, :]
+
+            # Применяем temperature для контроля случайности
+            if temperature > 0:
+                scaled_logits = last_logits / temperature
+                probs = softmax(scaled_logits)
+                next_token = np.random.choice(len(probs), p=probs)
+            else: # Жадная генерация
+                next_token = np.argmax(last_logits)
+
+            # Добавляем новый токен к последовательности
+            tokens = np.hstack([tokens, [[next_token]]])
+
+        return tokens.flatten()[num_start_tokens:]
 
     def forward(self, x, mask=None):
         x = self.embedding.forward(x)

@@ -1,4 +1,5 @@
 import numpy as np
+from nn_components.utils import softmax
 
 class SoftmaxCrossEntropy:
     """
@@ -8,11 +9,6 @@ class SoftmaxCrossEntropy:
     def __init__(self):
         self.probs = None
         self.targets = None
-
-    def softmax(self, logits):
-        """Стабильная функция Softmax."""
-        exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
-        return exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
     def forward(self, logits, targets):
         """
@@ -28,7 +24,7 @@ class SoftmaxCrossEntropy:
         batch_size, seq_len, vocab_size = logits.shape
 
         # 1. Применяем Softmax для получения вероятностей
-        self.probs = self.softmax(logits)
+        self.probs = softmax(logits)
         self.targets = targets
 
         # 2. Выбираем вероятности для правильных классов

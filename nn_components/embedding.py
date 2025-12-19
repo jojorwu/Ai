@@ -7,7 +7,7 @@ class Embedding:
     def __init__(self, vocab_size, d_model):
         self.vocab_size = vocab_size
         self.d_model = d_model
-        self.embeddings = np.random.randn(vocab_size, d_model) * 0.01
+        self.W = np.random.randn(vocab_size, d_model) * 0.01
         self.x_indices = None
         self.dW = None
 
@@ -19,14 +19,14 @@ class Embedding:
         Прямой проход. Извлекает эмбеддинги для входных индексов.
         """
         self.x_indices = x
-        return self.embeddings[x]
+        return self.W[x]
 
     def backward(self, dout):
         """
         Обратный проход. Вычисляет градиент для матрицы эмбеддингов.
         """
         # Инициализируем градиент нулями
-        self.dW = np.zeros_like(self.embeddings)
+        self.dW = np.zeros_like(self.W)
 
         # Градиент для эмбеддингов - это сумма градиентов для каждого токена.
         # np.add.at выполняет эту операцию эффективно для повторяющихся индексов.
@@ -56,7 +56,7 @@ def test_embedding_backward():
     layer.backward(dout)
 
     # --- Ручная проверка градиента ---
-    expected_dW = np.zeros_like(layer.embeddings)
+    expected_dW = np.zeros_like(layer.W)
     # Для индекса 1: градиент = dout[0, 0] + dout[0, 2]
     expected_dW[1] = dout[0, 0] + dout[0, 2]
     # Для индекса 2: градиент = dout[0, 1]
