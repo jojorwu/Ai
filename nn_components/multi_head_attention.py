@@ -20,6 +20,9 @@ class MultiHeadAttention:
 
         self.attention = ScaledDotProductAttention()
 
+    def get_params(self):
+        return self.wq.get_params() + self.wk.get_params() + self.wv.get_params() + self.wo.get_params()
+
     def split_heads(self, x):
         batch_size, seq_len, _ = x.shape
         return x.reshape(batch_size, seq_len, self.num_heads, self.d_k).transpose(0, 2, 1, 3)

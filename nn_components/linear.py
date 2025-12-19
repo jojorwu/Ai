@@ -22,6 +22,9 @@ class Linear:
         self.dW = None
         self.db = None
 
+    def get_params(self):
+        return [self]
+
     def forward(self, x):
         """
         Прямой проход.

@@ -1,0 +1,6 @@
+Привет, мир!
+Это простой текстовый файл для обучения нашей нейросети.
+Она должна научиться предсказывать следующий символ.
+Hello, world!
+This is a simple text file for training our neural network.
+It should learn to predict the next character.

@@ -10,6 +10,9 @@ class FeedForward:
         self.linear2 = Linear(d_ff, d_model)
         self.relu_cache = None
 
+    def get_params(self):
+        return self.linear1.get_params() + self.linear2.get_params()
+
     def relu(self, x):
         return np.maximum(0, x)
 

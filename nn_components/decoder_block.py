@@ -14,6 +14,9 @@ class DecoderBlock:
         self.norm1 = LayerNormalization(d_model)
         self.norm2 = LayerNormalization(d_model)
 
+    def get_params(self):
+        return self.mha.get_params() + self.ffn.get_params() + self.norm1.get_params() + self.norm2.get_params()
+
     def forward(self, x, mask=None):
         x_norm1 = self.norm1.forward(x)
         attn_output = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask)

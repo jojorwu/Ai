@@ -11,6 +11,9 @@ class Embedding:
         self.x_indices = None
         self.dW = None
 
+    def get_params(self):
+        return [self]
+
     def forward(self, x):
         """
         Прямой проход. Извлекает эмбеддинги для входных индексов.

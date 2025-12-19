@@ -25,6 +25,9 @@ class LayerNormalization:
         self.x_std = None
         self.x = None
 
+    def get_params(self):
+        return [self]
+
     def forward(self, x):
         """
         Прямой проход для Layer Normalization.

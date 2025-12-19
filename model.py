@@ -20,6 +20,14 @@ class Transformer:
         self.final_norm = LayerNormalization(d_model)
         self.output_linear = Linear(d_model, vocab_size)
 
+    def get_params(self):
+        params = self.embedding.get_params()
+        for block in self.decoder_blocks:
+            params += block.get_params()
+        params += self.final_norm.get_params()
+        params += self.output_linear.get_params()
+        return params
+
     def forward(self, x, mask=None):
         x = self.embedding.forward(x)
         x *= np.sqrt(self.d_model)
