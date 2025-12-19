@@ -3,6 +3,7 @@ from nn_components.embedding import Embedding
 from nn_components.positional_encoding import PositionalEncoding
 from nn_components.decoder_block import DecoderBlock
 from nn_components.layer_norm import LayerNormalization
+from nn_components.linear import Linear
 
 class Transformer:
     """
@@ -29,9 +30,7 @@ class Transformer:
 
         self.final_norm = LayerNormalization(d_model)
         # Финальный линейный слой, который проецирует выход в размер словаря
-        # Веса этого слоя часто "делят" с матрицей эмбеддингов, но мы для простоты
-        # сделаем их отдельными.
-        self.output_linear = np.random.randn(d_model, vocab_size) * np.sqrt(2.0 / d_model)
+        self.output_linear = Linear(d_model, vocab_size)
 
     def forward(self, x, mask=None):
         """
@@ -58,7 +57,7 @@ class Transformer:
 
         # 3. Финальная нормализация и линейный слой
         x = self.final_norm.forward(x)
-        logits = x @ self.output_linear
+        logits = self.output_linear.forward(x)
 
         return logits
 
