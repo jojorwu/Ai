@@ -33,6 +33,9 @@ def main():
     model, _ = Transformer.load_model(weights_path, vocab_size)
     print("Модель и веса успешно загружены.")
 
+    # Переключаем модель в режим генерации
+    model.eval()
+
     # --- 3. Генерация ---
     start_text = gen_config['start_text']
     print(f"\n[Шаг 2/3] Генерация текста, начиная с фразы: '{start_text}'...")

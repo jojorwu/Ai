@@ -65,6 +65,9 @@ def main():
 
     mask = np.triu(np.ones((train_config['seq_len'], train_config['seq_len'])), k=1).astype(bool)
 
+    # Переключаем модель в режим обучения
+    model.train()
+
     # --- 4. Цикл обучения ---
     print("\n[Шаг 3/4] Начало цикла обучения...")
     for epoch in range(train_config['epochs']):
