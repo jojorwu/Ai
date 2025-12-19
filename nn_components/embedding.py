@@ -14,6 +14,9 @@ class Embedding:
     def get_params(self):
         return [self]
 
+    def get_trainable_params(self):
+        return {'W': (self.W, self.dW)}
+
     def forward(self, x):
         """
         Прямой проход. Извлекает эмбеддинги для входных индексов.

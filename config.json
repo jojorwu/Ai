@@ -11,9 +11,15 @@
         "epochs": 10,
         "batch_size": 2,
         "seq_len": 32,
-        "learning_rate": 0.001,
         "data_dir": "data",
         "weights_path": "model_weights.npz"
+    },
+    "optimizer": {
+        "learning_rate": 0.001,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "epsilon": 1e-8,
+        "max_norm": 1.0
     },
     "generation": {
         "start_text": "Привет",

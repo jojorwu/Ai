@@ -4,7 +4,7 @@ import time
 import json
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
-from optimizer import SGD
+from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
 
 def get_batches(data, batch_size, seq_len):
@@ -38,6 +38,7 @@ def main():
 
     model_config = config['model']
     train_config = config['training']
+    optim_config = config['optimizer']
 
     # --- 2. Подготовка данных ---
     print("\n[Шаг 1/4] Инициализация токенизатора и загрузка данных...")
@@ -61,11 +62,13 @@ def main():
     print("\n[Шаг 2/4] Инициализация модели, функции потерь и оптимизатора...")
     model = Transformer(vocab_size=vocab_size, **model_config)
     loss_fn = SoftmaxCrossEntropy()
-    optimizer = SGD(model.get_params(), train_config['learning_rate'])
+
+    # Отделяем max_norm от параметров Adam
+    max_norm = optim_config.pop('max_norm')
+    optimizer = Adam(model.get_params(), **optim_config)
 
     mask = np.triu(np.ones((train_config['seq_len'], train_config['seq_len'])), k=1).astype(bool)
 
-    # Переключаем модель в режим обучения
     model.train()
 
     # --- 4. Цикл обучения ---
@@ -82,6 +85,9 @@ def main():
             dlogits = loss_fn.backward()
             model.backward(dlogits)
 
+            # Обрезка градиентов
+            clip_gradients(model.get_params(), max_norm)
+
             optimizer.step()
 
             total_loss += loss
@@ -93,7 +99,6 @@ def main():
 
     print("\n[Шаг 4/4] Обучение завершено!")
 
-    # --- 5. Сохранение весов и конфига ---
     model.save_weights(train_config['weights_path'], config)
 
 if __name__ == "__main__":

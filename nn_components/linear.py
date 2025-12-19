@@ -25,6 +25,9 @@ class Linear:
     def get_params(self):
         return [self]
 
+    def get_trainable_params(self):
+        return {'W': (self.W, self.dW), 'b': (self.b, self.db)}
+
     def forward(self, x):
         """
         Прямой проход.

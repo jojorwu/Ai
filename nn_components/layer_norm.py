@@ -24,9 +24,14 @@ class LayerNormalization:
         self.x_mean = None
         self.x_std = None
         self.x = None
+        self.dgamma = None
+        self.dbeta = None
 
     def get_params(self):
         return [self]
+
+    def get_trainable_params(self):
+        return {'gamma': (self.gamma, self.dgamma), 'beta': (self.beta, self.dbeta)}
 
     def forward(self, x):
         """
