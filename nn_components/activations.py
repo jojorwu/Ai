@@ -52,3 +52,30 @@ class GELU:
         dx = 0.5 * (1 + tanh_inner) + 0.5 * x * (dtanh * d_inner_dx)
 
         return dy * dx
+
+class SiLU:
+    """
+    Sigmoid Linear Unit (SiLU) activation function, also known as Swish.
+    f(x) = x * sigmoid(x)
+    """
+    def __init__(self):
+        self.x = None
+        self.sigmoid_x = None
+
+    def _sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
+
+    def forward(self, x):
+        self.x = x
+        self.sigmoid_x = self._sigmoid(x)
+        return x * self.sigmoid_x
+
+    def backward(self, dy):
+        """
+        Computes the backward pass of the SiLU activation.
+        d/dx(x * sig(x)) = sig(x) + x * (sig(x) * (1 - sig(x)))
+                        = sig(x) * (1 + x * (1 - sig(x)))
+        """
+        dsigmoid_dx = self.sigmoid_x * (1 - self.sigmoid_x)
+        dx = self.sigmoid_x + self.x * dsigmoid_dx
+        return dy * dx

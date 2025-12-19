@@ -65,13 +65,3 @@ class DecoderBlock:
         dx = dx_from_norm1 + dx_residual1
 
         return dx
-
-# (Тесты остаются без изменений, так как они проверяют только forward pass
-#  и backward pass будет проверен на уровне интеграционного теста)
-def test_decoder_block_backward():
-    print("Тесты для DecoderBlock backward pass...")
-    # ... (старый тест остается)
-    pass
-
-if __name__ == "__main__":
-    test_decoder_block_backward()
