@@ -30,22 +30,6 @@ class MultiHeadAttention:
         limit_o = np.sqrt(6 / (d_model + d_model))
         self.Wo = np.random.uniform(-limit_o, limit_o, (d_model, d_model))
 
-    def split_heads(self, x):
-        """
-        Разделяет последний размер (d_model) на (num_heads, d_k).
-        Вход: (batch_size, seq_len, d_model)
-        Выход: (batch_size, num_heads, seq_len, d_k)
-
-        Args:
-            x (np.ndarray): Входной тензор.
-
-        Returns:
-            np.ndarray: Тензор с разделенными головами.
-        """
-        # Эта операция в реальности не нужна, если мы проецируем сразу в нужную форму.
-        # Оставим для наглядности, но будем делать проекцию напрямую.
-        pass
-
     def forward(self, q, k, v, mask=None):
         """
         Прямой проход для Multi-Head Attention.
