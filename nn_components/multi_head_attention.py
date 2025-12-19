@@ -5,18 +5,23 @@ from nn_components.rotary_embedding import apply_rotary_pos_emb, rotary_backward
 
 class MultiHeadAttention:
     """
-    Реализация Multi-Head Attention слоя с Rotary Positional Embeddings (RoPE).
+    Реализация Grouped-Query Attention (GQA) слоя с Rotary Positional Embeddings (RoPE).
     """
-    def __init__(self, d_model, num_heads, rotary_emb=None):
+    def __init__(self, d_model, num_heads, num_kv_heads, rotary_emb=None):
         assert d_model % num_heads == 0, "d_model должна делиться на num_heads без остатка."
+        assert num_heads % num_kv_heads == 0, "num_heads должна делиться на num_kv_heads."
 
         self.d_model = d_model
         self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.num_q_per_kv = num_heads // num_kv_heads
         self.d_k = d_model // num_heads
 
+        # Слой Wq проецирует в полную размерность для всех Q голов
         self.wq = Linear(d_model, d_model)
-        self.wk = Linear(d_model, d_model)
-        self.wv = Linear(d_model, d_model)
+        # Слои Wk и Wv проецируют в меньшую размерность для KV голов
+        self.wk = Linear(d_model, self.d_k * num_kv_heads)
+        self.wv = Linear(d_model, self.d_k * num_kv_heads)
         self.wo = Linear(d_model, d_model)
 
         self.attention = ScaledDotProductAttention()
@@ -30,44 +35,49 @@ class MultiHeadAttention:
         """Возвращает словарь слоев для именованного сохранения и загрузки."""
         return {'wq': self.wq, 'wk': self.wk, 'wv': self.wv, 'wo': self.wo}
 
-    def split_heads(self, x):
+    def split_heads(self, x, num_heads):
         batch_size, seq_len, _ = x.shape
-        return x.reshape(batch_size, seq_len, self.num_heads, self.d_k).transpose(0, 2, 1, 3)
+        return x.reshape(batch_size, seq_len, num_heads, self.d_k).transpose(0, 2, 1, 3)
 
     def combine_heads(self, x):
         batch_size, _, seq_len, _ = x.shape
         return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, self.d_model)
 
+    @staticmethod
+    def repeat_kv(x, n_rep):
+        """Повторяет головы K и V для GQA."""
+        if n_rep == 1:
+            return x
+        batch, n_kv_heads, seq_len, head_dim = x.shape
+        # Просто повторяем тензор n_rep раз по оси голов
+        return np.repeat(x, n_rep, axis=1)
+
     def forward(self, q, k, v, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         seq_len = q.shape[1]
 
-        q_proj = self.split_heads(self.wq.forward(q))
-        k_proj = self.split_heads(self.wk.forward(k))
-        v_proj = self.split_heads(self.wv.forward(v))
+        q_proj = self.split_heads(self.wq.forward(q), self.num_heads)
+        k_proj = self.split_heads(self.wk.forward(k), self.num_kv_heads)
+        v_proj = self.split_heads(self.wv.forward(v), self.num_kv_heads)
 
         if self.rotary_emb is not None:
-            # Применяем RoPE. Важно делать это с учетом смещения для KV-кэша.
             cos = self.rotary_emb.cos_cached[:, :, seq_offset:seq_offset + seq_len, :]
             sin = self.rotary_emb.sin_cached[:, :, seq_offset:seq_offset + seq_len, :]
             q_proj = apply_rotary_pos_emb(q_proj, cos, sin)
             k_proj = apply_rotary_pos_emb(k_proj, cos, sin)
 
-        # Логика KV-кэширования (только для инференса)
         if kv_cache is not None:
-            # Обновляем кэш новыми k и v
             kv_cache.update(layer_idx, k_proj, v_proj, seq_offset)
-
-            # Получаем полные, кэшированные k и v
             k_cached, v_cached = kv_cache.get(layer_idx)
-
-            # Обрезаем до текущей длины последовательности
             total_seq_len = seq_offset + seq_len
             k_proj = k_cached[:, :, :total_seq_len, :]
             v_proj = v_cached[:, :, :total_seq_len, :]
 
-        # Для backward pass нам нужны проекции q и k до применения RoPE
         self.q_proj_no_rope = q_proj
         self.k_proj_no_rope = k_proj
+
+        # "Размножаем" KV головы для соответствия Q головам
+        k_proj = self.repeat_kv(k_proj, self.num_q_per_kv)
+        v_proj = self.repeat_kv(v_proj, self.num_q_per_kv)
 
         scaled_attention = self.attention.forward(q_proj, k_proj, v_proj, mask)
 
@@ -85,8 +95,13 @@ class MultiHeadAttention:
 
         dq_proj, dk_proj, dv_proj = self.attention.backward(d_scaled_attention)
 
+        # Обратный проход для repeat_kv
+        # Градиенты от "размноженных" голов нужно просто сложить
+        if self.num_q_per_kv > 1:
+            dk_proj = dk_proj.reshape(dk_proj.shape[0], self.num_kv_heads, self.num_q_per_kv, dk_proj.shape[2], dk_proj.shape[3]).sum(axis=2)
+            dv_proj = dv_proj.reshape(dv_proj.shape[0], self.num_kv_heads, self.num_q_per_kv, dv_proj.shape[2], dv_proj.shape[3]).sum(axis=2)
+
         if self.rotary_emb is not None:
-            # Обратный проход через RoPE
             cos = self.rotary_emb.cos_cached[:, :, :seq_len, :]
             sin = self.rotary_emb.sin_cached[:, :, :seq_len, :]
             dq_proj_no_rope = rotary_backward(dq_proj, self.q_proj_no_rope, cos, sin)
@@ -95,15 +110,16 @@ class MultiHeadAttention:
             dq_proj_no_rope = dq_proj
             dk_proj_no_rope = dk_proj
 
-        dq = self.wq.backward(self.split_heads_backward(dq_proj_no_rope))
-        dk = self.wk.backward(self.split_heads_backward(dk_proj_no_rope))
-        dv = self.wv.backward(self.split_heads_backward(dv_proj))
+        dq = self.wq.backward(self.split_heads_backward(dq_proj_no_rope, self.num_heads))
+        dk = self.wk.backward(self.split_heads_backward(dk_proj_no_rope, self.num_kv_heads))
+        dv = self.wv.backward(self.split_heads_backward(dv_proj, self.num_kv_heads))
 
         return dq, dk, dv
 
-    def split_heads_backward(self, x):
-        batch_size, num_heads, seq_len, d_k = x.shape
-        return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, self.d_model)
+    def split_heads_backward(self, x, num_heads):
+        batch_size, _, seq_len, d_k = x.shape
+        d_model = num_heads * d_k
+        return x.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, d_model)
 
     def combine_heads_backward(self, x):
         batch_size, seq_len, _ = x.shape

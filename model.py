@@ -12,11 +12,12 @@ class Transformer:
     """
     Полная модель GPT-style (decoder-only) Трансформера.
     """
-    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len, dropout_rate=0.1):
+    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len, dropout_rate=0.1, num_kv_heads=None):
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.num_layers = num_layers
         self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
         self.d_ff = d_ff
         self.max_seq_len = max_seq_len
         self.dropout_rate = dropout_rate
@@ -26,7 +27,10 @@ class Transformer:
 
         self.embedding = Embedding(vocab_size, d_model)
 
-        self.decoder_blocks = [DecoderBlock(d_model, num_heads, d_ff, dropout_rate, rotary_emb=self.rotary_emb) for _ in range(num_layers)]
+        self.decoder_blocks = [
+            DecoderBlock(d_model, num_heads, d_ff, dropout_rate, self.num_kv_heads, rotary_emb=self.rotary_emb)
+            for _ in range(num_layers)
+        ]
 
         self.final_norm = RMSNorm(d_model)
         # self.output_linear удален. Вместо него используется матрица эмбеддингов.
@@ -165,8 +169,8 @@ class Transformer:
         batch_size = 1
         d_k = self.d_model // self.num_heads
 
-        # 1. Инициализация KV-кэша
-        kv_cache = KVCache(self.num_layers, batch_size, self.num_heads, d_k, self.max_seq_len)
+        # 1. Инициализация KV-кэша с учетом GQA
+        kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
         # 2. Обработка "затравки" (start_tokens)
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)

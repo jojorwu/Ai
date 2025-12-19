@@ -2,26 +2,26 @@ import numpy as np
 
 class KVCache:
     """
-    Класс для хранения и управления KV-кэшем для быстрой генерации.
+    Класс для хранения и управления KV-кэшем для быстрой генерации с поддержкой GQA.
     """
-    def __init__(self, num_layers, batch_size, num_heads, d_k, max_seq_len, dtype=np.float32):
+    def __init__(self, num_layers, batch_size, num_kv_heads, d_k, max_seq_len, dtype=np.float32):
         """
         Инициализирует пустой кэш.
 
         Args:
             num_layers (int): Количество слоев DecoderBlock.
             batch_size (int): Размер батча (для генерации обычно 1).
-            num_heads (int): Количество голов внимания.
+            num_kv_heads (int): Количество голов K/V (для GQA).
             d_k (int): Размерность векторов K и V.
             max_seq_len (int): Максимальная длина последовательности.
         """
         self.num_layers = num_layers
         self.cache = []
         for _ in range(num_layers):
-            # Инициализируем пустыми тензорами правильной формы
-            # Форма: (batch, n_heads, seq_len, d_k)
-            k_cache = np.zeros((batch_size, num_heads, max_seq_len, d_k), dtype=dtype)
-            v_cache = np.zeros((batch_size, num_heads, max_seq_len, d_k), dtype=dtype)
+            # Инициализируем тензоры с учетом num_kv_heads
+            # Форма: (batch, n_kv_heads, seq_len, d_k)
+            k_cache = np.zeros((batch_size, num_kv_heads, max_seq_len, d_k), dtype=dtype)
+            v_cache = np.zeros((batch_size, num_kv_heads, max_seq_len, d_k), dtype=dtype)
             self.cache.append((k_cache, v_cache))
 
     def update(self, layer_idx, k_new, v_new, seq_offset):

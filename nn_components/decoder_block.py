@@ -8,8 +8,8 @@ class DecoderBlock:
     """
     Реализация одного блока декодера Трансформера с Dropout.
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout_rate, rotary_emb=None):
-        self.mha = MultiHeadAttention(d_model, num_heads, rotary_emb=rotary_emb)
+    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None):
+        self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb=rotary_emb)
         self.ffn = FeedForward(d_model, d_ff)
 
         self.norm1 = RMSNorm(d_model)
