@@ -1,0 +1,22 @@
+{
+    "model": {
+        "d_model": 64,
+        "num_layers": 4,
+        "num_heads": 4,
+        "d_ff": 256,
+        "max_seq_len": 128
+    },
+    "training": {
+        "epochs": 10,
+        "batch_size": 2,
+        "seq_len": 32,
+        "learning_rate": 0.001,
+        "data_dir": "data",
+        "weights_path": "model_weights.npz"
+    },
+    "generation": {
+        "start_text": "Привет",
+        "max_len": 50,
+        "temperature": 0.8
+    }
+}

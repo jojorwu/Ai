@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import json
 from model import Transformer
 from tokenizer import Tokenizer
 
@@ -9,20 +10,14 @@ def main():
     """
     print("--- Запуск генерации текста ---")
 
-    # --- 1. Параметры ---
-    # Эти параметры должны совпадать с теми, на которых обучалась модель
-    d_model = 64
-    num_layers = 4
-    num_heads = 4
-    d_ff = 256
-    max_seq_len = 128
-    data_dir = "data"
-    weights_path = "model_weights.npz"
+    # --- 1. Загрузка конфигурации ---
+    with open('config.json', 'r') as f:
+        config = json.load(f)
 
-    # Параметры генерации
-    start_text = "Привет"
-    max_len = 50 # Количество символов для генерации
-    temperature = 0.8 # Чем выше, тем более случайный текст
+    train_config = config['training']
+    gen_config = config['generation']
+    weights_path = train_config['weights_path']
+    data_dir = train_config['data_dir']
 
     # --- 2. Загрузка ---
     print("\n[Шаг 1/3] Загрузка токенизатора и модели...")
@@ -34,20 +29,22 @@ def main():
     tokenizer = Tokenizer(data_dir)
     vocab_size = tokenizer.vocab_size
 
-    model = Transformer(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len)
-    model.load_weights(weights_path)
+    # Загружаем модель (архитектуру и веса) из файла
+    model, _ = Transformer.load_model(weights_path, vocab_size)
     print("Модель и веса успешно загружены.")
 
     # --- 3. Генерация ---
+    start_text = gen_config['start_text']
     print(f"\n[Шаг 2/3] Генерация текста, начиная с фразы: '{start_text}'...")
 
-    # Кодируем начальный текст
     start_tokens = tokenizer.encode(start_text)
 
-    # Генерируем новые токены
-    generated_tokens = model.generate(start_tokens, max_len=max_len, temperature=temperature)
+    generated_tokens = model.generate(
+        start_tokens,
+        max_len=gen_config['max_len'],
+        temperature=gen_config['temperature']
+    )
 
-    # Декодируем результат
     generated_text = tokenizer.decode(generated_tokens.tolist())
 
     print("\n[Шаг 3/3] Результат:")

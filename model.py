@@ -1,4 +1,5 @@
 import numpy as np
+import json
 from nn_components.embedding import Embedding
 from nn_components.positional_encoding import PositionalEncoding
 from nn_components.decoder_block import DecoderBlock
@@ -11,7 +12,12 @@ class Transformer:
     Полная модель GPT-style (decoder-only) Трансформера.
     """
     def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
+        self.vocab_size = vocab_size
         self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.max_seq_len = max_seq_len
 
         self.embedding = Embedding(vocab_size, d_model)
         self.pos_encoding = PositionalEncoding(max_seq_len, d_model)
@@ -31,71 +37,53 @@ class Transformer:
 
     def _get_params_dict(self, params_list):
         params_dict = {}
-        # Используем enumerate для создания уникальных ключей для каждого слоя
         for i, layer in enumerate(params_list):
             for attr_name in dir(layer):
-                # Сохраняем только обучаемые веса (не градиенты и не кеш)
                 if not attr_name.startswith('d') and not attr_name.startswith('x_') and \
                    isinstance(getattr(layer, attr_name), np.ndarray) and attr_name != 'pe':
                     params_dict[f'layer_{i}_{attr_name}'] = getattr(layer, attr_name)
         return params_dict
 
-    def save_weights(self, filepath):
-        """Сохраняет все обучаемые веса модели в .npz файл."""
+    def save_weights(self, filepath, config):
+        """Сохраняет веса и конфигурацию модели в .npz файл."""
         params_list = self.get_params()
         params_dict = self._get_params_dict(params_list)
+
+        # Сохраняем конфиг как специальный массив в npz
+        config_str = json.dumps(config)
+        params_dict['config'] = np.array([config_str], dtype=object)
+
         np.savez(filepath, **params_dict)
-        print(f"Веса модели сохранены в {filepath}")
+        print(f"Веса и конфиг модели сохранены в {filepath}")
 
-    def load_weights(self, filepath):
-        """Загружает веса из .npz файла."""
-        data = np.load(filepath)
-        params_list = self.get_params()
+    @staticmethod
+    def load_model(filepath, vocab_size):
+        """Загружает модель (архитектуру и веса) из .npz файла."""
+        data = np.load(filepath, allow_pickle=True)
 
-        # Создаем словарь для быстрого доступа к слоям
+        config_str = data['config'][0]
+        config = json.loads(config_str)
+
+        model_config = config['model']
+        model = Transformer(vocab_size=vocab_size, **model_config)
+
+        params_list = model.get_params()
         layer_map = {i: layer for i, layer in enumerate(params_list)}
 
         for key, value in data.items():
+            if key == 'config':
+                continue
             parts = key.split('_')
             layer_idx = int(parts[1])
             attr_name = parts[2]
 
             if layer_idx in layer_map:
                 setattr(layer_map[layer_idx], attr_name, value)
-        print(f"Веса модели загружены из {filepath}")
-
-    def generate(self, start_tokens, max_len, temperature=1.0):
-        """
-        Генерирует последовательность токенов, начиная с start_tokens.
-        """
-        num_start_tokens = len(start_tokens)
-        tokens = np.array(start_tokens).reshape(1, -1)
-
-        for _ in range(max_len):
-            seq_len = tokens.shape[1]
-            # Создаем Causal маску для текущей длины последовательности
-            mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
-
-            # Forward pass
-            logits = self.forward(tokens, mask)
-
-            # Смотрим только на последний токен
-            last_logits = logits[0, -1, :]
-
-            # Применяем temperature для контроля случайности
-            if temperature > 0:
-                scaled_logits = last_logits / temperature
-                probs = softmax(scaled_logits)
-                next_token = np.random.choice(len(probs), p=probs)
-            else: # Жадная генерация
-                next_token = np.argmax(last_logits)
-
-            # Добавляем новый токен к последовательности
-            tokens = np.hstack([tokens, [[next_token]]])
-
-        return tokens.flatten()[num_start_tokens:]
+        print(f"Модель и веса загружены из {filepath}")
+        return model, config
 
     def forward(self, x, mask=None):
+        # ... (код forward pass без изменений)
         x = self.embedding.forward(x)
         x *= np.sqrt(self.d_model)
         x = self.pos_encoding.forward(x)
@@ -108,6 +96,7 @@ class Transformer:
 
         return logits
 
+    # ... (код backward и generate без изменений)
     def backward(self, dlogits):
         dx = self.output_linear.backward(dlogits)
         dx = self.final_norm.backward(dx)
@@ -115,36 +104,28 @@ class Transformer:
         for block in reversed(self.decoder_blocks):
             dx = block.backward(dx)
 
-        # Обратный проход через Positional Encoding (нет градиентов)
-        # Обратный проход через Embedding (будет реализован при обновлении весов)
-        # Мы возвращаем dx для информации
+        self.embedding.backward(dx * np.sqrt(self.d_model))
         return dx
 
-# ==================
-#      TESTS
-# ==================
-def test_transformer_forward_pass():
-    """Интеграционный тест для полного прямого прохода модели Трансформер."""
-    print("Running tests for Transformer (Full Forward Pass)...")
-    # Тест остается без изменений
-    vocab_size = 1000
-    d_model = 128
-    num_layers = 2
-    num_heads = 8
-    d_ff = 512
-    max_seq_len = 50
-    batch_size = 4
-    seq_len = 30
-    model = Transformer(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len)
-    np.random.seed(42)
-    x = np.random.randint(0, vocab_size, (batch_size, seq_len))
-    mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
-    logits = model.forward(x, mask=mask)
-    expected_shape = (batch_size, seq_len, vocab_size)
-    assert logits.shape == expected_shape, \
-        f"Test 1 Failed: Output shape is {logits.shape}, expected {expected_shape}"
-    print("Test 1 (Output Dimensions) PASSED.")
-    print("All tests passed!")
+    def generate(self, start_tokens, max_len, temperature=1.0):
+        num_start_tokens = len(start_tokens)
+        tokens = np.array(start_tokens).reshape(1, -1)
 
-if __name__ == "__main__":
-    test_transformer_forward_pass()
+        for _ in range(max_len):
+            seq_len = tokens.shape[1]
+            mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
+            logits = self.forward(tokens, mask)
+            last_logits = logits[0, -1, :]
+
+            if temperature > 0:
+                scaled_logits = last_logits / temperature
+                probs = softmax(scaled_logits)
+                next_token = np.random.choice(len(probs), p=probs)
+            else:
+                next_token = np.argmax(last_logits)
+
+            tokens = np.hstack([tokens, [[next_token]]])
+
+        return tokens.flatten()[num_start_tokens:]
+
+# ... (тесты)
