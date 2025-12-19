@@ -5,15 +5,21 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nn_components.multi_head_attention import MultiHeadAttention
+from nn_components.rotary_embedding import RotaryPositionalEmbedding
 
-def test_multi_head_attention_backward_gradient_check():
-    """Численная проверка градиентов для `backward` метода MultiHeadAttention."""
-    print("\nRunning Test: Gradient check for MultiHeadAttention backward pass...")
+def test_multi_head_attention_with_rope_backward_gradient_check():
+    """Численная проверка градиентов для `backward` метода MultiHeadAttention с RoPE."""
+    print("\nRunning Test: Gradient check for MultiHeadAttention with RoPE backward pass...")
 
     batch_size, seq_len, d_model, num_heads = 2, 6, 16, 4
+    d_k = d_model // num_heads
 
     np.random.seed(1337)
-    mha = MultiHeadAttention(d_model, num_heads)
+
+    # Создаем и передаем RoPE
+    rope = RotaryPositionalEmbedding(d_k, max_seq_len=seq_len)
+    mha = MultiHeadAttention(d_model, num_heads, rotary_emb=rope)
+
     q = np.random.randn(batch_size, seq_len, d_model)
     k = np.random.randn(batch_size, seq_len, d_model)
     v = np.random.randn(batch_size, seq_len, d_model)
@@ -78,4 +84,4 @@ def test_multi_head_attention_backward_gradient_check():
     print("All MultiHeadAttention gradient checks passed!")
 
 if __name__ == "__main__":
-    test_multi_head_attention_backward_gradient_check()
+    test_multi_head_attention_with_rope_backward_gradient_check()

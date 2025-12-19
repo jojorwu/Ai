@@ -1,19 +1,19 @@
 import numpy as np
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.feed_forward import FeedForward
-from nn_components.layer_norm import LayerNormalization
+from nn_components.rms_norm import RMSNorm
 from nn_components.dropout import Dropout
 
 class DecoderBlock:
     """
     Реализация одного блока декодера Трансформера с Dropout.
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout_rate):
-        self.mha = MultiHeadAttention(d_model, num_heads)
+    def __init__(self, d_model, num_heads, d_ff, dropout_rate, rotary_emb=None):
+        self.mha = MultiHeadAttention(d_model, num_heads, rotary_emb=rotary_emb)
         self.ffn = FeedForward(d_model, d_ff)
 
-        self.norm1 = LayerNormalization(d_model)
-        self.norm2 = LayerNormalization(d_model)
+        self.norm1 = RMSNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
 
         self.dropout1 = Dropout(dropout_rate)
         self.dropout2 = Dropout(dropout_rate)

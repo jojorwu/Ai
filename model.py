@@ -1,9 +1,9 @@
 import numpy as np
 import json
 from nn_components.embedding import Embedding
-from nn_components.positional_encoding import PositionalEncoding
+from nn_components.rotary_embedding import RotaryPositionalEmbedding
 from nn_components.decoder_block import DecoderBlock
-from nn_components.layer_norm import LayerNormalization
+from nn_components.rms_norm import RMSNorm
 from nn_components.linear import Linear
 from nn_components.utils import softmax
 
@@ -20,12 +20,14 @@ class Transformer:
         self.max_seq_len = max_seq_len
         self.dropout_rate = dropout_rate
 
+        d_k = d_model // num_heads
+        self.rotary_emb = RotaryPositionalEmbedding(d_k, max_seq_len)
+
         self.embedding = Embedding(vocab_size, d_model)
-        self.pos_encoding = PositionalEncoding(max_seq_len, d_model)
 
-        self.decoder_blocks = [DecoderBlock(d_model, num_heads, d_ff, dropout_rate) for _ in range(num_layers)]
+        self.decoder_blocks = [DecoderBlock(d_model, num_heads, d_ff, dropout_rate, rotary_emb=self.rotary_emb) for _ in range(num_layers)]
 
-        self.final_norm = LayerNormalization(d_model)
+        self.final_norm = RMSNorm(d_model)
         # self.output_linear удален. Вместо него используется матрица эмбеддингов.
 
     def get_named_params(self, obj=None, prefix=''):
@@ -117,7 +119,7 @@ class Transformer:
         # Кешируем выход final_norm для backward pass
         self.final_norm_output = self.embedding.forward(x)
         self.final_norm_output *= np.sqrt(self.d_model)
-        self.final_norm_output = self.pos_encoding.forward(self.final_norm_output)
+        # self.pos_encoding больше не используется. RoPE применяется внутри каждого MHA.
 
         for block in self.decoder_blocks:
             self.final_norm_output = block.forward(self.final_norm_output, mask)
