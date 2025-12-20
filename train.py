@@ -6,6 +6,7 @@ from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
+from nn_components.lr_scheduler import cosine_decay_with_warmup
 
 def get_batches(data, batch_size, seq_len):
     """Генератор батчей для обучения."""
@@ -39,6 +40,7 @@ def main():
     model_config = config['model']
     train_config = config['training']
     optim_config = config['optimizer']
+    scheduler_config = config.get('scheduler', {})
 
     # --- 2. Подготовка данных ---
     print("\n[Шаг 1/4] Инициализация токенизатора и загрузка данных...")
@@ -71,31 +73,41 @@ def main():
 
     model.train()
 
-    # --- 4. Цикл обучения ---
+    # --- 4. Настройка планировщика и цикл обучения ---
+    num_batches = len(data_tokens) // (train_config['batch_size'] * train_config['seq_len'])
+    training_steps = num_batches * train_config['epochs']
+
+    current_step = 0
+    max_lr = optim_config['learning_rate']
+    min_lr = scheduler_config['min_lr']
+    warmup_steps = scheduler_config['warmup_steps']
+
     print("\n[Шаг 3/4] Начало цикла обучения...")
     for epoch in range(train_config['epochs']):
         start_time = time.time()
         total_loss = 0
-        batch_count = 0
 
         for x, y in get_batches(data_tokens, train_config['batch_size'], train_config['seq_len']):
+            # Обновление learning rate
+            new_lr = cosine_decay_with_warmup(current_step, training_steps, warmup_steps, max_lr, min_lr)
+            optimizer.lr = new_lr
+
             logits = model.forward(x, mask)
             loss = loss_fn.forward(logits, y)
 
             dlogits = loss_fn.backward()
             model.backward(dlogits)
 
-            # Обрезка градиентов
             clip_gradients(model.get_named_params(), max_norm)
 
             optimizer.step()
 
             total_loss += loss
-            batch_count += 1
+            current_step += 1
 
-        epoch_loss = total_loss / batch_count
+        epoch_loss = total_loss / num_batches
         epoch_time = time.time() - start_time
-        print(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | Время: {epoch_time:.2f}с")
+        print(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
 
     print("\n[Шаг 4/4] Обучение завершено!")
 

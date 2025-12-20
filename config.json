@@ -22,6 +22,10 @@
         "epsilon": 1e-8,
         "max_norm": 1.0
     },
+    "scheduler": {
+        "warmup_steps": 10,
+        "min_lr": 1e-5
+    },
     "generation": {
         "start_text": "Привет",
         "max_len": 50,
