@@ -151,7 +151,7 @@ def main():
             policy_loss = policy_loss_fn.forward(logits, y)
 
             # Use negative policy loss as the target for the value head
-            value_target = np.array([[-policy_loss]])
+            value_target = np.full_like(value, -policy_loss)
 
             value_loss = value_loss_fn.forward(value, value_target)
 
@@ -215,7 +215,7 @@ def run_validation(model, val_data, policy_loss_fn, value_loss_fn, config):
         policy_loss = policy_loss_fn.forward(logits, y)
 
         # Use negative policy loss as the target for the value head
-        value_target = np.array([[-policy_loss]])
+        value_target = np.full_like(value, -policy_loss)
 
         value_loss = value_loss_fn.forward(value, value_target)
         loss = policy_loss + value_loss
