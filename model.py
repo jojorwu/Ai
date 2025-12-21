@@ -85,21 +85,31 @@ class Transformer:
             block.dropout1.is_training = False
             block.dropout2.is_training = False
 
-    def save_weights(self, filepath, config):
-        """Сохраняет веса модели и конфигурацию в .npz файл."""
-        params_to_save = {}
+    def get_state(self):
+        """Собирает состояние (веса) всех обучаемых слоев модели."""
+        model_state = {}
         named_layers = self.get_named_params()
-
         for layer_name, layer_obj in named_layers.items():
             if hasattr(layer_obj, 'get_trainable_params'):
-                trainable_params = layer_obj.get_trainable_params()
-                for param_name, (param_val, _) in trainable_params.items():
-                    save_key = f"{layer_name}.{param_name}"
-                    params_to_save[save_key] = param_val
+                for param_name, (param_val, _) in layer_obj.get_trainable_params().items():
+                    model_state[f"{layer_name}.{param_name}"] = param_val
+        return model_state
 
+    def set_state(self, state_dict):
+        """Загружает состояние (веса) для всех обучаемых слоев модели."""
+        named_layers = self.get_named_params()
+        for layer_name, layer_obj in named_layers.items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, _ in layer_obj.get_trainable_params().items():
+                    load_key = f"{layer_name}.{param_name}"
+                    if load_key in state_dict:
+                        setattr(layer_obj, param_name, state_dict[load_key])
+
+    def save_weights(self, filepath, config):
+        """Сохраняет веса модели и конфигурацию в .npz файл."""
+        params_to_save = self.get_state()
         config_str = json.dumps(config)
         params_to_save['config'] = np.array([config_str], dtype=object)
-
         np.savez(filepath, **params_to_save)
         print(f"Веса и конфиг модели сохранены в {filepath}")
 
@@ -113,21 +123,7 @@ class Transformer:
 
         # Создаем новую модель с правильной архитектурой
         model = Transformer(vocab_size=vocab_size, **model_config)
-
-        # Получаем именованные слои новой модели
-        named_layers = model.get_named_params()
-
-        # Загружаем веса
-        for layer_name, layer_obj in named_layers.items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                trainable_params = layer_obj.get_trainable_params()
-                for param_name, _ in trainable_params.items():
-                    load_key = f"{layer_name}.{param_name}"
-                    if load_key in data:
-                        # Используем setattr для обновления весов в объекте слоя
-                        setattr(layer_obj, param_name, data[load_key])
-                    else:
-                        print(f"Предупреждение: Вес {load_key} не найден в файле.")
+        model.set_state(data)
 
         print(f"Модель и веса загружены из {filepath}")
         return model, config
@@ -175,39 +171,43 @@ class Transformer:
         # d_pos_encoding не нужен, т.к. он не обучаемый
         return dx
 
-    def generate(self, start_tokens, max_len, temperature=1.0, top_k=0):
-        self.eval()  # Переключаем модель в режим генерации
+    def generate(self, start_tokens, max_len, temperature=1.0, top_k=0, top_p=0.0):
+        self.eval()
 
         batch_size = 1
         d_k = self.d_model // self.num_heads
-
-        # 1. Инициализация KV-кэша с учетом GQA
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
-        # 2. Обработка "затравки" (start_tokens)
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
         seq_len = prompt_tokens.shape[1]
 
-        # Первый forward pass для заполнения кэша
-        # Маска не нужна, так как нас интересует только последний логит
         logits = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+        next_token = np.array([[0]], dtype=np.int64)
 
-        # Следующий токен - это тот, что идет после всей "затравки"
-        next_token = np.array([[0]], dtype=np.int64) # Временное значение
-
-        # 3. Цикл пошаговой генерации
         generated_tokens = []
         for i in range(max_len):
-            # Нас интересуют только логиты для последнего токена
             last_logits = logits[0, -1, :]
 
-            # Сэмплирование
             if temperature > 0:
-                if top_k > 0:
-                    kth_logit = np.sort(last_logits)[-top_k]
-                    last_logits[last_logits < kth_logit] = -np.inf
-
                 probs = softmax(last_logits / temperature)
+
+                if top_p > 0.0:
+                    sorted_indices = np.argsort(probs)[::-1]
+                    sorted_probs = probs[sorted_indices]
+                    cumulative_probs = np.cumsum(sorted_probs)
+
+                    indices_to_remove = cumulative_probs > top_p
+                    indices_to_remove[1:] = indices_to_remove[:-1].copy()
+                    indices_to_remove[0] = False
+
+                    probs[sorted_indices[indices_to_remove]] = 0
+                    probs /= np.sum(probs) # Перенормировка
+
+                if top_k > 0:
+                    kth_prob = np.sort(probs)[-top_k]
+                    probs[probs < kth_prob] = 0
+                    probs /= np.sum(probs)
+
                 token_id = np.random.choice(self.vocab_size, p=probs)
             else:
                 token_id = np.argmax(last_logits)
@@ -215,8 +215,6 @@ class Transformer:
             generated_tokens.append(token_id)
             next_token[0, 0] = token_id
 
-            # Следующий forward pass будет только для одного нового токена
-            # seq_offset - это текущая длина последовательности
             seq_offset = seq_len + i
             logits = self.forward(next_token, kv_cache=kv_cache, seq_offset=seq_offset)
 

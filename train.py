@@ -2,11 +2,13 @@ import numpy as np
 import os
 import time
 import json
+import logging
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
 from nn_components.lr_scheduler import cosine_decay_with_warmup
+from utils import save_checkpoint, load_checkpoint
 
 def get_batches(data, batch_size, seq_len):
     """Генератор батчей для обучения."""
@@ -27,11 +29,32 @@ def get_batches(data, batch_size, seq_len):
         y_batch = y[:, i:i+seq_len]
         yield x_batch, y_batch
 
+def setup_logging():
+    """Настраивает логирование в файл и в консоль."""
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Форматтер
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Обработчик для файла
+    file_handler = logging.FileHandler('training.log')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # Обработчик для консоли
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
 def main():
     """
     Основной скрипт для обучения модели Трансформер.
     """
-    print("--- Запуск обучения модели Трансформер ---")
+    setup_logging()
+    logging.info("--- Запуск обучения модели Трансформер ---")
 
     # --- 1. Загрузка конфигурации ---
     with open('config.json', 'r') as f:
@@ -43,9 +66,9 @@ def main():
     scheduler_config = config.get('scheduler', {})
 
     # --- 2. Подготовка данных ---
-    print("\n[Шаг 1/4] Инициализация токенизатора и загрузка данных...")
+    logging.info("[Шаг 1/4] Инициализация токенизатора и загрузка данных...")
     if not os.path.exists(train_config['data_dir']) or not any(f.endswith('.txt') for f in os.listdir(train_config['data_dir'])):
-        print(f"Ошибка: Директория '{train_config['data_dir']}' не найдена или не содержит .txt файлов.")
+        logging.error(f"Ошибка: Директория '{train_config['data_dir']}' не найдена или не содержит .txt файлов.")
         return
 
     tokenizer = Tokenizer(train_config['data_dir'])
@@ -58,10 +81,18 @@ def main():
                 all_text += f.read()
 
     data_tokens = tokenizer.encode(all_text)
-    print(f"Данные успешно загружены. Размер словаря: {vocab_size}, Всего токенов: {len(data_tokens)}")
+
+    # Разделение данных на обучающую и валидационную выборки
+    val_split = train_config.get('validation_split', 0.0)
+    split_idx = int(len(data_tokens) * (1 - val_split))
+    train_data = data_tokens[:split_idx]
+    val_data = data_tokens[split_idx:]
+
+    logging.info(f"Данные успешно загружены. Размер словаря: {vocab_size}, всего токенов: {len(data_tokens)}")
+    logging.info(f"Обучающая выборка: {len(train_data)} токенов, Валидационная выборка: {len(val_data)} токенов")
 
     # --- 3. Инициализация модели и оптимизатора ---
-    print("\n[Шаг 2/4] Инициализация модели, функции потерь и оптимизатора...")
+    logging.info("[Шаг 2/4] Инициализация модели, функции потерь и оптимизатора...")
     model = Transformer(vocab_size=vocab_size, **model_config)
     loss_fn = SoftmaxCrossEntropy()
 
@@ -79,27 +110,27 @@ def main():
     # --- 4. Загрузка контрольной точки (если есть) ---
     checkpoint_path = train_config.get('checkpoint_path')
     if checkpoint_path and os.path.exists(checkpoint_path):
-        print(f"\n[Шаг 3/4] Обнаружена контрольная точка. Загрузка...")
+        logging.info(f"[Шаг 3/4] Обнаружена контрольная точка. Загрузка...")
         training_state, _ = load_checkpoint(model, optimizer, checkpoint_path)
         if training_state:
             start_epoch = training_state['epoch'] + 1
             current_step = training_state['current_step']
-            print(f"Обучение возобновлено с эпохи {start_epoch}, шаг {current_step}.")
+            logging.info(f"Обучение возобновлено с эпохи {start_epoch}, шаг {current_step}.")
     else:
-        print("\n[Шаг 3/4] Начало цикла обучения...")
+        logging.info("[Шаг 3/4] Начало цикла обучения...")
 
     # --- 5. Настройка планировщика и цикл обучения ---
     gradient_accumulation_steps = train_config.get('gradient_accumulation_steps', 1)
 
-    num_batches = len(data_tokens) // (train_config['batch_size'] * train_config['seq_len'])
+    num_batches = len(train_data) // (train_config['batch_size'] * train_config['seq_len'])
     training_steps = (num_batches // gradient_accumulation_steps) * train_config['epochs']
 
     max_lr = optim_config['learning_rate']
     min_lr = scheduler_config.get('min_lr', 1e-6)
     warmup_steps = scheduler_config.get('warmup_steps', 0)
 
-    print(f"Всего шагов оптимизации: {training_steps}")
-    print(f"Накопление градиентов: {gradient_accumulation_steps} шаг(а)")
+    logging.info(f"Всего шагов оптимизации: {training_steps}")
+    logging.info(f"Накопление градиентов: {gradient_accumulation_steps} шаг(а)")
 
     if start_epoch == 0:
         model.zero_grad()
@@ -136,86 +167,47 @@ def main():
                 current_step += 1
 
         # Расчет и вывод средней потери за эпоху
-        # Делим на количество шагов оптимизации, а не на количество батчей
         epoch_loss = total_loss / (num_batches / gradient_accumulation_steps)
         epoch_time = time.time() - start_time
-        print(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
+
+        # --- Валидация ---
+        if len(val_data) > 0:
+            val_loss = run_validation(model, val_data, loss_fn, train_config)
+            logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | Val Потери: {val_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
+        else:
+            logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
 
         # Сохранение контрольной точки
         if checkpoint_path:
             save_checkpoint(model, optimizer, epoch, current_step, config, checkpoint_path)
+            logging.info(f"Контрольная точка сохранена в {checkpoint_path}")
 
-    print("\n[Шаг 6/6] Обучение завершено!")
+    logging.info("[Шаг 6/6] Обучение завершено!")
 
     model.save_weights(train_config['weights_path'], config)
 
-def save_checkpoint(model, optimizer, epoch, current_step, config, filepath):
-    """Сохраняет состояние модели, оптимизатора и обучения."""
-    # Собираем состояние модели
-    model_state = {}
-    for name, layer in model.get_named_params().items():
-        if hasattr(layer, 'get_trainable_params'):
-            for param_name, (param_val, _) in layer.get_trainable_params().items():
-                model_state[f"{name}.{param_name}"] = param_val
 
-    # Собираем состояние оптимизатора
-    optimizer_state = optimizer.get_state()
+def run_validation(model, val_data, loss_fn, config):
+    """Выполняет проход по валидационным данным и возвращает средние потери."""
+    model.eval()  # Переключаем модель в режим оценки
+    total_val_loss = 0
+    val_batches = 0
 
-    # Собираем состояние обучения
-    training_state = {
-        'epoch': np.array(epoch),
-        'current_step': np.array(current_step)
-    }
+    batch_iterator = get_batches(val_data, config['batch_size'], config['seq_len'])
+    mask = np.triu(np.ones((config['seq_len'], config['seq_len'])), k=1).astype(bool)
 
-    # Объединяем все в один словарь для сохранения
-    checkpoint = {
-        **model_state,
-        'optimizer_m': optimizer_state['m'],
-        'optimizer_v': optimizer_state['v'],
-        'optimizer_t': np.array(optimizer_state['t']),
-        **training_state
-    }
+    for x, y in batch_iterator:
+        logits = model.forward(x, mask)
+        loss = loss_fn.forward(logits, y)
+        total_val_loss += loss
+        val_batches += 1
 
-    # Сохраняем и конфиг
-    config_str = json.dumps(config)
-    checkpoint['config'] = np.array([config_str], dtype=object)
+    model.train()  # Возвращаем модель в режим обучения
 
-    np.savez(filepath, **checkpoint)
-    print(f"Контрольная точка сохранена в {filepath}")
+    if val_batches == 0:
+        return 0.0
 
-
-def load_checkpoint(model, optimizer, filepath):
-    """Загружает состояние модели, оптимизатора и обучения."""
-    if not os.path.exists(filepath):
-        return None, None
-
-    data = np.load(filepath, allow_pickle=True)
-
-    # Загрузка весов модели
-    named_layers = model.get_named_params()
-    for layer_name, layer_obj in named_layers.items():
-        if hasattr(layer_obj, 'get_trainable_params'):
-            for param_name, _ in layer_obj.get_trainable_params().items():
-                load_key = f"{layer_name}.{param_name}"
-                if load_key in data:
-                    setattr(layer_obj, param_name, data[load_key])
-
-    # Загрузка состояния оптимизатора
-    optimizer_state = {
-        'm': data['optimizer_m'].item(),
-        'v': data['optimizer_v'].item(),
-        't': data['optimizer_t'].item()
-    }
-    optimizer.set_state(optimizer_state)
-
-    # Загрузка состояния обучения
-    training_state = {
-        'epoch': data['epoch'].item(),
-        'current_step': data['current_step'].item()
-    }
-
-    print(f"Контрольная точка загружена из {filepath}")
-    return training_state, json.loads(data['config'][0])
+    return total_val_loss / val_batches
 
 
 if __name__ == "__main__":

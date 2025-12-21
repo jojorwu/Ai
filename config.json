@@ -13,6 +13,7 @@
         "batch_size": 2,
         "seq_len": 32,
         "gradient_accumulation_steps": 1,
+        "validation_split": 0.1,
         "data_dir": "data",
         "weights_path": "model_weights.npz",
         "checkpoint_path": "checkpoint.npz"
@@ -33,6 +34,7 @@
         "start_text": "Привет",
         "max_len": 50,
         "temperature": 0.8,
-        "top_k": 5
+        "top_k": 5,
+        "top_p": 0.9
     }
 }
