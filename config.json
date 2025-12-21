@@ -35,6 +35,8 @@
         "max_len": 50,
         "temperature": 0.8,
         "top_k": 5,
-        "top_p": 0.9
+        "top_p": 0.9,
+        "speculative_steps": 5,
+        "value_threshold": -0.5
     }
 }

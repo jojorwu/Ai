@@ -47,7 +47,9 @@ def main():
         max_len=gen_config.get('max_len', 50),
         temperature=gen_config.get('temperature', 0.8),
         top_k=gen_config.get('top_k', 0),
-        top_p=gen_config.get('top_p', 0.0)
+        top_p=gen_config.get('top_p', 0.0),
+        speculative_steps=gen_config.get('speculative_steps', 5),
+        value_threshold=gen_config.get('value_threshold', -1.0)
     )
 
     generated_text = tokenizer.decode(generated_tokens.tolist())

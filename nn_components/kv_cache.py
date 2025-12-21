@@ -39,6 +39,14 @@ class KVCache:
         self.cache[layer_idx][0][:, :, seq_offset:seq_offset + seq_len, :] = k_new
         self.cache[layer_idx][1][:, :, seq_offset:seq_offset + seq_len, :] = v_new
 
+    def snapshot(self):
+        """Creates a copy of the current cache state."""
+        return [(np.copy(k), np.copy(v)) for k, v in self.cache]
+
+    def restore(self, state):
+        """Restores the cache from a snapshot."""
+        self.cache = state
+
     def get(self, layer_idx):
         """
         Возвращает кэшированные K и V для указанного слоя.
