@@ -76,3 +76,21 @@ class MSELoss:
 
     def backward(self):
         return 2 * (self.y_pred - self.y_true) / self.y_true.size
+
+class MarginRankingLoss:
+    """Margin Ranking Loss."""
+    def __init__(self, margin=1.0):
+        self.margin = margin
+
+    def forward(self, y_good, y_bad):
+        self.y_good = y_good
+        self.y_bad = y_bad
+        self.loss = np.maximum(0, self.margin - (y_good - y_bad))
+        return np.mean(self.loss)
+
+    def backward(self):
+        # Gradient is -1 for the "good" input and +1 for the "bad" input if the margin is not met
+        mask = (self.loss > 0).astype(int)
+        d_y_good = -mask / self.y_good.size
+        d_y_bad = mask / self.y_bad.size
+        return d_y_good, d_y_bad

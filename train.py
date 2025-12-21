@@ -4,7 +4,7 @@ import time
 import json
 import logging
 from model import Transformer
-from nn_components.loss import SoftmaxCrossEntropy, MSELoss
+from nn_components.loss import SoftmaxCrossEntropy, MSELoss, MarginRankingLoss
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
 from nn_components.lr_scheduler import cosine_decay_with_warmup
@@ -95,7 +95,7 @@ def main():
     logging.info("[Шаг 2/4] Инициализация модели, функции потерь и оптимизатора...")
     model = Transformer(vocab_size=vocab_size, **model_config)
     policy_loss_fn = SoftmaxCrossEntropy()
-    value_loss_fn = MSELoss()
+    value_loss_fn = MarginRankingLoss(margin=train_config.get('contrastive_margin', 1.0))
 
     # Отделяем max_norm от параметров Adam
     max_norm = optim_config.pop('max_norm')
@@ -143,40 +143,60 @@ def main():
         # Обертка для enumerate, чтобы получить индекс батча
         batch_iterator = get_batches(data_tokens, train_config['batch_size'], train_config['seq_len'])
 
+        num_candidates = train_config.get('num_candidates', 2)
+
         for i, (x, y) in enumerate(batch_iterator):
-            # 1. Прямой проход
-            logits, value = model.forward(x, mask)
+            model.zero_grad()
 
-            # 2. Расчет потерь
+            # --- Part 1: Supervised Policy Training ---
+            model.train() # Ensure dropout is on
+            logits, _ = model.forward(x, mask)
             policy_loss = policy_loss_fn.forward(logits, y)
+            dlogits = policy_loss_fn.backward()
+            model.backward(dlogits, np.zeros((x.shape[0], 1)))
 
-            # Use negative policy loss as the target for the value head
-            value_target = np.full_like(value, -policy_loss)
+            # --- Part 2: Contrastive Value Training ---
+            model.train() # Ensure dropout is on for candidate generation
+            candidate_data = []
+            for _ in range(num_candidates):
+                c_logits, c_value = model.forward(x, mask)
+                c_loss = policy_loss_fn.forward(c_logits, y)
+                candidate_data.append({'value': c_value, 'loss': c_loss, 'logits': c_logits})
 
-            value_loss = value_loss_fn.forward(value, value_target)
+            candidate_data.sort(key=lambda c: c['loss'])
+            best_candidate = candidate_data[0]
+            worst_candidate = candidate_data[-1]
 
-            # Комбинируем потери (можно добавить веса, если нужно)
+            good_value = best_candidate['value']
+            bad_value = worst_candidate['value']
+
+            value_loss = value_loss_fn.forward(good_value, bad_value)
+            d_good_value, d_bad_value = value_loss_fn.backward()
+
+            # Correctly backpropagate by making the forward pass deterministic
+            model.eval() # Disable dropout
+
+            # Backprop for the "good" value
+            _ = model.forward(x, mask) # This forward pass is now deterministic
+            model.backward(np.zeros_like(logits), d_good_value)
+
+            # Backprop for the "bad" value
+            _ = model.forward(x, mask) # This forward pass is also deterministic
+            model.backward(np.zeros_like(logits), d_bad_value)
+
+            model.train() # Re-enable dropout for the next iteration
+
+            # --- Combine and update ---
             loss = policy_loss + value_loss
-
-            # 3. Нормализация потерь для усреднения градиентов
             loss = loss / gradient_accumulation_steps
             total_loss += loss.item()
 
-            # 4. Обратный проход
-            dlogits = policy_loss_fn.backward()
-            dvalue = value_loss_fn.backward()
-            model.backward(dlogits, dvalue)
-
-            # 5. Обновление весов после накопления
             if (i + 1) % gradient_accumulation_steps == 0:
-                # Обновление learning rate происходит перед шагом оптимизатора
                 new_lr = cosine_decay_with_warmup(current_step, training_steps, warmup_steps, max_lr, min_lr)
                 optimizer.lr = new_lr
-
                 clip_gradients(model.get_named_params(), max_norm)
                 optimizer.step()
-                model.zero_grad() # Очистка градиентов для следующего цикла накопления
-
+                model.zero_grad()
                 current_step += 1
 
         # Расчет и вывод средней потери за эпоху
@@ -185,7 +205,7 @@ def main():
 
         # --- Валидация ---
         if len(val_data) > 0:
-            val_loss = run_validation(model, val_data, policy_loss_fn, value_loss_fn, train_config)
+            val_loss = run_validation(model, val_data, policy_loss_fn, train_config)
             logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | Val Потери: {val_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
         else:
             logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
@@ -200,7 +220,7 @@ def main():
     model.save_weights(train_config['weights_path'], config)
 
 
-def run_validation(model, val_data, policy_loss_fn, value_loss_fn, config):
+def run_validation(model, val_data, policy_loss_fn, config):
     """Выполняет проход по валидационным данным и возвращает средние потери."""
     model.eval()
     total_val_loss = 0
@@ -210,16 +230,8 @@ def run_validation(model, val_data, policy_loss_fn, value_loss_fn, config):
     mask = np.triu(np.ones((config['seq_len'], config['seq_len'])), k=1).astype(bool)
 
     for x, y in batch_iterator:
-        logits, value = model.forward(x, mask)
-
-        policy_loss = policy_loss_fn.forward(logits, y)
-
-        # Use negative policy loss as the target for the value head
-        value_target = np.full_like(value, -policy_loss)
-
-        value_loss = value_loss_fn.forward(value, value_target)
-        loss = policy_loss + value_loss
-
+        logits, _ = model.forward(x, mask)
+        loss = policy_loss_fn.forward(logits, y)
         total_val_loss += loss
         val_batches += 1
 
