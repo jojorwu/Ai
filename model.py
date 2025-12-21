@@ -7,6 +7,7 @@ from nn_components.rms_norm import RMSNorm
 from nn_components.linear import Linear
 from nn_components.utils import softmax
 from nn_components.kv_cache import KVCache
+from nn_components.activations import Tanh
 
 class Transformer:
     """
@@ -33,7 +34,11 @@ class Transformer:
         ]
 
         self.final_norm = RMSNorm(d_model)
-        # self.output_linear удален. Вместо него используется матрица эмбеддингов.
+
+        # Policy Head (Actor) - reusing embedding weights (Weight Tying)
+        # Value Head (Critic)
+        self.value_head_linear = Linear(d_model, 1)
+        self.value_head_activation = Tanh()
 
     def get_named_params(self, obj=None, prefix=''):
         """Рекурсивно собирает все обучаемые слои и их параметры с именами."""
@@ -58,6 +63,7 @@ class Transformer:
             for i, block in enumerate(self.decoder_blocks):
                 named_params.update(self.get_named_params(block, f'decoder_blocks.{i}'))
             named_params.update(self.get_named_params(self.final_norm, 'final_norm'))
+            named_params.update(self.get_named_params(self.value_head_linear, 'value_head_linear'))
 
         return named_params
 
@@ -137,13 +143,18 @@ class Transformer:
             h = block.forward(h, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
 
         h = self.final_norm.forward(h)
-        self.final_norm_output = h # Сохраняем для backward
+        self.final_norm_output = h
 
-        # Weight Tying: Умножаем на транспонированную матрицу эмбеддингов
+        # Policy Head (Actor)
         logits = self.final_norm_output @ self.embedding.W.T
-        return logits
 
-    def backward(self, dlogits):
+        # Value Head (Critic)
+        value_hidden = self.value_head_linear.forward(h)
+        value = self.value_head_activation.forward(value_hidden)
+
+        return logits, value
+
+    def backward(self, dlogits, dvalue):
         # Обратный проход для Weight Tying
         # dL/dW_emb = (x_norm.T @ dlogits).T = dlogits.T @ x_norm
         # Но т.к. W транспонирована, градиент считается как x.T @ dlogits
@@ -153,8 +164,16 @@ class Transformer:
         # Градиент для матрицы эмбеддингов от выходного слоя (dW = dlogits.T @ x)
         d_embedding_W_from_output = dlogits_reshaped.T @ x_norm_reshaped
 
-        # Градиент по выходу final_norm
-        dx = dlogits @ self.embedding.W
+        # --- Backward pass for Value Head ---
+        dvalue_hidden = self.value_head_activation.backward(dvalue)
+        d_h_value = self.value_head_linear.backward(dvalue_hidden)
+
+        # --- Backward pass for Policy Head ---
+        d_embedding_W_from_output = dlogits_reshaped.T @ x_norm_reshaped
+        d_h_policy = dlogits @ self.embedding.W
+
+        # --- Combine gradients ---
+        dx = d_h_policy + d_h_value
 
         # Продолжаем обратный проход
         dx = self.final_norm.backward(dx)
@@ -181,7 +200,7 @@ class Transformer:
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
         seq_len = prompt_tokens.shape[1]
 
-        logits = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+        logits, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
         next_token = np.array([[0]], dtype=np.int64)
 
         generated_tokens = []
@@ -216,6 +235,6 @@ class Transformer:
             next_token[0, 0] = token_id
 
             seq_offset = seq_len + i
-            logits = self.forward(next_token, kv_cache=kv_cache, seq_offset=seq_offset)
+            logits, _ = self.forward(next_token, kv_cache=kv_cache, seq_offset=seq_offset)
 
         return np.array(generated_tokens)
