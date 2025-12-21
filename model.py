@@ -111,6 +111,24 @@ class Transformer:
                     if load_key in state_dict:
                         setattr(layer_obj, param_name, state_dict[load_key])
 
+    def get_gradients(self):
+        """Gets the current gradients of all trainable parameters."""
+        grads = {}
+        for layer_name, layer_obj in self.get_named_params().items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+                    grads[f"{layer_name}.{param_name}"] = np.copy(grad)
+        return grads
+
+    def set_gradients(self, grads):
+        """Sets the gradients of all trainable parameters."""
+        for layer_name, layer_obj in self.get_named_params().items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, _ in layer_obj.get_trainable_params().items():
+                    grad_attr_name = f"d{param_name}"
+                    if hasattr(layer_obj, grad_attr_name):
+                        setattr(layer_obj, grad_attr_name, grads[f"{layer_name}.{param_name}"])
+
     def save_weights(self, filepath, config):
         """Сохраняет веса модели и конфигурацию в .npz файл."""
         params_to_save = self.get_state()
@@ -195,72 +213,66 @@ class Transformer:
         # d_pos_encoding не нужен, т.к. он не обучаемый
         return dx
 
-    def generate(self, start_tokens, max_len, temperature=1.0, top_k=0, top_p=0.0, speculative_steps=5, value_threshold=-1.0):
+    def generate(self, start_tokens, max_len, temperature=1.0, top_k=0, top_p=0.0, speculative_steps=5, value_threshold=-1.0, max_retries=3):
         self.eval()
 
         batch_size = 1
         d_k = self.d_model // self.num_heads
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
-        prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
-        seq_len = prompt_tokens.shape[1]
-
         all_generated_tokens = []
         current_tokens = list(start_tokens)
 
         while len(all_generated_tokens) < max_len:
-            # Snapshot the current state
             cache_snapshot = kv_cache.snapshot()
             tokens_snapshot = list(current_tokens)
 
-            # Generate a speculative chunk
-            speculative_chunk = []
-            chunk_len = min(speculative_steps, max_len - len(all_generated_tokens))
+            retries = 0
+            while retries < max_retries:
+                speculative_chunk = []
+                chunk_len = min(speculative_steps, max_len - len(all_generated_tokens))
 
-            # Forward pass for the prompt to get the first logits
-            logits, _ = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=kv_cache, seq_offset=0)
+                # Start generation from the current state
+                logits, _ = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=kv_cache, seq_offset=0)
 
-            for _ in range(chunk_len):
-                last_logits = logits[0, -1, :]
+                for _ in range(chunk_len):
+                    last_logits = logits[0, -1, :]
 
-                if temperature > 0:
-                    probs = softmax(last_logits / temperature)
-                    # Apply top-p and top-k sampling
-                    if top_p > 0.0:
-                        sorted_indices = np.argsort(probs)[::-1]
-                        sorted_probs = probs[sorted_indices]
-                        cumulative_probs = np.cumsum(sorted_probs)
-                        indices_to_remove = cumulative_probs > top_p
-                        indices_to_remove[1:] = indices_to_remove[:-1].copy()
-                        indices_to_remove[0] = False
-                        probs[sorted_indices[indices_to_remove]] = 0
-                        probs /= np.sum(probs)
-                    if top_k > 0:
-                        kth_prob = np.sort(probs)[-top_k]
-                        probs[probs < kth_prob] = 0
-                        probs /= np.sum(probs)
+                    if temperature > 0:
+                        probs = softmax(last_logits / temperature)
+                        if top_p > 0.0:
+                            sorted_indices = np.argsort(probs)[::-1]
+                            sorted_probs = probs[sorted_indices]
+                            cumulative_probs = np.cumsum(sorted_probs)
+                            indices_to_remove = cumulative_probs > top_p
+                            indices_to_remove[1:] = indices_to_remove[:-1].copy()
+                            indices_to_remove[0] = False
+                            probs[sorted_indices[indices_to_remove]] = 0
+                            probs /= np.sum(probs)
+                        if top_k > 0:
+                            kth_prob = np.sort(probs)[-top_k]
+                            probs[probs < kth_prob] = 0
+                            probs /= np.sum(probs)
 
-                    token_id = np.random.choice(self.vocab_size, p=probs)
+                        token_id = np.random.choice(self.vocab_size, p=probs)
+                    else:
+                        token_id = np.argmax(last_logits)
+
+                    speculative_chunk.append(token_id)
+                    current_tokens.append(token_id)
+
+                    logits, _ = self.forward(np.array([[token_id]]), kv_cache=kv_cache, seq_offset=len(current_tokens)-1)
+
+                _, value = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=None, seq_offset=0)
+
+                if value.item() >= value_threshold:
+                    all_generated_tokens.extend(speculative_chunk)
+                    break
                 else:
-                    token_id = np.argmax(last_logits)
-
-                speculative_chunk.append(token_id)
-                current_tokens.append(token_id)
-
-                # Update logits for the next token
-                logits, _ = self.forward(np.array([[token_id]]), kv_cache=kv_cache, seq_offset=len(current_tokens)-1)
-
-            # Evaluate the generated chunk
-            _, value = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=None, seq_offset=0)
-
-            if value.item() >= value_threshold:
-                # Accept the chunk
-                all_generated_tokens.extend(speculative_chunk)
+                    kv_cache.restore(cache_snapshot)
+                    current_tokens = tokens_snapshot
+                    retries += 1
             else:
-                # Reject the chunk and rollback
-                kv_cache.restore(cache_snapshot)
-                current_tokens = tokens_snapshot
-                # Optional: break or try a different sampling strategy
                 break
 
         return np.array(all_generated_tokens)
