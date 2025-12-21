@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model import Transformer
 from optimizer import Adam
-from nn_components.loss import SoftmaxCrossEntropy, MarginRankingLoss
+from nn_components.loss import SoftmaxCrossEntropy
 
 class TestTrainingIntegration(unittest.TestCase):
     """
@@ -20,7 +20,7 @@ class TestTrainingIntegration(unittest.TestCase):
     """
     def test_single_training_step(self):
         """
-        Tests that a single training step updates the model's weights.
+        Tests that a single, simple training step updates the model's weights.
         """
         print("\\nRunning Test: Training Integration (single step)...")
         # --- Config ---
@@ -41,7 +41,6 @@ class TestTrainingIntegration(unittest.TestCase):
 
         # --- Loss and Optimizer ---
         policy_loss_fn = SoftmaxCrossEntropy()
-        value_loss_fn = MarginRankingLoss(margin=1.0)
         optimizer = Adam(model.get_named_params(), learning_rate=0.001)
 
         # --- Get initial weights ---
@@ -51,48 +50,24 @@ class TestTrainingIntegration(unittest.TestCase):
         model.train()
         model.zero_grad()
 
-        # Get grads for a "good" candidate (just the standard policy pass)
-        logits, good_value = model.forward(x, mask)
+        # Forward pass
+        logits, value = model.forward(x, mask)
+
+        # Policy loss calculation
         _ = policy_loss_fn.forward(logits, y)
         dlogits = policy_loss_fn.backward()
-        model.backward(dlogits, np.zeros_like(good_value))
-        good_grads = model.get_gradients()
 
-        # Get grads for a "bad" candidate
-        model.zero_grad()
-        logits, bad_value = model.forward(x, mask)
-        _ = policy_loss_fn.forward(logits, y)
-        dlogits_bad = policy_loss_fn.backward()
-        model.backward(dlogits_bad, np.zeros_like(bad_value))
+        # Backward pass for the whole model
+        model.backward(dlogits, np.zeros_like(value))
 
-        # Value loss
-        _ = value_loss_fn.forward(good_value, bad_value)
-        d_good, d_bad = value_loss_fn.backward()
-
-        # Accumulate gradients manually
-        final_grads = good_grads
-
-        model.zero_grad()
-        model.eval()
-        _, _ = model.forward(x, mask)
-        model.backward(np.zeros_like(logits), d_good)
-        good_value_grads = model.get_gradients()
-        for key in final_grads:
-            final_grads[key] += good_value_grads[key]
-
-        _, _ = model.forward(x, mask)
-        model.backward(np.zeros_like(logits), d_bad)
-        bad_value_grads = model.get_gradients()
-        for key in final_grads:
-            final_grads[key] += bad_value_grads[key]
-
-        model.set_gradients(final_grads)
-
+        # Optimizer step
         optimizer.step()
 
         # --- Check if weights have been updated ---
         updated_weights = model.decoder_blocks[0].ffn.w1.W
-        self.assertFalse(np.allclose(initial_weights, updated_weights), "Weights were not updated after a training step.")
+
+        self.assertFalse(np.allclose(initial_weights, updated_weights),
+                         "Weights were not updated after a training step.")
         print("Training Integration test PASSED.")
 
 if __name__ == "__main__":

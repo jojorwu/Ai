@@ -22,10 +22,6 @@ class Linear:
         self.dW = None
         self.db = None
 
-    def get_params(self):
-        """Возвращает сам объект слоя для обнаружения оптимизатором."""
-        return [self]
-
     def get_trainable_params(self):
         """Возвращает словарь с обучаемыми параметрами и их градиентами."""
         return {'W': (self.W, self.dW), 'b': (self.b, self.db)}
@@ -41,8 +37,6 @@ class Linear:
             np.ndarray: Выходной тензор (размер: ..., output_dim).
         """
         self.x = x
-        # Если x многомерный (e.g., batch, seq_len, d_model),
-        # операция @ работает как надо.
         output = self.x @ self.W + self.b
         return output
 
@@ -56,18 +50,13 @@ class Linear:
         Returns:
             np.ndarray: Градиент потерь по отношению ко входу слоя (dx).
         """
-        # Для многомерных входов нужно "схлопнуть" все измерения, кроме последнего
         original_shape = self.x.shape
         x_reshaped = self.x.reshape(-1, original_shape[-1])
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
-        # Градиент по весам: dL/dW = dL/dY * dY/dW = x.T @ dout
         dW = x_reshaped.T @ dout_reshaped
-
-        # Градиент по смещению: dL/db = dL/dY * dY/db = sum(dout)
         db = np.sum(dout_reshaped, axis=0)
 
-        # Накапливаем градиенты
         if self.dW is None:
             self.dW = dW
         else:
@@ -78,8 +67,5 @@ class Linear:
         else:
             self.db += db
 
-        # Градиент по входу: dL/dx = dL/dY * dY/dx = dout @ W.T
         dx = dout_reshaped @ self.W.T
-
-        # Возвращаем градиенту по входу исходную форму
         return dx.reshape(original_shape)

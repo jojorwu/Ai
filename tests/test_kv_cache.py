@@ -1,14 +1,20 @@
+"""
+Tests for the KVCache.
+"""
+
+import os
+import sys
 import unittest
 import numpy as np
-import sys
-import os
 
-# Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from nn_components.kv_cache import KVCache
 
 class TestKVCache(unittest.TestCase):
+    """
+    Tests for the KVCache.
+    """
     def setUp(self):
         self.num_layers = 2
         self.batch_size = 1
@@ -16,7 +22,7 @@ class TestKVCache(unittest.TestCase):
         self.d_k = 8
         self.max_seq_len = 16
         self.cache = KVCache(self.num_layers, self.batch_size, self.num_kv_heads, self.d_k, self.max_seq_len)
-        print("\nRunning Test: KVCache snapshot and restore...")
+        print("\\nRunning Test: KVCache snapshot and restore...")
 
     def test_snapshot_and_restore(self):
         """Test the snapshot and restore functionality of the KVCache."""
