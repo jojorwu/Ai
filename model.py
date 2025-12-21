@@ -148,8 +148,9 @@ class Transformer:
         # Policy Head (Actor)
         logits = self.final_norm_output @ self.embedding.W.T
 
-        # Value Head (Critic)
-        value_hidden = self.value_head_linear.forward(h)
+        # Value Head (Critic) - uses the hidden state of the last token
+        last_token_hidden_state = h[:, -1, :] # Shape: (batch_size, d_model)
+        value_hidden = self.value_head_linear.forward(last_token_hidden_state) # Shape: (batch_size, 1)
         value = self.value_head_activation.forward(value_hidden)
 
         return logits, value
@@ -166,10 +167,14 @@ class Transformer:
 
         # --- Backward pass for Value Head ---
         dvalue_hidden = self.value_head_activation.backward(dvalue)
-        d_h_value = self.value_head_linear.backward(dvalue_hidden)
+        d_last_token_hidden_state = self.value_head_linear.backward(dvalue_hidden)
+
+        # Create a zero gradient for the full hidden state tensor
+        d_h_value = np.zeros_like(self.final_norm_output)
+        # Place the gradient only at the last time step
+        d_h_value[:, -1, :] = d_last_token_hidden_state
 
         # --- Backward pass for Policy Head ---
-        d_embedding_W_from_output = dlogits_reshaped.T @ x_norm_reshaped
         d_h_policy = dlogits @ self.embedding.W
 
         # --- Combine gradients ---

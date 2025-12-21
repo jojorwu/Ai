@@ -147,11 +147,12 @@ def main():
             # 1. Прямой проход
             logits, value = model.forward(x, mask)
 
-            # Placeholder target for value head (e.g., all ones)
-            value_target = np.ones_like(value)
-
             # 2. Расчет потерь
             policy_loss = policy_loss_fn.forward(logits, y)
+
+            # Use negative policy loss as the target for the value head
+            value_target = np.array([[-policy_loss]])
+
             value_loss = value_loss_fn.forward(value, value_target)
 
             # Комбинируем потери (можно добавить веса, если нужно)
@@ -211,10 +212,11 @@ def run_validation(model, val_data, policy_loss_fn, value_loss_fn, config):
     for x, y in batch_iterator:
         logits, value = model.forward(x, mask)
 
-        # Placeholder for value target
-        value_target = np.ones_like(value)
-
         policy_loss = policy_loss_fn.forward(logits, y)
+
+        # Use negative policy loss as the target for the value head
+        value_target = np.array([[-policy_loss]])
+
         value_loss = value_loss_fn.forward(value, value_target)
         loss = policy_loss + value_loss
 
