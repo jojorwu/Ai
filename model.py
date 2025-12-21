@@ -85,21 +85,31 @@ class Transformer:
             block.dropout1.is_training = False
             block.dropout2.is_training = False
 
-    def save_weights(self, filepath, config):
-        """Сохраняет веса модели и конфигурацию в .npz файл."""
-        params_to_save = {}
+    def get_state(self):
+        """Собирает состояние (веса) всех обучаемых слоев модели."""
+        model_state = {}
         named_layers = self.get_named_params()
-
         for layer_name, layer_obj in named_layers.items():
             if hasattr(layer_obj, 'get_trainable_params'):
-                trainable_params = layer_obj.get_trainable_params()
-                for param_name, (param_val, _) in trainable_params.items():
-                    save_key = f"{layer_name}.{param_name}"
-                    params_to_save[save_key] = param_val
+                for param_name, (param_val, _) in layer_obj.get_trainable_params().items():
+                    model_state[f"{layer_name}.{param_name}"] = param_val
+        return model_state
 
+    def set_state(self, state_dict):
+        """Загружает состояние (веса) для всех обучаемых слоев модели."""
+        named_layers = self.get_named_params()
+        for layer_name, layer_obj in named_layers.items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, _ in layer_obj.get_trainable_params().items():
+                    load_key = f"{layer_name}.{param_name}"
+                    if load_key in state_dict:
+                        setattr(layer_obj, param_name, state_dict[load_key])
+
+    def save_weights(self, filepath, config):
+        """Сохраняет веса модели и конфигурацию в .npz файл."""
+        params_to_save = self.get_state()
         config_str = json.dumps(config)
         params_to_save['config'] = np.array([config_str], dtype=object)
-
         np.savez(filepath, **params_to_save)
         print(f"Веса и конфиг модели сохранены в {filepath}")
 
@@ -113,21 +123,7 @@ class Transformer:
 
         # Создаем новую модель с правильной архитектурой
         model = Transformer(vocab_size=vocab_size, **model_config)
-
-        # Получаем именованные слои новой модели
-        named_layers = model.get_named_params()
-
-        # Загружаем веса
-        for layer_name, layer_obj in named_layers.items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                trainable_params = layer_obj.get_trainable_params()
-                for param_name, _ in trainable_params.items():
-                    load_key = f"{layer_name}.{param_name}"
-                    if load_key in data:
-                        # Используем setattr для обновления весов в объекте слоя
-                        setattr(layer_obj, param_name, data[load_key])
-                    else:
-                        print(f"Предупреждение: Вес {load_key} не найден в файле.")
+        model.set_state(data)
 
         print(f"Модель и веса загружены из {filepath}")
         return model, config
