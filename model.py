@@ -234,11 +234,15 @@ class Transformer:
 
             retries = 0
             accepted = False
-            while retries < max_retries:
+            while retries < max_retries and not accepted:
+                # Make a copy of the cache state for this attempt
+                attempt_cache = kv_cache.copy()
+
                 speculative_chunk = []
                 chunk_len = min(speculative_steps, max_len - len(all_generated_tokens))
 
                 temp_logits = logits
+                final_value = None
 
                 for i in range(chunk_len):
                     last_logits = temp_logits[0, -1, :]
@@ -265,23 +269,26 @@ class Transformer:
 
                     speculative_chunk.append(token_id)
 
-                    # Efficiently get next logits using KV Cache
-                    temp_logits, _ = self.forward(np.array([[token_id]]), kv_cache=kv_cache, seq_offset=current_seq_len + i)
+                    # Use the attempt-specific cache here
+                    temp_logits, final_value = self.forward(
+                        np.array([[token_id]]),
+                        kv_cache=attempt_cache,
+                        seq_offset=current_seq_len + i
+                    )
 
-                # Evaluate the value of the sequence *with* the speculative chunk
-                _, value = self.forward(np.array([speculative_chunk]), kv_cache=kv_cache, seq_offset=current_seq_len)
-
-                if value.item() >= value_threshold:
+                if final_value is not None and final_value.item() >= value_threshold:
                     all_generated_tokens.extend(speculative_chunk)
                     current_seq_len += chunk_len
                     logits = temp_logits
+                    # The attempt was successful, so update the main cache
+                    kv_cache.restore(attempt_cache.snapshot())
                     accepted = True
-                    break
                 else:
-                    kv_cache.restore(cache_snapshot)
+                    # No need to restore the main cache, it was never touched.
+                    # Just increment retries and the loop will start a new attempt.
                     retries += 1
 
             if not accepted:
-                break
+                break # Break if all retries failed for the current step
 
         return np.array(all_generated_tokens)

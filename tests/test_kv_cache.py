@@ -1,55 +1,56 @@
+import unittest
 import numpy as np
 import sys
 import os
-import unittest
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from nn_components.kv_cache import KVCache
 
 class TestKVCache(unittest.TestCase):
+    def setUp(self):
+        self.num_layers = 2
+        self.batch_size = 1
+        self.num_kv_heads = 4
+        self.d_k = 8
+        self.max_seq_len = 16
+        self.cache = KVCache(self.num_layers, self.batch_size, self.num_kv_heads, self.d_k, self.max_seq_len)
+        print("\nRunning Test: KVCache snapshot and restore...")
+
     def test_snapshot_and_restore(self):
         """Test the snapshot and restore functionality of the KVCache."""
-        print("\nRunning Test: KVCache snapshot and restore...")
-        num_layers = 2
-        batch_size = 1
-        num_kv_heads = 4
-        d_k = 8
-        max_seq_len = 16
+        # 1. Initial state should be all zeros
+        initial_snapshot = self.cache.snapshot()
+        self.assertTrue(np.all(initial_snapshot['k_cache'] == 0))
+        self.assertTrue(np.all(initial_snapshot['v_cache'] == 0))
 
-        cache = KVCache(num_layers, batch_size, num_kv_heads, d_k, max_seq_len)
+        # 2. Update the cache with some data
+        k_data = np.random.randn(self.batch_size, self.num_kv_heads, 5, self.d_k)
+        v_data = np.random.randn(self.batch_size, self.num_kv_heads, 5, self.d_k)
+        self.cache.update(k_data, v_data, layer_idx=0, seq_offset=0)
 
-        # 1. Take an initial snapshot (should be all zeros)
-        initial_snapshot = cache.snapshot()
-        self.assertTrue(all(np.all(k == 0) for k, v in initial_snapshot))
-        self.assertTrue(all(np.all(v == 0) for k, v in initial_snapshot))
+        # 3. Take a snapshot of the updated state
+        updated_snapshot = self.cache.snapshot()
 
-        # 2. Update the cache
-        k_update = np.random.randn(batch_size, num_kv_heads, 1, d_k)
-        v_update = np.random.randn(batch_size, num_kv_heads, 1, d_k)
-        cache.update(0, k_update, v_update, 0)
+        # 4. Modify the cache again
+        k_data2 = np.random.randn(self.batch_size, self.num_kv_heads, 3, self.d_k)
+        v_data2 = np.random.randn(self.batch_size, self.num_kv_heads, 3, self.d_k)
+        self.cache.update(k_data2, v_data2, layer_idx=1, seq_offset=2)
 
-        # 3. Take a second snapshot
-        updated_snapshot = cache.snapshot()
-        self.assertFalse(np.all(updated_snapshot[0][0] == 0))
-        self.assertFalse(np.all(updated_snapshot[0][1] == 0))
+        # 5. Restore the cache to the updated_snapshot state
+        self.cache.restore(updated_snapshot)
 
-        # 4. Update the cache again
-        k_update2 = np.random.randn(batch_size, num_kv_heads, 1, d_k)
-        v_update2 = np.random.randn(batch_size, num_kv_heads, 1, d_k)
-        cache.update(0, k_update2, v_update2, 1)
+        # 6. Verify that the cache state matches the updated_snapshot
+        np.testing.assert_array_equal(self.cache.k_cache, updated_snapshot['k_cache'])
+        np.testing.assert_array_equal(self.cache.v_cache, updated_snapshot['v_cache'])
 
-        # 5. Restore to the initial snapshot
-        cache.restore(initial_snapshot)
-        self.assertTrue(all(np.all(k == 0) for k, v in cache.cache))
-        self.assertTrue(all(np.all(v == 0) for k, v in cache.cache))
-
-        # 6. Restore to the updated snapshot
-        cache.restore(updated_snapshot)
-        self.assertTrue(np.allclose(cache.cache[0][0], updated_snapshot[0][0]))
-        self.assertTrue(np.allclose(cache.cache[0][1], updated_snapshot[0][1]))
+        # 7. Restore the initial state
+        self.cache.restore(initial_snapshot)
+        np.testing.assert_array_equal(self.cache.k_cache, initial_snapshot['k_cache'])
+        np.testing.assert_array_equal(self.cache.v_cache, initial_snapshot['v_cache'])
 
         print("KVCache snapshot and restore PASSED.")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

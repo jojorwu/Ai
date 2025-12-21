@@ -2,56 +2,58 @@ import numpy as np
 
 class KVCache:
     """
-    Класс для хранения и управления KV-кэшем для быстрой генерации с поддержкой GQA.
+    Кэш для ключ-значение пар в self-attention слоях, оптимизированный для GQA.
     """
-    def __init__(self, num_layers, batch_size, num_kv_heads, d_k, max_seq_len, dtype=np.float32):
-        """
-        Инициализирует пустой кэш.
-
-        Args:
-            num_layers (int): Количество слоев DecoderBlock.
-            batch_size (int): Размер батча (для генерации обычно 1).
-            num_kv_heads (int): Количество голов K/V (для GQA).
-            d_k (int): Размерность векторов K и V.
-            max_seq_len (int): Максимальная длина последовательности.
-        """
+    def __init__(self, num_layers, batch_size, num_kv_heads, d_k, max_seq_len):
         self.num_layers = num_layers
-        self.cache = []
-        for _ in range(num_layers):
-            # Инициализируем тензоры с учетом num_kv_heads
-            # Форма: (batch, n_kv_heads, seq_len, d_k)
-            k_cache = np.zeros((batch_size, num_kv_heads, max_seq_len, d_k), dtype=dtype)
-            v_cache = np.zeros((batch_size, num_kv_heads, max_seq_len, d_k), dtype=dtype)
-            self.cache.append((k_cache, v_cache))
+        self.batch_size = batch_size
+        self.num_kv_heads = num_kv_heads
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
 
-    def update(self, layer_idx, k_new, v_new, seq_offset):
+        # Инициализируем пустые кэши
+        self.k_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
+        self.v_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
+
+    def update(self, k, v, layer_idx, seq_offset):
         """
-        Обновляет кэш для указанного слоя новыми значениями k и v.
-
-        Args:
-            layer_idx (int): Индекс слоя DecoderBlock.
-            k_new (np.ndarray): Новый тензор ключей.
-            v_new (np.ndarray): Новый тензор значений.
-            seq_offset (int): Смещение в последовательности, с которого нужно начать вставку.
+        Обновляет кэш новыми значениями k и v для указанного слоя.
+        k, v: (batch_size, num_kv_heads, seq_len, d_k)
+        seq_offset: начальная позиция для вставки
         """
-        seq_len = k_new.shape[2]
+        seq_len = k.shape[2]
+        end_pos = seq_offset + seq_len
 
-        self.cache[layer_idx][0][:, :, seq_offset:seq_offset + seq_len, :] = k_new
-        self.cache[layer_idx][1][:, :, seq_offset:seq_offset + seq_len, :] = v_new
+        if end_pos > self.max_seq_len:
+            raise ValueError("KVCache: последовательность превышает максимальную длину.")
+
+        self.k_cache[layer_idx, :, :, seq_offset:end_pos, :] = k
+        self.v_cache[layer_idx, :, :, seq_offset:end_pos, :] = v
+
+    def get(self, layer_idx, seq_len):
+        """
+        Возвращает кэшированные k и v для указанного слоя до определенной длины.
+        """
+        return self.k_cache[layer_idx, ..., :seq_len, :], self.v_cache[layer_idx, ..., :seq_len, :]
 
     def snapshot(self):
-        """Creates a copy of the current cache state."""
-        return [(np.copy(k), np.copy(v)) for k, v in self.cache]
+        """Создает 'снимок' текущего состояния кэша."""
+        return {
+            'k_cache': np.copy(self.k_cache),
+            'v_cache': np.copy(self.v_cache)
+        }
 
-    def restore(self, state):
-        """Restores the cache from a snapshot."""
-        self.cache = state
+    def restore(self, snapshot):
+        """Восстанавливает состояние кэша из 'снимка'."""
+        if 'k_cache' in snapshot and 'v_cache' in snapshot:
+            self.k_cache = np.copy(snapshot['k_cache'])
+            self.v_cache = np.copy(snapshot['v_cache'])
+        else:
+            raise ValueError("Invalid snapshot format provided for KVCache restoration.")
 
-    def get(self, layer_idx):
-        """
-        Возвращает кэшированные K и V для указанного слоя.
-        """
-        return self.cache[layer_idx]
-
-    def __len__(self):
-        return len(self.cache)
+    def copy(self):
+        """Creates a deep copy of this KVCache instance."""
+        new_cache = KVCache(self.num_layers, self.batch_size, self.num_kv_heads, self.d_k, self.max_seq_len)
+        new_cache.k_cache = np.copy(self.k_cache)
+        new_cache.v_cache = np.copy(self.v_cache)
+        return new_cache
