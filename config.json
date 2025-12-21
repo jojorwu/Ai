@@ -33,6 +33,7 @@
         "start_text": "Привет",
         "max_len": 50,
         "temperature": 0.8,
-        "top_k": 5
+        "top_k": 5,
+        "top_p": 0.9
     }
 }
