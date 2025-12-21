@@ -1,13 +1,20 @@
+"""
+Tests for the Tokenizer.
+"""
+
 import os
-import unittest
-import shutil
 import sys
+import shutil
+import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tokenizer import Tokenizer
 
 class TestTokenizer(unittest.TestCase):
+    """
+    Tests for the Tokenizer.
+    """
     def setUp(self):
         self.test_dir = "test_data_tokenizer"
         os.makedirs(self.test_dir, exist_ok=True)

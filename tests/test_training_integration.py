@@ -1,8 +1,11 @@
-import numpy as np
-import unittest
+"""
+Integration test for the training pipeline.
+"""
+
 import os
-import json
 import sys
+import unittest
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -11,12 +14,15 @@ from optimizer import Adam
 from nn_components.loss import SoftmaxCrossEntropy, MarginRankingLoss
 
 class TestTrainingIntegration(unittest.TestCase):
+    """
+    Tests that a single training step updates the model's weights.
+    This is a smoke test for the entire training pipeline.
+    """
     def test_single_training_step(self):
         """
         Tests that a single training step updates the model's weights.
-        This is a smoke test for the entire training pipeline.
         """
-        print("\nRunning Test: Training Integration (single step)...")
+        print("\\nRunning Test: Training Integration (single step)...")
         # --- Config ---
         vocab_size = 10
         d_model = 8
@@ -47,7 +53,7 @@ class TestTrainingIntegration(unittest.TestCase):
 
         # Get grads for a "good" candidate (just the standard policy pass)
         logits, good_value = model.forward(x, mask)
-        policy_loss = policy_loss_fn.forward(logits, y)
+        _ = policy_loss_fn.forward(logits, y)
         dlogits = policy_loss_fn.backward()
         model.backward(dlogits, np.zeros_like(good_value))
         good_grads = model.get_gradients()
@@ -55,13 +61,12 @@ class TestTrainingIntegration(unittest.TestCase):
         # Get grads for a "bad" candidate
         model.zero_grad()
         logits, bad_value = model.forward(x, mask)
-        policy_loss_bad = policy_loss_fn.forward(logits, y) # Not used, just for completeness
+        _ = policy_loss_fn.forward(logits, y)
         dlogits_bad = policy_loss_fn.backward()
         model.backward(dlogits_bad, np.zeros_like(bad_value))
-        bad_grads = model.get_gradients()
 
         # Value loss
-        value_loss = value_loss_fn.forward(good_value, bad_value)
+        _ = value_loss_fn.forward(good_value, bad_value)
         d_good, d_bad = value_loss_fn.backward()
 
         # Accumulate gradients manually

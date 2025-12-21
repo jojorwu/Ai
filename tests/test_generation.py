@@ -1,8 +1,12 @@
-import unittest
-from unittest.mock import patch, MagicMock
-import numpy as np
-import sys
+"""
+Tests for the text generation functionality.
+"""
+
 import os
+import sys
+import unittest
+from unittest.mock import patch
+import numpy as np
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -10,6 +14,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from model import Transformer
 
 class TestGeneration(unittest.TestCase):
+    """
+    Tests for the text generation functionality.
+    """
 
     def setUp(self):
         # A minimal model configuration for testing
@@ -22,7 +29,7 @@ class TestGeneration(unittest.TestCase):
             max_seq_len=100,
             dropout_rate=0.0
         )
-        print("\nRunning Test: Generation reject and rollback...")
+        print("\\nRunning Test: Generation reject and rollback...")
 
     @patch('model.Transformer.forward')
     def test_reject_and_rollback(self, mock_forward):

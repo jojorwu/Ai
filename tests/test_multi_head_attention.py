@@ -1,7 +1,11 @@
-import numpy as np
-import sys
+"""
+Tests for the MultiHeadAttention layer.
+"""
+
 import os
+import sys
 import unittest
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -9,9 +13,12 @@ from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import RotaryPositionalEmbedding
 
 class TestMultiHeadAttention(unittest.TestCase):
+    """
+    Tests for the MultiHeadAttention layer.
+    """
     def test_gqa_with_rope_backward_gradient_check(self):
         """Численная проверка градиентов для `backward` метода GQA с RoPE."""
-        print("\nRunning Test: Gradient check for GQA with RoPE backward pass...")
+        print("\\nRunning Test: Gradient check for GQA with RoPE backward pass...")
 
         batch_size, seq_len, d_model, num_heads, num_kv_heads = 2, 6, 32, 8, 2
         d_k = d_model // num_heads
@@ -36,24 +43,9 @@ class TestMultiHeadAttention(unittest.TestCase):
         # --- Численная проверка градиентов для входов (dq, dk, dv) ---
         for name, x, dx_analytic in zip(['q', 'k', 'v'], [q, k, v], [dq, dk, dv]):
             print(f"Checking gradients for input: d{name}...")
-            dx_numerical = np.zeros_like(x)
-            it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
-            while not it.finished:
-                ix = it.multi_index
-                original_value = x[ix]
-
-                x[ix] = original_value + epsilon
-                fx_plus_h = np.sum(mha.forward(q, k, v) * dout)
-
-                x[ix] = original_value - epsilon
-                fx_minus_h = np.sum(mha.forward(q, k, v) * dout)
-
-                dx_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-                x[ix] = original_value
-                it.iternext()
-
-            self.assertTrue(np.allclose(dx_analytic, dx_numerical, rtol=1e-4, atol=1e-4), f"Gradient check for d{name} FAILED")
+            dx_numerical = self._numerical_gradient_input(mha, q, k, v, x, dout, epsilon)
+            self.assertTrue(np.allclose(dx_analytic, dx_numerical, rtol=1e-4, atol=1e-4),
+                            f"Gradient check for d{name} FAILED")
             print(f"Gradient check for d{name} PASSED.")
 
         # --- Численная проверка градиентов для весов (Wq, Wk, Wv, Wo) ---
@@ -62,28 +54,53 @@ class TestMultiHeadAttention(unittest.TestCase):
             params = layer_obj.get_trainable_params()
             for p_name, (p_param, p_grad) in params.items():
                 print(f"Checking gradients for parameter: {layer_name}.{p_name}...")
-
-                grad_numerical = np.zeros_like(p_param)
-                it = np.nditer(p_param, flags=['multi_index'], op_flags=['readwrite'])
-                while not it.finished:
-                    ix = it.multi_index
-                    original_value = p_param[ix]
-
-                    p_param[ix] = original_value + epsilon
-                    fx_plus_h = np.sum(mha.forward(q, k, v) * dout)
-
-                    p_param[ix] = original_value - epsilon
-                    fx_minus_h = np.sum(mha.forward(q, k, v) * dout)
-
-                    grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-                    p_param[ix] = original_value
-                    it.iternext()
-
-                self.assertTrue(np.allclose(p_grad, grad_numerical, rtol=1e-4, atol=1e-4), f"Gradient check for {layer_name}.{p_name} FAILED")
+                grad_numerical = self._numerical_gradient_weights(mha, q, k, v, p_param, dout, epsilon)
+                self.assertTrue(np.allclose(p_grad, grad_numerical, rtol=1e-4, atol=1e-4),
+                                f"Gradient check for {layer_name}.{p_name} FAILED")
                 print(f"Gradient check for parameter {layer_name}.{p_name} PASSED.")
 
         print("All MultiHeadAttention gradient checks passed!")
+
+    def _numerical_gradient_input(self, model, q, k, v, x, dout, epsilon):
+        """Helper for numerical gradient checking of the input."""
+        dx_numerical = np.zeros_like(x)
+        it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
+        while not it.finished:
+            ix = it.multi_index
+            original_value = x[ix]
+
+            x[ix] = original_value + epsilon
+            fx_plus_h = np.sum(model.forward(q, k, v) * dout)
+
+            x[ix] = original_value - epsilon
+            fx_minus_h = np.sum(model.forward(q, k, v) * dout)
+
+            dx_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
+
+            x[ix] = original_value
+            it.iternext()
+        return dx_numerical
+
+    def _numerical_gradient_weights(self, model, q, k, v, p_param, dout, epsilon):
+        """Helper for numerical gradient checking of the weights."""
+        grad_numerical = np.zeros_like(p_param)
+        it = np.nditer(p_param, flags=['multi_index'], op_flags=['readwrite'])
+        while not it.finished:
+            ix = it.multi_index
+            original_value = p_param[ix]
+
+            p_param[ix] = original_value + epsilon
+            fx_plus_h = np.sum(model.forward(q, k, v) * dout)
+
+            p_param[ix] = original_value - epsilon
+            fx_minus_h = np.sum(model.forward(q, k, v) * dout)
+
+            grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
+
+            p_param[ix] = original_value
+            it.iternext()
+        return grad_numerical
+
 
 if __name__ == "__main__":
     unittest.main()

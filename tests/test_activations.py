@@ -1,13 +1,20 @@
-import numpy as np
-import sys
+"""
+Tests for activation functions.
+"""
+
 import os
+import sys
 import unittest
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nn_components.activations import Tanh
 
 class TestActivations(unittest.TestCase):
+    """
+    Tests for activation functions.
+    """
     def test_tanh_forward(self):
         """Test the forward pass of the Tanh activation function."""
         tanh = Tanh()
