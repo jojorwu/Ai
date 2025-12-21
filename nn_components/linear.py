@@ -62,10 +62,21 @@ class Linear:
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
         # Градиент по весам: dL/dW = dL/dY * dY/dW = x.T @ dout
-        self.dW = x_reshaped.T @ dout_reshaped
+        dW = x_reshaped.T @ dout_reshaped
 
         # Градиент по смещению: dL/db = dL/dY * dY/db = sum(dout)
-        self.db = np.sum(dout_reshaped, axis=0)
+        db = np.sum(dout_reshaped, axis=0)
+
+        # Накапливаем градиенты
+        if self.dW is None:
+            self.dW = dW
+        else:
+            self.dW += dW
+
+        if self.db is None:
+            self.db = db
+        else:
+            self.db += db
 
         # Градиент по входу: dL/dx = dL/dY * dY/dx = dout @ W.T
         dx = dout_reshaped @ self.W.T

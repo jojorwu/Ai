@@ -12,14 +12,17 @@
         "epochs": 10,
         "batch_size": 2,
         "seq_len": 32,
+        "gradient_accumulation_steps": 1,
         "data_dir": "data",
-        "weights_path": "model_weights.npz"
+        "weights_path": "model_weights.npz",
+        "checkpoint_path": "checkpoint.npz"
     },
     "optimizer": {
         "learning_rate": 0.001,
         "beta1": 0.9,
         "beta2": 0.999,
         "epsilon": 1e-8,
+        "weight_decay": 0.01,
         "max_norm": 1.0
     },
     "scheduler": {

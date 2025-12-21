@@ -61,6 +61,18 @@ class Transformer:
 
         return named_params
 
+    def zero_grad(self):
+        """Обнуляет градиенты во всех обучаемых слоях."""
+        for layer_obj in self.get_named_params().values():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+                    grad_attr_name = f"d{param_name}"
+                    if hasattr(layer_obj, grad_attr_name):
+                        # Обнуляем градиент
+                        grad_val = getattr(layer_obj, grad_attr_name)
+                        if grad_val is not None:
+                            setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
+
     def train(self):
         """Переключает все слои в режим обучения."""
         for block in self.decoder_blocks:

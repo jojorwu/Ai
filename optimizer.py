@@ -2,19 +2,19 @@ import numpy as np
 
 class Adam:
     """
-    Оптимизатор Adam (Adaptive Moment Estimation).
+    Оптимизатор Adam с поддержкой Decoupled Weight Decay (AdamW).
     """
-    def __init__(self, named_params, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
-        self.named_params = named_params  # Ожидаем словарь { 'name': layer_obj }
+    def __init__(self, named_params, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01):
+        self.named_params = named_params
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
+        self.weight_decay = weight_decay
         self.t = 0
 
         self.m = {}
         self.v = {}
-        # Инициализируем m и v для каждого обучаемого параметра
         for layer_name, layer_obj in self.named_params.items():
             if hasattr(layer_obj, 'get_trainable_params'):
                 for param_name, (weight, _) in layer_obj.get_trainable_params().items():
@@ -32,14 +32,31 @@ class Adam:
 
                     key = f"{layer_name}.{param_name}"
 
+                    # Применяем распад весов напрямую к весам (стиль AdamW)
+                    weight -= self.lr * self.weight_decay * weight
+
+                    # Обновление моментов
                     self.m[key] = self.beta1 * self.m[key] + (1 - self.beta1) * grad
                     self.v[key] = self.beta2 * self.v[key] + (1 - self.beta2) * (grad**2)
 
+                    # Коррекция смещения
                     m_hat = self.m[key] / (1 - self.beta1**self.t)
                     v_hat = self.v[key] / (1 - self.beta2**self.t)
 
-                    new_weight = weight - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+                    # Обновление весов
+                    update = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+                    new_weight = weight - update
                     setattr(layer_obj, param_name, new_weight)
+
+    def get_state(self):
+        """Возвращает состояние оптимизатора (m, v, t)."""
+        return {'m': self.m, 'v': self.v, 't': self.t}
+
+    def set_state(self, state):
+        """Устанавливает состояние оптимизатора."""
+        self.m = state['m']
+        self.v = state['v']
+        self.t = state['t']
 
 def clip_gradients(named_params, max_norm):
     """Обрезает градиенты по общей норме."""

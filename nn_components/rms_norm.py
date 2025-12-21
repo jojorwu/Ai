@@ -45,7 +45,11 @@ class RMSNorm:
         normalized_x = self.x / self.rms
 
         # 1. Градиент по gamma
-        self.dgamma = np.sum(dout * normalized_x, axis=tuple(range(dout.ndim - 1)))
+        dgamma = np.sum(dout * normalized_x, axis=tuple(range(dout.ndim - 1)))
+        if self.dgamma is None:
+            self.dgamma = dgamma
+        else:
+            self.dgamma += dgamma
 
         # 2. Градиент по нормализованному входу
         d_normalized_x = dout * self.gamma
