@@ -20,12 +20,10 @@ class TestNewLoss(unittest.TestCase):
         margin_loss = MarginRankingLoss(margin=1.0)
         y_good = np.array([2.0])
         y_bad = np.array([0.5])
-        # loss = max(0, 1.0 - (2.0 - 0.5)) = max(0, -0.5) = 0
         self.assertAlmostEqual(margin_loss.forward(y_good, y_bad), 0.0)
 
         y_good = np.array([0.5])
         y_bad = np.array([2.0])
-        # loss = max(0, 1.0 - (0.5 - 2.0)) = max(0, 2.5) = 2.5
         self.assertAlmostEqual(margin_loss.forward(y_good, y_bad), 2.5)
 
     def test_margin_ranking_loss_backward(self):

@@ -4,42 +4,24 @@ import json
 from model import Transformer
 from tokenizer import Tokenizer
 
-def main():
-    """
-    Скрипт для генерации текста с использованием двухэтапного процесса "думай, затем отвечай".
-    """
-    print("--- Запуск генерации текста в режиме 'Думай, затем отвечай' ---")
-
-    # --- 1. Загрузка конфигурации и инициализация ---
-    with open('config.json', 'r') as f:
-        config = json.load(f)
-
-    train_config = config['training']
-    gen_config = config['generation']
-    weights_path = train_config['weights_path']
-    data_dir = train_config['data_dir']
-
-    print("\n[Шаг 1/4] Загрузка токенизатора и модели...")
+def load_model_and_tokenizer(weights_path, data_dir):
+    """Загружает модель и токенизатор."""
     if not os.path.exists(weights_path):
-        print(f"Ошибка: Файл с весами '{weights_path}' не найден.")
-        return
+        raise FileNotFoundError(f"Файл с весами '{weights_path}' не найден.")
 
     tokenizer = Tokenizer(data_dir)
     vocab_size = tokenizer.vocab_size
     model, _ = Transformer.load_model(weights_path, vocab_size)
     model.eval()
+    return model, tokenizer
 
-    start_text = gen_config['start_text']
+def generate_thought(model, tokenizer, start_text, gen_config):
+    """Генерирует внутренний монолог (мысли)."""
     think_token = tokenizer.encode('<THINK>', add_special_tokens=False)
     answer_token = tokenizer.encode('<ANSWER>', add_special_tokens=False)[0]
 
-    # --- 2. Этап "Мышления" ---
-    print(f"\n[Шаг 2/4] Генерация внутреннего монолога (мыслей)...")
-
-    # Формируем промпт для мышления: <THINK> + ваш_текст
     prompt_for_thinking = think_token + tokenizer.encode(start_text)
 
-    # Генерируем мысли, пока не встретим токен <ANSWER>
     thought_tokens = []
     generated_tokens_stream = model.generate(
         prompt_for_thinking,
@@ -57,34 +39,56 @@ def main():
             break
         thought_tokens.append(token)
 
-    thought_text = tokenizer.decode(thought_tokens)
-    print(f"Сгенерированные мысли: {thought_text}")
+    return thought_tokens
 
-    # --- 3. Этап "Ответа" ---
-    print(f"\n[Шаг 3/4] Генерация финального ответа...")
+def generate_answer(model, tokenizer, start_text, thought_tokens, gen_config):
+    """Генерирует финальный ответ."""
+    think_token = tokenizer.encode('<THINK>', add_special_tokens=False)
+    answer_token = tokenizer.encode('<ANSWER>', add_special_tokens=False)[0]
 
-    # Формируем полный контекст: <THINK> + ваш_текст + мысли + <ANSWER>
     context_for_answer = think_token + tokenizer.encode(start_text) + thought_tokens + [answer_token]
 
-    # Генерируем финальный ответ, используя стандартную генерацию
     final_answer_tokens = model.generate(
         context_for_answer,
         max_len=gen_config.get('max_len', 50),
         temperature=gen_config.get('temperature', 0.8),
         top_k=gen_config.get('top_k', 0),
         top_p=gen_config.get('top_p', 0.0),
-        speculative_steps=0 # Отключаем спекулятивную генерацию для чистого ответа
+        speculative_steps=0
     )
 
-    final_answer_text = tokenizer.decode(final_answer_tokens.tolist())
+    return tokenizer.decode(final_answer_tokens.tolist())
 
-    # --- 4. Результат ---
+def main():
+    """
+    Основной скрипт для генерации текста.
+    """
+    print("--- Запуск генерации текста ---")
+
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+
+    train_config = config['training']
+    gen_config = config['generation']
+
+    print("\n[Шаг 1/4] Загрузка модели и токенизатора...")
+    model, tokenizer = load_model_and_tokenizer(train_config['weights_path'], train_config['data_dir'])
+
+    start_text = gen_config['start_text']
+
+    print("\n[Шаг 2/4] Генерация мыслей...")
+    thought_tokens = generate_thought(model, tokenizer, start_text, gen_config)
+    thought_text = tokenizer.decode(thought_tokens)
+    print(f"Сгенерированные мысли: {thought_text}")
+
+    print("\n[Шаг 3/4] Генерация ответа...")
+    final_answer_text = generate_answer(model, tokenizer, start_text, thought_tokens, gen_config)
+
     print("\n[Шаг 4/4] Результат:")
     print("="*20)
     print(f"Входной текст: {start_text}")
     print(f"Финальный ответ: {final_answer_text}")
     print("="*20)
-
 
 if __name__ == "__main__":
     main()

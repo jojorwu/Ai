@@ -36,7 +36,6 @@ def get_batches(data, batch_size, seq_len):
 
 def setup_logging():
     """Настраивает логирование в файл и в консоль."""
-    # Remove existing handlers to avoid duplicate logs
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
 
@@ -49,23 +48,11 @@ def setup_logging():
         ]
     )
 
-def _get_candidate_pass_data(model, x, y, mask, policy_loss_fn):
-    """Выполняет один проход (forward/backward) для кандидата."""
-    model.train()
-    model.zero_grad()
-
-    logits, value = model.forward(x, mask)
-    policy_loss = policy_loss_fn.forward(logits, y)
-    dlogits = policy_loss_fn.backward()
-
-    model.backward(dlogits, np.zeros_like(value))
-
-    return {'value': value, 'loss': policy_loss, 'grads': model.get_gradients()}
-
 def _accumulate_gradients(base_grads, new_grads):
     """Добавляет новые градиенты к существующим."""
     for key in base_grads:
-        base_grads[key] += new_grads[key]
+        if key in new_grads and new_grads[key] is not None:
+            base_grads[key] += new_grads[key]
     return base_grads
 
 def main():
@@ -85,7 +72,6 @@ def main():
     tokenizer = Tokenizer(train_config['data_dir'])
     vocab_size = tokenizer.vocab_size
 
-    # ... (data loading logic remains the same)
     all_text = ""
     for filename in os.listdir(train_config['data_dir']):
         if filename.endswith(".txt"):
@@ -129,30 +115,44 @@ def main():
         total_loss, total_policy_loss, total_value_loss = 0, 0, 0
 
         batch_iterator = get_batches(train_data, train_config['batch_size'], train_config['seq_len'])
-        grad_accumulator = {key: np.zeros_like(param) for key, (param, _) in model.get_named_params()['embedding'].get_trainable_params().items()}
+
+        grad_accumulator = {
+            f"{layer_name}.{param_name}": np.zeros_like(param)
+            for layer_name, layer_obj in model.get_named_params().items()
+            for param_name, (param, _) in layer_obj.get_trainable_params().items()
+        }
 
         for i, (x, y) in enumerate(batch_iterator):
             mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
 
-            # 1. Contrastive Step
-            candidates = [_get_candidate_pass_data(model, x, y, mask, policy_loss_fn) for _ in range(train_config.get('num_candidates', 4))]
-            candidates.sort(key=lambda c: c['loss'])
-            best, worst = candidates[0], candidates[-1]
+            model.train()
 
-            # 2. Calculate losses
-            policy_loss = best['loss']
-            value_loss = value_loss_fn.forward(best['value'], worst['value'])
+            candidate_logits, candidate_values, candidate_losses = [], [], []
+            for _ in range(train_config.get('num_candidates', 4)):
+                logits, value = model.forward(x, mask)
+                loss = policy_loss_fn.forward(logits, y)
+                candidate_logits.append(logits)
+                candidate_values.append(value)
+                candidate_losses.append(loss)
+
+            best_idx = np.argmin(candidate_losses)
+            worst_idx = np.argmax(candidate_losses)
+
+            best_value, worst_value = candidate_values[best_idx], candidate_values[worst_idx]
+            best_logits = candidate_logits[best_idx]
+
+            policy_loss = policy_loss_fn.forward(best_logits, y)
+            value_loss = value_loss_fn.forward(best_value, worst_value)
             d_good_v, d_bad_v = value_loss_fn.backward()
 
-            # 3. Accumulate gradients
-            final_grads = best['grads']
+            model.zero_grad()
+            dlogits = policy_loss_fn.backward()
+            model.backward(dlogits, d_good_v)
+            final_grads = model.get_gradients()
 
-            model.zero_grad(); model.eval(); _, _ = model.forward(x, mask)
-            model.backward(np.zeros_like(final_grads['embedding.W']), d_good_v)
-            final_grads = _accumulate_gradients(final_grads, model.get_gradients())
-
-            model.zero_grad(); model.eval(); _, _ = model.forward(x, mask)
-            model.backward(np.zeros_like(final_grads['embedding.W']), d_bad_v)
+            model.zero_grad()
+            _ = model.forward(x, mask)
+            model.backward(np.zeros_like(best_logits), d_bad_v)
             final_grads = _accumulate_gradients(final_grads, model.get_gradients())
 
             grad_accumulator = _accumulate_gradients(grad_accumulator, final_grads)
@@ -162,7 +162,6 @@ def main():
             total_value_loss += value_loss
 
             if (i + 1) % grad_accum_steps == 0:
-                # Normalize gradients
                 for key in grad_accumulator:
                     grad_accumulator[key] /= grad_accum_steps
 
@@ -177,7 +176,6 @@ def main():
                 grad_accumulator = {key: np.zeros_like(val) for key, val in grad_accumulator.items()}
                 current_step += 1
 
-        # --- End of Epoch ---
         avg_loss = total_loss / num_batches
         avg_policy = total_policy_loss / num_batches
         avg_value = total_value_loss / num_batches
@@ -200,7 +198,6 @@ def main():
     model.save_weights(train_config['weights_path'], config)
 
 def run_validation(model, val_data, policy_loss_fn, config):
-    """Выполняет проход по валидационным данным и возвращает средние потери."""
     model.eval()
     total_val_loss, val_batches = 0, 0
 
