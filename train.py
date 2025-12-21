@@ -129,74 +129,41 @@ def main():
         for i, (x, y) in enumerate(batch_iterator):
             model.zero_grad()
 
-            # --- Contrastive Value and Policy Training ---
-            candidate_data = []
+            candidate_data = [
+                _get_candidate_grads_and_value(model, x, y, mask, policy_loss_fn)
+                for _ in range(num_candidates)
+            ]
 
-            for _ in range(num_candidates):
-                model.train() # Ensure dropout is on
-
-                # 1. Forward pass
-                logits, value = model.forward(x, mask)
-
-                # 2. Calculate policy loss
-                policy_loss = policy_loss_fn.forward(logits, y)
-
-                # 3. Backward pass for policy loss
-                dlogits = policy_loss_fn.backward()
-                model.backward(dlogits, np.zeros_like(value))
-
-                # 4. Store gradients and other data
-                candidate_data.append({
-                    'value': value,
-                    'loss': policy_loss,
-                    'grads': model.get_gradients()
-                })
-                model.zero_grad()
-
-            # Identify best and worst candidates
             candidate_data.sort(key=lambda c: c['loss'])
             best_candidate = candidate_data[0]
             worst_candidate = candidate_data[-1]
 
-            # Get value predictions for best and worst
-            good_value = best_candidate['value']
-            bad_value = worst_candidate['value']
-
-            # Calculate contrastive loss and gradients
-            value_loss = value_loss_fn.forward(good_value, bad_value)
+            value_loss = value_loss_fn.forward(best_candidate['value'], worst_candidate['value'])
             d_good_value, d_bad_value = value_loss_fn.backward()
 
-            # Get the stored gradients for the best and worst candidates
-            best_grads = best_candidate['grads']
-            worst_grads = worst_candidate['grads']
+            # --- Correct Gradient Accumulation ---
+            # 1. Start with the gradients from the best candidate's policy loss
+            final_grads = best_candidate['grads']
 
-            # --- Accumulate Gradients ---
-            # Set the model's gradients to the 'best' candidate's policy gradients
-            model.set_gradients(best_grads)
-            # Re-run forward pass deterministically to set state for value backward pass
+            # 2. Add the gradients from the "good" value
+            model.zero_grad()
             model.eval()
             _, _ = model.forward(x, mask)
-            # Accumulate the gradient from the 'good' value
-            model.backward(np.zeros_like(logits), d_good_value)
+            model.backward(np.zeros_like(best_candidate['grads']['embedding.W']), d_good_value)
+            good_value_grads = model.get_gradients()
+            for key in final_grads:
+                final_grads[key] += good_value_grads[key]
 
-            # Get the combined gradients for the best candidate
-            accumulated_grads = model.get_gradients()
-
-            # Set the model's gradients to the 'worst' candidate's policy gradients
-            model.set_gradients(worst_grads)
-            # Re-run forward pass deterministically
+            # 3. Add the gradients from the "bad" value
+            model.zero_grad()
             model.eval()
             _, _ = model.forward(x, mask)
-            # Accumulate the gradient from the 'bad' value
-            model.backward(np.zeros_like(logits), d_bad_value)
+            model.backward(np.zeros_like(worst_candidate['grads']['embedding.W']), d_bad_value)
+            bad_value_grads = model.get_gradients()
+            for key in final_grads:
+                final_grads[key] += bad_value_grads[key]
 
-            # Add the worst candidate's gradients to the accumulated gradients
-            worst_combined_grads = model.get_gradients()
-            for key in accumulated_grads:
-                accumulated_grads[key] += worst_combined_grads[key]
-
-            # Set the final accumulated gradients to the model
-            model.set_gradients(accumulated_grads)
+            model.set_gradients(final_grads)
 
             loss = best_candidate['loss'] + value_loss
             loss = loss / gradient_accumulation_steps
@@ -224,6 +191,23 @@ def main():
 
     logging.info("[Шаг 6/6] Обучение завершено!")
     model.save_weights(train_config['weights_path'], config)
+
+def _get_candidate_grads_and_value(model, x, y, mask, policy_loss_fn):
+    """Helper to perform a single forward/backward pass and return grads and value."""
+    model.train()
+    model.zero_grad()
+
+    logits, value = model.forward(x, mask)
+    policy_loss = policy_loss_fn.forward(logits, y)
+    dlogits = policy_loss_fn.backward()
+
+    model.backward(dlogits, np.zeros_like(value))
+
+    return {
+        'value': value,
+        'loss': policy_loss,
+        'grads': model.get_gradients()
+    }
 
 def run_validation(model, val_data, policy_loss_fn, config):
     """Выполняет проход по валидационным данным и возвращает средние потери."""

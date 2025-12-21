@@ -221,22 +221,27 @@ class Transformer:
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
         all_generated_tokens = []
-        current_tokens = list(start_tokens)
+
+        # Process the initial prompt
+        prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
+        seq_len = prompt_tokens.shape[1]
+        logits, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+
+        current_seq_len = seq_len
 
         while len(all_generated_tokens) < max_len:
             cache_snapshot = kv_cache.snapshot()
-            tokens_snapshot = list(current_tokens)
 
             retries = 0
+            accepted = False
             while retries < max_retries:
                 speculative_chunk = []
                 chunk_len = min(speculative_steps, max_len - len(all_generated_tokens))
 
-                # Start generation from the current state
-                logits, _ = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=kv_cache, seq_offset=0)
+                temp_logits = logits
 
-                for _ in range(chunk_len):
-                    last_logits = logits[0, -1, :]
+                for i in range(chunk_len):
+                    last_logits = temp_logits[0, -1, :]
 
                     if temperature > 0:
                         probs = softmax(last_logits / temperature)
@@ -259,20 +264,24 @@ class Transformer:
                         token_id = np.argmax(last_logits)
 
                     speculative_chunk.append(token_id)
-                    current_tokens.append(token_id)
 
-                    logits, _ = self.forward(np.array([[token_id]]), kv_cache=kv_cache, seq_offset=len(current_tokens)-1)
+                    # Efficiently get next logits using KV Cache
+                    temp_logits, _ = self.forward(np.array([[token_id]]), kv_cache=kv_cache, seq_offset=current_seq_len + i)
 
-                _, value = self.forward(np.array(current_tokens).reshape(batch_size, -1), kv_cache=None, seq_offset=0)
+                # Evaluate the value of the sequence *with* the speculative chunk
+                _, value = self.forward(np.array([speculative_chunk]), kv_cache=kv_cache, seq_offset=current_seq_len)
 
                 if value.item() >= value_threshold:
                     all_generated_tokens.extend(speculative_chunk)
+                    current_seq_len += chunk_len
+                    logits = temp_logits
+                    accepted = True
                     break
                 else:
                     kv_cache.restore(cache_snapshot)
-                    current_tokens = tokens_snapshot
                     retries += 1
-            else:
+
+            if not accepted:
                 break
 
         return np.array(all_generated_tokens)
