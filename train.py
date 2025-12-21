@@ -81,7 +81,15 @@ def main():
                 all_text += f.read()
 
     data_tokens = tokenizer.encode(all_text)
-    logging.info(f"Данные успешно загружены. Размер словаря: {vocab_size}, Всего токенов: {len(data_tokens)}")
+
+    # Разделение данных на обучающую и валидационную выборки
+    val_split = train_config.get('validation_split', 0.0)
+    split_idx = int(len(data_tokens) * (1 - val_split))
+    train_data = data_tokens[:split_idx]
+    val_data = data_tokens[split_idx:]
+
+    logging.info(f"Данные успешно загружены. Размер словаря: {vocab_size}, всего токенов: {len(data_tokens)}")
+    logging.info(f"Обучающая выборка: {len(train_data)} токенов, Валидационная выборка: {len(val_data)} токенов")
 
     # --- 3. Инициализация модели и оптимизатора ---
     logging.info("[Шаг 2/4] Инициализация модели, функции потерь и оптимизатора...")
@@ -114,7 +122,7 @@ def main():
     # --- 5. Настройка планировщика и цикл обучения ---
     gradient_accumulation_steps = train_config.get('gradient_accumulation_steps', 1)
 
-    num_batches = len(data_tokens) // (train_config['batch_size'] * train_config['seq_len'])
+    num_batches = len(train_data) // (train_config['batch_size'] * train_config['seq_len'])
     training_steps = (num_batches // gradient_accumulation_steps) * train_config['epochs']
 
     max_lr = optim_config['learning_rate']
@@ -159,10 +167,15 @@ def main():
                 current_step += 1
 
         # Расчет и вывод средней потери за эпоху
-        # Делим на количество шагов оптимизации, а не на количество батчей
         epoch_loss = total_loss / (num_batches / gradient_accumulation_steps)
         epoch_time = time.time() - start_time
-        logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
+
+        # --- Валидация ---
+        if len(val_data) > 0:
+            val_loss = run_validation(model, val_data, loss_fn, train_config)
+            logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | Val Потери: {val_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
+        else:
+            logging.info(f"Эпоха {epoch+1}/{train_config['epochs']} | Потери: {epoch_loss:.4f} | LR: {optimizer.lr:.6f} | Время: {epoch_time:.2f}с")
 
         # Сохранение контрольной точки
         if checkpoint_path:
@@ -172,6 +185,29 @@ def main():
     logging.info("[Шаг 6/6] Обучение завершено!")
 
     model.save_weights(train_config['weights_path'], config)
+
+
+def run_validation(model, val_data, loss_fn, config):
+    """Выполняет проход по валидационным данным и возвращает средние потери."""
+    model.eval()  # Переключаем модель в режим оценки
+    total_val_loss = 0
+    val_batches = 0
+
+    batch_iterator = get_batches(val_data, config['batch_size'], config['seq_len'])
+    mask = np.triu(np.ones((config['seq_len'], config['seq_len'])), k=1).astype(bool)
+
+    for x, y in batch_iterator:
+        logits = model.forward(x, mask)
+        loss = loss_fn.forward(logits, y)
+        total_val_loss += loss
+        val_batches += 1
+
+    model.train()  # Возвращаем модель в режим обучения
+
+    if val_batches == 0:
+        return 0.0
+
+    return total_val_loss / val_batches
 
 
 if __name__ == "__main__":

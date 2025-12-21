@@ -13,6 +13,7 @@
         "batch_size": 2,
         "seq_len": 32,
         "gradient_accumulation_steps": 1,
+        "validation_split": 0.1,
         "data_dir": "data",
         "weights_path": "model_weights.npz",
         "checkpoint_path": "checkpoint.npz"
