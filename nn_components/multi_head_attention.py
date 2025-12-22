@@ -7,7 +7,7 @@ class MultiHeadAttention:
     """
     Реализация Grouped-Query Attention (GQA) слоя с Rotary Positional Embeddings (RoPE).
     """
-    def __init__(self, d_model, num_heads, num_kv_heads, rotary_emb=None):
+    def __init__(self, d_model, num_heads, num_kv_heads, rotary_emb=None, bias=True):
         assert d_model % num_heads == 0, "d_model должна делиться на num_heads без остатка."
         assert num_heads % num_kv_heads == 0, "num_heads должна делиться на num_kv_heads."
 
@@ -17,10 +17,10 @@ class MultiHeadAttention:
         self.num_q_per_kv = num_heads // num_kv_heads
         self.d_k = d_model // num_heads
 
-        self.wq = Linear(d_model, d_model)
-        self.wk = Linear(d_model, self.d_k * num_kv_heads)
-        self.wv = Linear(d_model, self.d_k * num_kv_heads)
-        self.wo = Linear(d_model, d_model)
+        self.wq = Linear(d_model, d_model, bias=bias)
+        self.wk = Linear(d_model, self.d_k * num_kv_heads, bias=bias)
+        self.wv = Linear(d_model, self.d_k * num_kv_heads, bias=bias)
+        self.wo = Linear(d_model, d_model, bias=bias)
 
         self.attention = ScaledDotProductAttention()
         self.rotary_emb = rotary_emb
