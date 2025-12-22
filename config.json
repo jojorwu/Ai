@@ -33,13 +33,13 @@
         "min_lr": 1e-5
     },
     "generation": {
-        "start_text": "Привет",
-        "max_len": 50,
-        "temperature": 0.8,
-        "top_k": 5,
-        "top_p": 0.9,
-        "speculative_steps": 5,
-        "value_threshold": -0.5,
+        "start_text": "Пожалуйста, перечисли файлы в текущей директории. Используй инструмент 'list_files'.",
+        "max_len": 100,
+        "temperature": 0.0,
+        "top_k": 1,
+        "top_p": 0.0,
+        "speculative_steps": 0,
+        "value_threshold": -1.0,
         "max_thought_len": 50,
         "max_retries": 3
     }

@@ -1,29 +1,45 @@
 import os
+import re
 
 class Tokenizer:
     """
-    Простой символьный токенизатор с поддержкой специальных токенов.
+    Простой символьный токенизатор с улучшенной поддержкой специальных токенов.
     """
     def __init__(self, data_dir):
-        self.special_tokens = ['<THINK>', '<ANSWER>']
+        # Добавляем новые специальные токены для использования инструментов
+        self.special_tokens = [
+            '<THINK>', '<ANSWER>',
+            '<TOOL_CALL>', '</TOOL_CALL>',
+            '<TOOL_OUTPUT>', '</TOOL_OUTPUT>'
+        ]
         self.chars = []
         self.char_to_idx = {}
         self.idx_to_char = {}
         self.vocab_size = 0
+
+        # Создаем регулярное выражение для поиска специальных токенов
+        self.special_token_pattern = re.compile(f"({'|'.join(re.escape(token) for token in self.special_tokens)})")
 
         self._build_vocab(data_dir)
 
     def _build_vocab(self, data_dir):
         """Строит словарь из всех .txt файлов в директории и добавляет специальные токены."""
         all_text = ""
+        # Сканируем директорию для построения словаря символов
         for filename in os.listdir(data_dir):
-            if filename.endswith(".txt"):
-                with open(os.path.join(data_dir, filename), 'r', encoding='utf-8') as f:
-                    all_text += f.read()
+            file_path = os.path.join(data_dir, filename)
+            if os.path.isfile(file_path):
+                 # Пропускаем файлы, которые не являются текстовыми
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        all_text += f.read()
+                except UnicodeDecodeError:
+                    print(f"Skipping non-text file: {filename}")
+                    continue
 
         self.chars = sorted(list(set(all_text)))
 
-        # Add special tokens to the vocabulary
+        # Добавляем специальные токены в словарь
         full_vocab = self.special_tokens + self.chars
         self.vocab_size = len(full_vocab)
 
@@ -31,28 +47,33 @@ class Tokenizer:
             self.char_to_idx[char] = i
             self.idx_to_char[i] = char
 
-    def encode(self, text, add_special_tokens=False):
+    def encode(self, text: str, add_special_tokens=False) -> list[int]:
         """
-        Преобразует строку текста в список токенов.
-        Опционально добавляет специальные токены в начало и конец.
+        Преобразует строку текста в список токенов, корректно обрабатывая
+        специальные токены внутри строки.
         """
+        if add_special_tokens:
+            text = f"<THINK>{text}<ANSWER>"
+
         tokens = []
-        if add_special_tokens:
-            tokens.append(self.char_to_idx['<THINK>'])
+        # Разбиваем текст по специальным токенам
+        parts = self.special_token_pattern.split(text)
 
-        # This is a simplified approach. A more robust tokenizer would handle
-        # special tokens within the text itself.
-        if text in self.special_tokens:
-            return [self.char_to_idx[text]]
-
-        tokens.extend([self.char_to_idx[char] for char in text])
-
-        if add_special_tokens:
-            tokens.append(self.char_to_idx['<ANSWER>'])
+        for part in parts:
+            if not part:
+                continue
+            # Если часть является специальным токеном, добавляем ее ID
+            if part in self.special_tokens:
+                tokens.append(self.char_to_idx[part])
+            # Иначе, токенизируем ее как обычные символы
+            else:
+                tokens.extend([self.char_to_idx.get(char, -1) for char in part if char in self.char_to_idx])
 
         return tokens
 
-    def decode(self, tokens):
-        """Преобразует список токенов обратно в строку."""
-        # Filter out special tokens from the decoded string for clean output
-        return "".join([self.idx_to_char[token] for token in tokens if self.idx_to_char[token] not in self.special_tokens])
+    def decode(self, tokens: list[int]) -> str:
+        """
+        Преобразует список токенов обратно в строку.
+        Специальные токены остаются в строке, что важно для контекста модели.
+        """
+        return "".join([self.idx_to_char.get(token, '') for token in tokens])

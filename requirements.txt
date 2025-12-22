@@ -2,3 +2,4 @@ numpy
 pydantic
 pypdf
 python-docx
+Pillow

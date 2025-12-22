@@ -1,104 +1,116 @@
 """
-Скрипт для генерации текста с использованием обученной модели Трансформер.
-Поддерживает генерацию "мыслей" (внутреннего монолога) перед ответом.
+Основной скрипт-агент для взаимодействия с моделью Трансформер.
+Этот скрипт управляет циклом "мысль -> инструмент -> наблюдение",
+позволяя модели использовать инструменты для выполнения задач.
 """
 
+import json
 import logging
-import os
+import re
 from copy import deepcopy
 
-from config import Config, GenerationConfig, TrainingConfig
+from config import Config, TrainingConfig
 from model import Transformer
 from tokenizer import Tokenizer
+from tools import execute_tool
 
 def setup_logging():
     """Настраивает логирование в консоль."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 def load_model_and_tokenizer(train_config: TrainingConfig):
-    """
-    Загружает модель и токенизатор.
-    Включает проверку на наличие файла с весами.
-    """
-    if not os.path.exists(train_config.weights_path):
-        logging.error("Файл с весами '%s' не найден.", train_config.weights_path)
-        raise FileNotFoundError(f"Файл с весами '{train_config.weights_path}' не найден.")
-
+    """Загружает модель и токенизатор."""
+    logging.info("Загрузка модели и токенизатора...")
     tokenizer = Tokenizer(train_config.data_dir)
     model, _ = Transformer.load_model(train_config.weights_path, tokenizer.vocab_size)
     model.eval()
+    logging.info("Модель и токенизатор успешно загружены.")
     return model, tokenizer
 
-def generate_text_stream(model: Transformer, prompt: list, gen_config: GenerationConfig, stop_token: int = None):
+def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
     """
-    Универсальная функция для потоковой генерации токенов.
+    Ищет в тексте вызов инструмента, заключенный в <TOOL_CALL>...</TOOL_CALL>,
+    и парсит его.
     """
-    generation_params = gen_config.dict()
-    # Удаляем start_text, так как он не является параметром для model.generate
-    generation_params.pop('start_text', None)
-    generation_params.pop('max_thought_len', None)
+    pattern = r"<TOOL_CALL>(.*?)</TOOL_CALL>"
+    match = re.search(pattern, text, re.DOTALL)
 
-    generated_tokens = []
-    token_stream = model.generate(prompt, **generation_params)
+    if not match:
+        return None, None
 
-    for token in token_stream:
-        if stop_token is not None and token == stop_token:
-            break
-        generated_tokens.append(token)
-
-    return generated_tokens
+    tool_call_json = match.group(1).strip()
+    try:
+        tool_call = json.loads(tool_call_json)
+        tool_name = tool_call.get("tool")
+        args = tool_call.get("args", {})
+        if not isinstance(tool_name, str) or not isinstance(args, dict):
+            return None, None
+        return tool_name, args
+    except (json.JSONDecodeError, AttributeError):
+        return None, None
 
 def main():
     """
-    Основной скрипт для генерации текста.
+    Основной цикл агента.
     """
     setup_logging()
-    logging.info("--- Запуск генерации текста ---")
 
     try:
         config = Config.from_json('config.json')
-        train_config = config.training
-        gen_config = config.generation
+        model, tokenizer = load_model_and_tokenizer(config.training)
 
-        logging.info("[Шаг 1/3] Загрузка модели и токенизатора...")
-        model, tokenizer = load_model_and_tokenizer(train_config)
+        # Начальная инструкция для модели
+        start_text = config.generation.start_text
+        logging.info(f"Начальная задача: {start_text}")
 
-        logging.info("Входной текст: %s", gen_config.start_text)
+        # Формируем начальный промпт
+        conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
 
-        # Подготовка специальных токенов
-        think_token_id = tokenizer.encode('<THINK>', add_special_tokens=False)
-        answer_token_id = tokenizer.encode('<ANSWER>', add_special_tokens=False)[0]
+        max_turns = 10  # Ограничение на количество вызовов инструментов
+        for turn in range(max_turns):
+            logging.info(f"\n--- Итерация {turn + 1} ---")
 
-        # Генерация "мыслей"
-        logging.info("[Шаг 2/3] Генерация мыслей (внутреннего монолога)...")
-        prompt_for_thinking = think_token_id + tokenizer.encode(gen_config.start_text)
+            # --- Генерация ответа модели ---
+            gen_config = deepcopy(config.generation)
+            gen_config.speculative_steps = 0 # Отключаем спекуляцию для более точных вызовов
 
-        thought_gen_config = deepcopy(gen_config)
-        thought_gen_config.max_len = thought_gen_config.max_thought_len
+            # Генерируем продолжение диалога
+            generated_tokens_stream = model.generate(
+                conversation_history_tokens,
+                **gen_config.dict()
+            )
 
-        thought_tokens = generate_text_stream(model, prompt_for_thinking, thought_gen_config, stop_token=answer_token_id)
-        thought_text = tokenizer.decode(thought_tokens)
-        logging.info("Сгенерированные мысли: %s", thought_text)
+            # Декодируем сгенерированный текст
+            generated_text = tokenizer.decode(list(generated_tokens_stream))
+            logging.info(f"Модель сгенерировала:\n{generated_text}")
 
-        # Генерация ответа
-        logging.info("[Шаг 3/3] Генерация финального ответа...")
-        prompt_for_answer = prompt_for_thinking + thought_tokens + [answer_token_id]
+            # Добавляем сгенерированные токены в историю
+            conversation_history_tokens.extend(list(generated_tokens_stream))
 
-        answer_gen_config = deepcopy(gen_config)
-        answer_gen_config.speculative_steps = 0  # Ответ генерируем без спекуляции
+            # --- Поиск и выполнение вызова инструмента ---
+            tool_name, args = parse_tool_call(generated_text)
 
-        answer_tokens = generate_text_stream(model, prompt_for_answer, answer_gen_config)
-        final_answer_text = tokenizer.decode(answer_tokens)
+            if tool_name and args is not None:
+                tool_output = execute_tool(tool_name, args)
+                logging.info(f"Вывод инструмента '{tool_name}':\n{tool_output}")
 
-        print("\\n" + "="*30)
-        print(f"  Входной текст: {gen_config.start_text}")
-        print(f"  Финальный ответ: {final_answer_text}")
-        print("="*30)
+                # Формируем и добавляем результат работы инструмента в историю
+                tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
+                tool_output_tokens = tokenizer.encode(tool_output_formatted)
+                conversation_history_tokens.extend(tool_output_tokens)
+            else:
+                # Если вызова инструмента нет, считаем, что модель дала финальный ответ
+                logging.info("\n--- Финальный ответ ---")
+                final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
+                print(final_answer)
+                break
+        else:
+            logging.warning("Достигнуто максимальное количество итераций. Завершение работы.")
 
     except FileNotFoundError as e:
-        logging.error("Ошибка: %s. Убедитесь, что модель обучена и файл 'config.json' настроен правильно.", e)
+        logging.error(f"Ошибка: {e}. Убедитесь, что модель обучена и 'config.json' настроен.")
     except Exception as e:
-        logging.error("Произошла непредвиденная ошибка: %s", e, exc_info=True)
+        logging.error(f"Произошла непредвиденная ошибка: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
