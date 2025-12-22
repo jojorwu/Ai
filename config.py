@@ -29,6 +29,8 @@ class TrainingConfig(BaseModel):
     sft_data_dir: str = Field(..., description="Директория с данными для supervised fine-tuning (этап 2).")
     weights_path: str = Field(..., description="Путь для сохранения финальных весов модели.")
     checkpoint_path: str = Field(..., description="Путь для сохранения чекпоинтов.")
+    early_stopping_patience: int = Field(3, description="Количество эпох без улучшения для ранней остановки.")
+    best_model_path: str = Field("best_model.npz", description="Путь для сохранения лучшей модели.")
 
 class OptimizerConfig(BaseModel):
     """Конфигурация оптимизатора Adam."""

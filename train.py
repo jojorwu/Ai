@@ -207,10 +207,16 @@ def main():
     model, policy_loss_fn, value_loss_fn, optimizer, max_norm = initialize_components(config, tokenizer.vocab_size)
 
     start_epoch, current_step = 0, 0
+    best_val_loss = float('inf')
+    epochs_no_improve = 0
+
     if config.training.checkpoint_path and os.path.exists(config.training.checkpoint_path):
-        state, _ = load_checkpoint(model, optimizer, config.training.checkpoint_path)
+        state, loaded_config = load_checkpoint(model, optimizer, config.training.checkpoint_path)
         if state:
-            start_epoch, current_step = state['epoch'], state['current_step']
+            start_epoch = state.get('epoch', 0)
+            current_step = state.get('current_step', 0)
+            best_val_loss = state.get('best_val_loss', float('inf'))
+            epochs_no_improve = state.get('epochs_no_improve', 0)
             logging.info(f"Возобновление с эпохи {start_epoch}, шаг {current_step}.")
 
     logging.info(f"Начало цикла обучения. Этап: {config.training.training_stage}")
@@ -237,21 +243,38 @@ def main():
             log_msg_parts.append(f", Value: {avg_value:.4f})")
         else:
             log_msg_parts.append(")")
-        log_msg_parts.extend([
-            f"LR: {optimizer.lr:.6f}",
-            f"Время: {epoch_time:.2f}с"
-        ])
+        log_msg_parts.extend([f"LR: {optimizer.lr:.6f}", f"Время: {epoch_time:.2f}с"])
 
+        val_loss = float('inf')
         if len(val_data) > 0:
             val_loss = run_validation(model, val_data, policy_loss_fn, config.training)
             log_msg_parts.append(f"Val Потери: {val_loss:.4f}")
 
         logging.info(" | ".join(log_msg_parts))
 
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+            model.save_weights(config.training.best_model_path, config.dict())
+            logging.info(f"Новая лучшая модель сохранена с Val Loss: {best_val_loss:.4f}")
+        else:
+            epochs_no_improve += 1
+
         if config.training.checkpoint_path:
-            save_checkpoint(model, optimizer, epoch + 1, current_step, config.dict(), config.training.checkpoint_path)
+            state_to_save = {
+                'epoch': epoch + 1,
+                'current_step': current_step,
+                'best_val_loss': best_val_loss,
+                'epochs_no_improve': epochs_no_improve
+            }
+            save_checkpoint(model, optimizer, state_to_save, config.dict(), config.training.checkpoint_path)
+
+        if epochs_no_improve >= config.training.early_stopping_patience:
+            logging.info(f"Ранняя остановка! Нет улучшения Val Loss в течение {epochs_no_improve} эпох.")
+            break
 
     logging.info("Обучение завершено!")
+    # Сохраняем финальную модель в любом случае
     model.save_weights(config.training.weights_path, config.dict())
 
 if __name__ == "__main__":
