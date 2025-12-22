@@ -17,7 +17,7 @@ class ModelConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     """Конфигурация процесса обучения."""
-    training_stage: int = Field(1, description="Этап обучения: 1 для pre-training, 2 для fine-tuning.")
+    training_stage: int = Field(1, description="Этап обучения: 1, 2 или 3.")
     epochs: int = Field(..., description="Количество эпох обучения.")
     batch_size: int = Field(..., description="Размер одного батча.")
     seq_len: int = Field(..., description="Длина последовательности для обучения.")
@@ -25,7 +25,8 @@ class TrainingConfig(BaseModel):
     validation_split: float = Field(..., description="Доля данных для валидации.")
     contrastive_margin: float = Field(..., description="Маржа для contrastive loss.")
     num_candidates: int = Field(..., description="Количество кандидатов для contrastive loss.")
-    data_dir: str = Field(..., description="Директория с обучающими данными.")
+    data_dir: str = Field(..., description="Директория с данными для pre-training (этап 1 и 3).")
+    sft_data_dir: str = Field(..., description="Директория с данными для supervised fine-tuning (этап 2).")
     weights_path: str = Field(..., description="Путь для сохранения финальных весов модели.")
     checkpoint_path: str = Field(..., description="Путь для сохранения чекпоинтов.")
 

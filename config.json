@@ -18,6 +18,7 @@
         "contrastive_margin": 1.0,
         "num_candidates": 4,
         "data_dir": "data",
+        "sft_data_dir": "sft_data",
         "weights_path": "model_weights.npz",
         "checkpoint_path": "checkpoint.npz"
     },

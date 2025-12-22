@@ -30,12 +30,21 @@ def setup_logging():
     )
 
 def load_and_prepare_data(config: TrainingConfig):
-    """Инициализирует токенизатор и загружает данные для обучения."""
+    """Инициализирует токенизатор и загружает данные для обучения в зависимости от этапа."""
     logging.info("Инициализация токенизатора и загрузка данных...")
+    # Токенизатор всегда инициализируется на основных данных для консистентности словаря
     tokenizer = Tokenizer(config.data_dir)
-    all_text = load_text_from_directory(config.data_dir)
+
+    if config.training_stage == 2:
+        data_path = config.sft_data_dir
+        logging.info(f"Загрузка данных для этапа 2 (SFT) из: {data_path}")
+    else:
+        data_path = config.data_dir
+        logging.info(f"Загрузка данных для этапа {config.training_stage} из: {data_path}")
+
+    all_text = load_text_from_directory(data_path)
     if not all_text:
-        raise ValueError("Не удалось загрузить текст из директории.")
+        raise ValueError(f"Не удалось загрузить текст из директории: {data_path}")
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
     split_idx = int(len(data_tokens) * (1 - config.validation_split))
     train_data, val_data = data_tokens[:split_idx], data_tokens[split_idx:]
@@ -119,8 +128,8 @@ def train_epoch_stage1(model: Transformer, data: list, policy_loss_fn, optimizer
     return avg_policy_loss, avg_policy_loss, 0.0, epoch_time, current_step
 
 
-def train_epoch_stage2(model: Transformer, data: list, loss_fns, optimizer, configs, max_norm, current_step):
-    """Выполняет одну эпоху обучения для этапа 2 (contrastive fine-tuning)."""
+def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, configs, max_norm, current_step):
+    """Выполняет одну эпоху обучения для этапа 3 (contrastive fine-tuning)."""
     train_config, scheduler_config = configs
     policy_loss_fn, value_loss_fn = loss_fns
     start_time = time.time()
@@ -206,13 +215,13 @@ def main():
 
     logging.info(f"Начало цикла обучения. Этап: {config.training.training_stage}")
     for epoch in range(start_epoch, config.training.epochs):
-        if config.training.training_stage == 1:
+        if config.training.training_stage in [1, 2]:
             avg_loss, avg_policy, avg_value, epoch_time, current_step = train_epoch_stage1(
                 model, train_data, policy_loss_fn, optimizer,
                 (config.training, config.scheduler), max_norm, current_step
             )
-        elif config.training.training_stage == 2:
-            avg_loss, avg_policy, avg_value, epoch_time, current_step = train_epoch_stage2(
+        elif config.training.training_stage == 3:
+            avg_loss, avg_policy, avg_value, epoch_time, current_step = train_epoch_stage3(
                 model, train_data, (policy_loss_fn, value_loss_fn), optimizer,
                 (config.training, config.scheduler), max_norm, current_step
             )
@@ -224,7 +233,7 @@ def main():
             f"Потери: {avg_loss:.4f}",
             f"(Policy: {avg_policy:.4f}"
         ]
-        if config.training.training_stage == 2:
+        if config.training.training_stage == 3:
             log_msg_parts.append(f", Value: {avg_value:.4f})")
         else:
             log_msg_parts.append(")")
