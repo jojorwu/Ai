@@ -6,7 +6,8 @@ import os
 import time
 import numpy as np
 
-from config import Config, TrainingConfig, SchedulerConfig
+from config import Config, TrainingConfig
+from data_loader import load_text_from_directory
 from model import Transformer
 from nn_components.loss import MarginRankingLoss, SoftmaxCrossEntropy
 from nn_components.lr_scheduler import cosine_decay_with_warmup
@@ -33,11 +34,11 @@ def load_and_prepare_data(config: TrainingConfig):
     logging.info("Инициализация токенизатора и загрузка данных...")
     tokenizer = Tokenizer(config.data_dir)
 
-    all_text = ""
-    for filename in os.listdir(config.data_dir):
-        if filename.endswith(".txt"):
-            with open(os.path.join(config.data_dir, filename), 'r', encoding='utf-8') as f:
-                all_text += f.read()
+    # Используем новый data_loader для извлечения текста
+    all_text = load_text_from_directory(config.data_dir)
+
+    if not all_text:
+        raise ValueError("Не удалось загрузить текст из директории. Убедитесь, что в ней есть файлы .txt, .pdf или .docx.")
 
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
     split_idx = int(len(data_tokens) * (1 - config.validation_split))
@@ -113,31 +114,51 @@ def train_epoch(model: Transformer, data: list, loss_fns, optimizer, configs, ma
     for i, (x, y) in enumerate(batch_iterator):
         mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
 
-        candidate_logits, candidate_values, candidate_losses = [], [], []
+        # --- ИСПРАВЛЕНИЕ ОШИБКИ ВЫЧИСЛЕНИЯ ГРАДИЕНТА ---
+
+        # 1. Фаза выбора: генерируем кандидатов в режиме обучения (со стохастичностью, например, dropout)
+        #    и находим лучшего и худшего по policy loss.
+        model.train()
+        candidate_losses = []
+        candidate_values = []
         for _ in range(train_config.num_candidates):
             logits, value = model.forward(x, mask)
             loss = policy_loss_fn.forward(logits, y)
-            candidate_logits.append(logits); candidate_values.append(value); candidate_losses.append(loss)
+            candidate_losses.append(loss)
+            candidate_values.append(value)
 
-        best_idx, worst_idx = np.argmin(candidate_losses), np.argmax(candidate_losses)
-        best_value, worst_value = candidate_values[best_idx], candidate_values[worst_idx]
+        best_idx = np.argmin(candidate_losses)
+        worst_idx = np.argmax(candidate_losses)
+        best_value = candidate_values[best_idx]
+        worst_value = candidate_values[worst_idx]
 
-        policy_loss = candidate_losses[best_idx]
+        # 2. Фаза вычисления градиентов:
+        #    Выполняем ОДИН новый forward pass в режиме обучения. Градиенты будут считаться
+        #    для этого конкретного прохода, обеспечивая консистентность состояния модели.
+        model.train()
+        logits, _ = model.forward(x, mask)
+
+        # 3. Расчет policy loss и value loss.
+        #    Policy loss считается для нового прохода.
+        #    Value loss использует значения лучшего/худшего из фазы выбора.
+        policy_loss = policy_loss_fn.forward(logits, y)
         dlogits = policy_loss_fn.backward()
 
         value_loss = value_loss_fn.forward(best_value, worst_value)
         d_good_v, d_bad_v = value_loss_fn.backward()
 
-        # Обратный проход выполняется в два этапа для накопления градиентов:
-        # 1. Градиенты от policy loss (dlogits) и от "хорошего" примера value loss (d_good_v).
+        # 4. Backward pass для policy loss и "хорошего" value loss.
+        #    Состояние модели (dropout маски и т.д.) соответствует `logits`,
+        #    для которых был вычислен `dlogits`, что исправляет ошибку.
         model.zero_grad()
         model.backward(dlogits, d_good_v)
         final_grads = model.get_gradients(flat=True)
 
-        # 2. Градиенты от "плохого" примера value loss (d_bad_v).
-        # Нам не нужен policy loss здесь, поэтому dlogits равен нулю.
-        model.zero_grad()
+        # 5. Backward pass для "плохого" value loss.
+        #    Нужен еще один forward pass, чтобы установить состояние для этого.
+        model.train()
         _ = model.forward(x, mask)
+        model.zero_grad()
         model.backward(np.zeros_like(dlogits), d_bad_v)
         final_grads = _accumulate_gradients(final_grads, model.get_gradients(flat=True))
 
@@ -147,11 +168,14 @@ def train_epoch(model: Transformer, data: list, loss_fns, optimizer, configs, ma
         total_policy_loss += policy_loss
         total_value_loss += value_loss
 
+        # 6. Обновление весов (остается без изменений)
         if (i + 1) % train_config.gradient_accumulation_steps == 0:
-            for key in grad_accumulator: grad_accumulator[key] /= train_config.gradient_accumulation_steps
+            for key, val in grad_accumulator.items():
+                if val is not None:
+                    grad_accumulator[key] = val / train_config.gradient_accumulation_steps
 
             model.set_gradients(grad_accumulator, flat=True)
-            clip_gradients(model.get_named_params(), max_norm)
+            clip_gradients(model.get_named_params(flat=False), max_norm)
 
             new_lr = cosine_decay_with_warmup(current_step, training_steps, **scheduler_config.dict())
             optimizer.lr = new_lr
@@ -161,9 +185,9 @@ def train_epoch(model: Transformer, data: list, loss_fns, optimizer, configs, ma
             grad_accumulator = {key: np.zeros_like(val) for key, val in grad_accumulator.items()}
             current_step += 1
 
-    avg_loss = total_loss / num_batches
-    avg_policy = total_policy_loss / num_batches
-    avg_value = total_value_loss / num_batches
+    avg_loss = total_loss / num_batches if num_batches > 0 else 0
+    avg_policy = total_policy_loss / num_batches if num_batches > 0 else 0
+    avg_value = total_value_loss / num_batches if num_batches > 0 else 0
     epoch_time = time.time() - start_time
 
     return avg_loss, avg_policy, avg_value, epoch_time, current_step
@@ -205,11 +229,9 @@ def main():
         logging.info(log_msg)
 
         if config.training.checkpoint_path:
-            # Передаем config.dict() для сохранения в чекпоинт
             save_checkpoint(model, optimizer, epoch, current_step, config.dict(), config.training.checkpoint_path)
 
     logging.info("Обучение завершено!")
-    # Передаем config.dict() для сохранения вместе с весами
     model.save_weights(config.training.weights_path, config.dict())
 
 if __name__ == "__main__":

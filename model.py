@@ -62,21 +62,23 @@ class Transformer:
             children[f'decoder_blocks.{i}'] = block
         return children
 
-    def get_named_params(self, obj=None, prefix=''):
+    def get_named_params(self, obj=None, prefix='', flat=False):
         """Рекурсивно собирает все обучаемые слои и их параметры с именами."""
         if obj is None:
             obj = self
 
         named_params = {}
-        # Если у объекта есть get_trainable_params, значит это конечный слой
         if hasattr(obj, 'get_trainable_params'):
-            named_params[prefix] = obj
+            if flat:
+                for param_name, params in obj.get_trainable_params().items():
+                    named_params[f"{prefix}.{param_name}"] = params
+            else:
+                named_params[prefix] = obj
 
-        # Если у объекта есть дочерние слои, рекурсивно обходим их
         if hasattr(obj, 'get_children'):
             for name, child in obj.get_children().items():
                 child_prefix = f"{prefix}.{name}" if prefix else name
-                named_params.update(self.get_named_params(child, child_prefix))
+                named_params.update(self.get_named_params(child, child_prefix, flat=flat))
 
         return named_params
 
@@ -119,23 +121,32 @@ class Transformer:
                     if load_key in state_dict:
                         setattr(layer_obj, param_name, state_dict[load_key])
 
-    def get_gradients(self):
+    def get_gradients(self, flat=False):
         """Gets the current gradients of all trainable parameters."""
         grads = {}
-        for layer_name, layer_obj in self.get_named_params().items():
+        # get_named_params(flat=False) вернет {'layer_name': layer_obj}
+        layers = self.get_named_params(flat=False)
+        for layer_name, layer_obj in layers.items():
             if hasattr(layer_obj, 'get_trainable_params'):
                 for param_name, (_, grad) in layer_obj.get_trainable_params().items():
-                    grads[f"{layer_name}.{param_name}"] = np.copy(grad)
+                    # grad может быть None, если backward еще не вызывался
+                    if grad is not None:
+                        grads[f"{layer_name}.{param_name}"] = np.copy(grad)
         return grads
 
-    def set_gradients(self, grads):
+    def set_gradients(self, grads, flat=False):
         """Sets the gradients of all trainable parameters."""
-        for layer_name, layer_obj in self.get_named_params().items():
+        if not flat:
+            raise NotImplementedError("set_gradients currently only supports flat=True")
+
+        layers = self.get_named_params(flat=False)
+        for layer_name, layer_obj in layers.items():
             if hasattr(layer_obj, 'get_trainable_params'):
                 for param_name, _ in layer_obj.get_trainable_params().items():
                     grad_attr_name = f"d{param_name}"
-                    if hasattr(layer_obj, grad_attr_name):
-                        setattr(layer_obj, grad_attr_name, grads[f"{layer_name}.{param_name}"])
+                    grad_key = f"{layer_name}.{param_name}"
+                    if hasattr(layer_obj, grad_attr_name) and grad_key in grads:
+                        setattr(layer_obj, grad_attr_name, grads[grad_key])
 
     def save_weights(self, filepath, config):
         """Сохраняет веса модели и конфигурацию в .npz файл."""
