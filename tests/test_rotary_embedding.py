@@ -1,16 +1,23 @@
-import numpy as np
-import sys
+"""
+Tests for the Rotary Positional Embedding.
+"""
+
 import os
+import sys
 import unittest
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nn_components.rotary_embedding import RotaryPositionalEmbedding, apply_rotary_pos_emb, rotary_backward
 
 class TestRotaryEmbedding(unittest.TestCase):
+    """
+    Tests for the Rotary Positional Embedding.
+    """
     def test_rotary_embedding_backward_gradient_check(self):
         """Численная проверка градиентов для `rotary_backward` функции."""
-        print("\nRunning Test: Gradient check for Rotary Positional Embedding backward pass...")
+        print("\\nRunning Test: Gradient check for Rotary Positional Embedding backward pass...")
 
         batch_size, n_heads, seq_len, dim = 2, 4, 8, 16
 
@@ -52,7 +59,8 @@ class TestRotaryEmbedding(unittest.TestCase):
             it.iternext()
 
         # 5. Сравнение
-        self.assertTrue(np.allclose(dx_analytic, dx_numerical, rtol=1e-4, atol=1e-4), "Gradient check for dx FAILED")
+        self.assertTrue(np.allclose(dx_analytic, dx_numerical, rtol=1e-4, atol=1e-4),
+                        "Gradient check for dx FAILED")
         print("Gradient check for dx PASSED.")
         print("All Rotary Embedding gradient checks passed!")
 

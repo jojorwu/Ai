@@ -1,1 +1,5 @@
 numpy
+pydantic
+PyPDF2
+python-docx
+Pillow

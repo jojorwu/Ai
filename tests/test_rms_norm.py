@@ -1,16 +1,24 @@
-import numpy as np
-import sys
+"""
+Tests for the RMSNorm layer.
+"""
+
 import os
+import sys
 import unittest
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nn_components.rms_norm import RMSNorm
+from tests.gradient_check import check_gradient, numerical_gradient
 
 class TestRMSNorm(unittest.TestCase):
+    """
+    Tests for the RMSNorm layer.
+    """
     def test_rms_norm_backward_gradient_check(self):
         """Численная проверка градиентов для `backward` метода RMSNorm."""
-        print("\nRunning Test: Gradient check for RMSNorm backward pass...")
+        print("\\nRunning Test: Gradient check for RMSNorm backward pass...")
 
         batch_size, seq_len, d_model = 2, 5, 16
 
@@ -27,36 +35,13 @@ class TestRMSNorm(unittest.TestCase):
         dx = norm.backward(dout)
         dgamma = norm.dgamma
 
-        epsilon = 1e-5
-
         # --- Численная проверка dgamma ---
-        dgamma_num = np.zeros_like(norm.gamma)
-        for i in range(d_model):
-            old_val = norm.gamma[i]
-            norm.gamma[i] = old_val + epsilon
-            fx_plus = np.sum(norm.forward(x) * dout)
-            norm.gamma[i] = old_val - epsilon
-            fx_minus = np.sum(norm.forward(x) * dout)
-            dgamma_num[i] = (fx_plus - fx_minus) / (2 * epsilon)
-            norm.gamma[i] = old_val
-        self.assertTrue(np.allclose(dgamma, dgamma_num, rtol=1e-4, atol=1e-4), "Gradient check for dgamma FAILED")
-        print("Gradient check for dgamma PASSED.")
+        dgamma_num = numerical_gradient(lambda: norm.forward(x), norm.gamma, dout)
+        check_gradient(self, dgamma, dgamma_num, "dgamma")
 
         # --- Численная проверка dx ---
-        dx_num = np.zeros_like(x)
-        it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            old_val = x[ix]
-            x[ix] = old_val + epsilon
-            fx_plus = np.sum(norm.forward(x) * dout)
-            x[ix] = old_val - epsilon
-            fx_minus = np.sum(norm.forward(x) * dout)
-            dx_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
-            x[ix] = old_val
-            it.iternext()
-        self.assertTrue(np.allclose(dx, dx_num, rtol=1e-4, atol=1e-4), "Gradient check for dx FAILED")
-        print("Gradient check for dx PASSED.")
+        dx_num = numerical_gradient(lambda: norm.forward(x), x, dout)
+        check_gradient(self, dx, dx_num, "dx")
 
         print("All RMSNorm gradient checks passed!")
 

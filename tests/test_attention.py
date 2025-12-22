@@ -1,24 +1,32 @@
-import numpy as np
-import sys
+"""
+Tests for the ScaledDotProductAttention layer.
+"""
+
 import os
+import sys
 import unittest
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from nn_components.attention import ScaledDotProductAttention
+from tests.gradient_check import check_gradient, numerical_gradient
 
 class TestAttention(unittest.TestCase):
+    """
+    Tests for the ScaledDotProductAttention layer.
+    """
     def test_attention_backward(self):
         """Численная проверка градиентов для `backward` метода."""
-        print("Running tests for ScaledDotProductAttention (Backward Pass)...")
+        print("\\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
 
         np.random.seed(42)
-        batch_size, seq_len, d_k, d_v = 2, 3, 4, 5
+        batch_size, num_heads, seq_len, d_k, d_v = 2, 8, 3, 4, 5
 
-        q = np.random.randn(batch_size, 1, seq_len, d_k) # Добавим "головы" для совместимости
-        k = np.random.randn(batch_size, 1, seq_len, d_k)
-        v = np.random.randn(batch_size, 1, seq_len, d_v)
-        dout = np.random.randn(batch_size, 1, seq_len, d_v)
+        q = np.random.randn(batch_size, num_heads, seq_len, d_k)
+        k = np.random.randn(batch_size, num_heads, seq_len, d_k)
+        v = np.random.randn(batch_size, num_heads, seq_len, d_v)
+        dout = np.random.randn(batch_size, num_heads, seq_len, d_v)
 
         attention = ScaledDotProductAttention()
 
@@ -26,45 +34,23 @@ class TestAttention(unittest.TestCase):
         _ = attention.forward(q, k, v)
         dq, dk, dv = attention.backward(dout)
 
-        # --- Численные градиенты ---
-        epsilon = 1e-6
+        # --- Численная проверка ---
+        forward_fn = lambda: attention.forward(q, k, v)
 
-        # 1. Проверка dq
-        dq_num = np.zeros_like(q)
-        it = np.nditer(q, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            old_val = q[ix]
-            q[ix] = old_val + epsilon
-            fx_plus = np.sum(attention.forward(q, k, v) * dout)
-            q[ix] = old_val - epsilon
-            fx_minus = np.sum(attention.forward(q, k, v) * dout)
-            dq_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
-            q[ix] = old_val
-            it.iternext()
+        # Check dQ
+        dq_num = numerical_gradient(forward_fn, q, dout)
+        check_gradient(self, dq, dq_num, "dQ")
 
-        # 2. Проверка dk
-        dk_num = np.zeros_like(k)
-        it = np.nditer(k, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            old_val = k[ix]
-            k[ix] = old_val + epsilon
-            fx_plus = np.sum(attention.forward(q, k, v) * dout)
-            k[ix] = old_val - epsilon
-            fx_minus = np.sum(attention.forward(q, k, v) * dout)
-            dk_num[ix] = (fx_plus - fx_minus) / (2 * epsilon)
-            k[ix] = old_val
-            it.iternext()
+        # Check dK
+        dk_num = numerical_gradient(forward_fn, k, dout)
+        check_gradient(self, dk, dk_num, "dK")
 
-        # --- Сравнение ---
-        self.assertTrue(np.allclose(dq, dq_num, rtol=1e-4, atol=1e-4), "Gradient check for dq FAILED")
-        print("Gradient check for dq PASSED.")
-        self.assertTrue(np.allclose(dk, dk_num, rtol=1e-4, atol=1e-4), "Gradient check for dk FAILED")
-        print("Gradient check for dk PASSED.")
-        # dv тривиален и менее склонен к ошибкам, но его тоже стоит проверять
+        # Check dV
+        dv_num = numerical_gradient(forward_fn, v, dout)
+        check_gradient(self, dv, dv_num, "dV")
 
-        print("All tests passed!")
+        print("All ScaledDotProductAttention gradient checks passed!")
+
 
 if __name__ == "__main__":
     unittest.main()

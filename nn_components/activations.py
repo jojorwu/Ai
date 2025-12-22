@@ -26,3 +26,13 @@ class SiLU:
         dsigmoid_dx = self.sigmoid_x * (1 - self.sigmoid_x)
         dx = self.sigmoid_x + self.x * dsigmoid_dx
         return dy * dx
+
+class Tanh:
+    """Hyperbolic tangent activation function."""
+    def forward(self, x):
+        self.output = np.tanh(x)
+        return self.output
+
+    def backward(self, dout):
+        # Derivative of tanh(x) = 1 - tanh^2(x)
+        return dout * (1 - self.output**2)

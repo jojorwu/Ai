@@ -17,22 +17,18 @@ class MultiHeadAttention:
         self.num_q_per_kv = num_heads // num_kv_heads
         self.d_k = d_model // num_heads
 
-        # Слой Wq проецирует в полную размерность для всех Q голов
         self.wq = Linear(d_model, d_model)
-        # Слои Wk и Wv проецируют в меньшую размерность для KV голов
         self.wk = Linear(d_model, self.d_k * num_kv_heads)
         self.wv = Linear(d_model, self.d_k * num_kv_heads)
         self.wo = Linear(d_model, d_model)
 
         self.attention = ScaledDotProductAttention()
         self.rotary_emb = rotary_emb
-
-        # Кеш для backward pass
         self.q_proj_no_rope = None
         self.k_proj_no_rope = None
 
-    def get_params(self):
-        """Возвращает словарь слоев для именованного сохранения и загрузки."""
+    def get_children(self):
+        """Возвращает словарь дочерних слоев."""
         return {'wq': self.wq, 'wk': self.wk, 'wv': self.wv, 'wo': self.wo}
 
     def split_heads(self, x, num_heads):
@@ -45,16 +41,12 @@ class MultiHeadAttention:
 
     @staticmethod
     def repeat_kv(x, n_rep):
-        """Повторяет головы K и V для GQA."""
         if n_rep == 1:
             return x
-        batch, n_kv_heads, seq_len, head_dim = x.shape
-        # Просто повторяем тензор n_rep раз по оси голов
         return np.repeat(x, n_rep, axis=1)
 
     def forward(self, q, k, v, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         seq_len = q.shape[1]
-
         q_proj = self.split_heads(self.wq.forward(q), self.num_heads)
         k_proj = self.split_heads(self.wk.forward(k), self.num_kv_heads)
         v_proj = self.split_heads(self.wv.forward(v), self.num_kv_heads)
@@ -66,44 +58,31 @@ class MultiHeadAttention:
             k_proj = apply_rotary_pos_emb(k_proj, cos, sin)
 
         if kv_cache is not None:
-            kv_cache.update(layer_idx, k_proj, v_proj, seq_offset)
-            k_cached, v_cached = kv_cache.get(layer_idx)
-            total_seq_len = seq_offset + seq_len
-            k_proj = k_cached[:, :, :total_seq_len, :]
-            v_proj = v_cached[:, :, :total_seq_len, :]
+            kv_cache.update(k_proj, v_proj, layer_idx, seq_offset)
+            k_proj, v_proj = kv_cache.get(layer_idx, seq_offset + seq_len)
 
         self.q_proj_no_rope = q_proj
         self.k_proj_no_rope = k_proj
-
-        # "Размножаем" KV головы для соответствия Q головам
         k_proj = self.repeat_kv(k_proj, self.num_q_per_kv)
         v_proj = self.repeat_kv(v_proj, self.num_q_per_kv)
 
         scaled_attention = self.attention.forward(q_proj, k_proj, v_proj, mask)
-
         concat_attention = self.combine_heads(scaled_attention)
-
         output = self.wo.forward(concat_attention)
-
         return output
 
     def backward(self, dout):
-        seq_len = self.q_proj_no_rope.shape[2]
-
         d_concat_attention = self.wo.backward(dout)
         d_scaled_attention = self.combine_heads_backward(d_concat_attention)
-
         dq_proj, dk_proj, dv_proj = self.attention.backward(d_scaled_attention)
 
-        # Обратный проход для repeat_kv
-        # Градиенты от "размноженных" голов нужно просто сложить
         if self.num_q_per_kv > 1:
             dk_proj = dk_proj.reshape(dk_proj.shape[0], self.num_kv_heads, self.num_q_per_kv, dk_proj.shape[2], dk_proj.shape[3]).sum(axis=2)
             dv_proj = dv_proj.reshape(dv_proj.shape[0], self.num_kv_heads, self.num_q_per_kv, dv_proj.shape[2], dv_proj.shape[3]).sum(axis=2)
 
         if self.rotary_emb is not None:
-            cos = self.rotary_emb.cos_cached[:, :, :seq_len, :]
-            sin = self.rotary_emb.sin_cached[:, :, :seq_len, :]
+            cos = self.rotary_emb.cos_cached[:, :, :self.q_proj_no_rope.shape[2], :]
+            sin = self.rotary_emb.sin_cached[:, :, :self.q_proj_no_rope.shape[2], :]
             dq_proj_no_rope = rotary_backward(dq_proj, self.q_proj_no_rope, cos, sin)
             dk_proj_no_rope = rotary_backward(dk_proj, self.k_proj_no_rope, cos, sin)
         else:
@@ -113,7 +92,6 @@ class MultiHeadAttention:
         dq = self.wq.backward(self.split_heads_backward(dq_proj_no_rope, self.num_heads))
         dk = self.wk.backward(self.split_heads_backward(dk_proj_no_rope, self.num_kv_heads))
         dv = self.wv.backward(self.split_heads_backward(dv_proj, self.num_kv_heads))
-
         return dq, dk, dv
 
     def split_heads_backward(self, x, num_heads):

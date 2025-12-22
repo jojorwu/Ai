@@ -15,7 +15,7 @@ class Adam:
 
         self.m = {}
         self.v = {}
-        for layer_name, layer_obj in self.named_params.items():
+        for layer_name, layer_obj in named_params.items():
             if hasattr(layer_obj, 'get_trainable_params'):
                 for param_name, (weight, _) in layer_obj.get_trainable_params().items():
                     key = f"{layer_name}.{param_name}"
@@ -32,21 +32,25 @@ class Adam:
 
                     key = f"{layer_name}.{param_name}"
 
-                    # Применяем распад весов напрямую к весам (стиль AdamW)
+                    # AdamW-style weight decay.
+                    # It's applied directly to the weights, separate from the gradient update.
+                    # The `-=` operation modifies the weight array in-place.
                     weight -= self.lr * self.weight_decay * weight
 
-                    # Обновление моментов
+                    # Update moments
                     self.m[key] = self.beta1 * self.m[key] + (1 - self.beta1) * grad
                     self.v[key] = self.beta2 * self.v[key] + (1 - self.beta2) * (grad**2)
 
-                    # Коррекция смещения
+                    # Bias correction
                     m_hat = self.m[key] / (1 - self.beta1**self.t)
                     v_hat = self.v[key] / (1 - self.beta2**self.t)
 
-                    # Обновление весов
+                    # Update weights with the Adam update
+                    # Note that `weight` is the already-decayed weight from the in-place operation above.
                     update = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
                     new_weight = weight - update
                     setattr(layer_obj, param_name, new_weight)
+
 
     def get_state(self):
         """Возвращает состояние оптимизатора (m, v, t)."""
@@ -63,21 +67,20 @@ def clip_gradients(named_params, max_norm):
     total_norm = 0
     param_grads = []
 
-    for layer_name, layer_obj in named_params.items():
+    for _, layer_obj in named_params.items():
         if hasattr(layer_obj, 'get_trainable_params'):
-            for param_name, (weight, grad) in layer_obj.get_trainable_params().items():
+            for _, (_, grad) in layer_obj.get_trainable_params().items():
                 if grad is not None:
                     total_norm += np.sum(grad**2)
-                    # Сохраняем ссылку на объект, имя параметра и сам градиент
-                    param_grads.append((layer_obj, param_name, grad))
 
     total_norm = np.sqrt(total_norm)
     clip_coef = max_norm / (total_norm + 1e-6)
 
     if clip_coef < 1:
-        # Обновляем градиенты в объектах слоев
-        for layer_obj, param_name, grad in param_grads:
-            # Градиенты хранятся как d<param_name>, например, self.dW
-            grad_attr_name = f"d{param_name}"
-            if hasattr(layer_obj, grad_attr_name):
-                setattr(layer_obj, grad_attr_name, grad * clip_coef)
+        for _, layer_obj in named_params.items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+                    if grad is not None:
+                        grad_attr_name = f"d{param_name}"
+                        if hasattr(layer_obj, grad_attr_name):
+                            setattr(layer_obj, grad_attr_name, grad * clip_coef)

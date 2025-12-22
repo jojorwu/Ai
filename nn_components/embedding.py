@@ -11,9 +11,6 @@ class Embedding:
         self.x_indices = None
         self.dW = None
 
-    def get_params(self):
-        return [self]
-
     def get_trainable_params(self):
         return {'W': (self.W, self.dW)}
 
@@ -28,14 +25,7 @@ class Embedding:
         """
         Обратный проход. Накапливает градиент для матрицы эмбеддингов.
         """
-        # Инициализируем градиент нулями, если он еще не существует
         if self.dW is None:
             self.dW = np.zeros_like(self.W)
-
-        # Градиент для эмбеддингов - это сумма градиентов для каждого токена.
-        # np.add.at выполняет эту операцию эффективно для повторяющихся индексов,
-        # добавляя значения к существующему градиенту.
         np.add.at(self.dW, self.x_indices, dout)
-
-        # У этого слоя нет входа, по которому нужно было бы передавать градиент дальше.
         return None
