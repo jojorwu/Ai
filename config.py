@@ -17,6 +17,7 @@ class ModelConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     """Конфигурация процесса обучения."""
+    training_stage: int = Field(1, description="Этап обучения: 1 для pre-training, 2 для fine-tuning.")
     epochs: int = Field(..., description="Количество эпох обучения.")
     batch_size: int = Field(..., description="Размер одного батча.")
     seq_len: int = Field(..., description="Длина последовательности для обучения.")

@@ -9,6 +9,7 @@
         "dropout_rate": 0.1
     },
     "training": {
+        "training_stage": 1,
         "epochs": 10,
         "batch_size": 2,
         "seq_len": 32,
