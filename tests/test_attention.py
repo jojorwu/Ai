@@ -10,6 +10,7 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from nn_components.attention import ScaledDotProductAttention
+from tests.gradient_check import check_gradient, numerical_gradient
 
 class TestAttention(unittest.TestCase):
     """
@@ -17,54 +18,39 @@ class TestAttention(unittest.TestCase):
     """
     def test_attention_backward(self):
         """Численная проверка градиентов для `backward` метода."""
-        print("Running tests for ScaledDotProductAttention (Backward Pass)...")
+        print("\\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
 
         np.random.seed(42)
-        batch_size, seq_len, d_k, d_v = 2, 3, 4, 5
+        batch_size, num_heads, seq_len, d_k, d_v = 2, 8, 3, 4, 5
 
-        q = np.random.randn(batch_size, 1, seq_len, d_k)
-        k = np.random.randn(batch_size, 1, seq_len, d_k)
-        v = np.random.randn(batch_size, 1, seq_len, d_v)
-        dout = np.random.randn(batch_size, 1, seq_len, d_v)
+        q = np.random.randn(batch_size, num_heads, seq_len, d_k)
+        k = np.random.randn(batch_size, num_heads, seq_len, d_k)
+        v = np.random.randn(batch_size, num_heads, seq_len, d_v)
+        dout = np.random.randn(batch_size, num_heads, seq_len, d_v)
 
         attention = ScaledDotProductAttention()
 
+        # --- Аналитические градиенты ---
         _ = attention.forward(q, k, v)
-        dq, dk, _ = attention.backward(dout)
+        dq, dk, dv = attention.backward(dout)
 
-        epsilon = 1e-6
+        # --- Численная проверка ---
+        forward_fn = lambda: attention.forward(q, k, v)
 
-        dq_num = self._numerical_gradient(attention, q, q, k, v, dout, epsilon)
-        dk_num = self._numerical_gradient(attention, k, q, k, v, dout, epsilon)
+        # Check dQ
+        dq_num = numerical_gradient(forward_fn, q, dout)
+        check_gradient(self, dq, dq_num, "dQ")
 
-        self.assertTrue(np.allclose(dq, dq_num, rtol=1e-4, atol=1e-4),
-                        "Gradient check for dq FAILED")
-        print("Gradient check for dq PASSED.")
-        self.assertTrue(np.allclose(dk, dk_num, rtol=1e-4, atol=1e-4),
-                        "Gradient check for dk FAILED")
-        print("Gradient check for dk PASSED.")
+        # Check dK
+        dk_num = numerical_gradient(forward_fn, k, dout)
+        check_gradient(self, dk, dk_num, "dK")
 
-        print("All tests passed!")
+        # Check dV
+        dv_num = numerical_gradient(forward_fn, v, dout)
+        check_gradient(self, dv, dv_num, "dV")
 
-    def _numerical_gradient(self, model, param, q, k, v, dout, epsilon):
-        """Helper for numerical gradient checking."""
-        grad_numerical = np.zeros_like(param)
-        it = np.nditer(param, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            original_value = param[ix]
+        print("All ScaledDotProductAttention gradient checks passed!")
 
-            param[ix] = original_value + epsilon
-            fx_plus_h = np.sum(model.forward(q, k, v) * dout)
-
-            param[ix] = original_value - epsilon
-            fx_minus_h = np.sum(model.forward(q, k, v) * dout)
-
-            grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-            param[ix] = original_value
-            it.iternext()
-        return grad_numerical
 
 if __name__ == "__main__":
     unittest.main()

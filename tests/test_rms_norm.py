@@ -10,6 +10,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nn_components.rms_norm import RMSNorm
+from tests.gradient_check import check_gradient, numerical_gradient
 
 class TestRMSNorm(unittest.TestCase):
     """
@@ -34,42 +35,15 @@ class TestRMSNorm(unittest.TestCase):
         dx = norm.backward(dout)
         dgamma = norm.dgamma
 
-        epsilon = 1e-5
-
         # --- Численная проверка dgamma ---
-        dgamma_num = self._numerical_gradient(norm, norm.gamma, x, dout, epsilon)
-        self.assertTrue(np.allclose(dgamma, dgamma_num, rtol=1e-4, atol=1e-4),
-                        "Gradient check for dgamma FAILED")
-        print("Gradient check for dgamma PASSED.")
+        dgamma_num = numerical_gradient(lambda: norm.forward(x), norm.gamma, dout)
+        check_gradient(self, dgamma, dgamma_num, "dgamma")
 
         # --- Численная проверка dx ---
-        dx_num = self._numerical_gradient(norm, x, x, dout, epsilon)
-        self.assertTrue(np.allclose(dx, dx_num, rtol=1e-4, atol=1e-4),
-                        "Gradient check for dx FAILED")
-        print("Gradient check for dx PASSED.")
+        dx_num = numerical_gradient(lambda: norm.forward(x), x, dout)
+        check_gradient(self, dx, dx_num, "dx")
 
         print("All RMSNorm gradient checks passed!")
-
-    def _numerical_gradient(self, model, param, x, dout, epsilon):
-        """Helper for numerical gradient checking."""
-        grad_numerical = np.zeros_like(param)
-        it = np.nditer(param, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            original_value = param[ix]
-
-            param[ix] = original_value + epsilon
-            fx_plus_h = np.sum(model.forward(x) * dout)
-
-            param[ix] = original_value - epsilon
-            fx_minus_h = np.sum(model.forward(x) * dout)
-
-            grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-            param[ix] = original_value
-            it.iternext()
-        return grad_numerical
-
 
 if __name__ == "__main__":
     unittest.main()
