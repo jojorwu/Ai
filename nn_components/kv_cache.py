@@ -11,7 +11,6 @@ class KVCache:
         self.d_k = d_k
         self.max_seq_len = max_seq_len
 
-        # Инициализируем пустые кэши
         self.k_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
         self.v_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
 
@@ -38,10 +37,7 @@ class KVCache:
 
     def snapshot(self):
         """Создает 'снимок' текущего состояния кэша."""
-        return {
-            'k_cache': np.copy(self.k_cache),
-            'v_cache': np.copy(self.v_cache)
-        }
+        return {'k_cache': np.copy(self.k_cache), 'v_cache': np.copy(self.v_cache)}
 
     def restore(self, snapshot):
         """Восстанавливает состояние кэша из 'снимка'."""
@@ -49,7 +45,7 @@ class KVCache:
             self.k_cache = np.copy(snapshot['k_cache'])
             self.v_cache = np.copy(snapshot['v_cache'])
         else:
-            raise ValueError("Invalid snapshot format provided for KVCache restoration.")
+            raise ValueError("Invalid snapshot format for KVCache restoration.")
 
     def copy(self):
         """Creates a deep copy of this KVCache instance."""
