@@ -8,9 +8,14 @@ class DecoderBlock:
     """
     Реализация одного блока декодера Трансформера с Dropout.
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None):
+    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None, num_layers=1):
         self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb=rotary_emb, bias=False)
         self.ffn = FeedForward(d_model, d_ff, bias=False)
+
+        # Специальная инициализация для остаточных связей
+        self.mha.wo.special_residual_init(num_layers)
+        self.ffn.w2.special_residual_init(num_layers)
+
         self.norm1 = RMSNorm(d_model)
         self.norm2 = RMSNorm(d_model)
         self.dropout1 = Dropout(dropout_rate)

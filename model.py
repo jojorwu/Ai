@@ -51,7 +51,10 @@ class Transformer:
         self.rotary_emb = RotaryPositionalEmbedding(d_k, max_seq_len)
 
         self.embedding = Embedding(vocab_size, d_model)
-        self.decoder_blocks = [DecoderBlock(d_model, num_heads, d_ff, dropout_rate, self.num_kv_heads, rotary_emb=self.rotary_emb) for _ in range(num_layers)]
+        self.decoder_blocks = [
+            DecoderBlock(d_model, num_heads, d_ff, dropout_rate, self.num_kv_heads, rotary_emb=self.rotary_emb, num_layers=num_layers)
+            for _ in range(num_layers)
+        ]
         self.final_norm = RMSNorm(d_model)
         self.value_head_linear = Linear(d_model, 1, bias=False)
         self.value_head_activation = Tanh()

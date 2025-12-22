@@ -13,13 +13,16 @@ class Linear:
             bias (bool): Использовать ли вектор смещения.
         """
         self.use_bias = bias
-        limit = np.sqrt(6 / (input_dim + output_dim))
-        self.W = np.random.uniform(-limit, limit, (input_dim, output_dim))
+        self.W = np.random.randn(input_dim, output_dim) * 0.02
         self.b = np.zeros(output_dim) if self.use_bias else None
 
         self.x = None
         self.dW = None
         self.db = None if self.use_bias else -1 # Используем -1 как флаг "не использовать"
+
+    def special_residual_init(self, num_layers):
+        """Специальная инициализация для остаточных связей, как в GPT-2."""
+        self.W = np.random.randn(*self.W.shape) * 0.02 / np.sqrt(2 * num_layers)
 
     def get_trainable_params(self):
         """Возвращает словарь с обучаемыми параметрами и их градиентами."""
