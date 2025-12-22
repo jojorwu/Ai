@@ -1,5 +1,5 @@
 numpy
 pydantic
-pypdf
+PyPDF2
 python-docx
 Pillow
