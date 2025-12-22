@@ -41,6 +41,7 @@
         "speculative_steps": 0,
         "value_threshold": -1.0,
         "max_thought_len": 50,
-        "max_retries": 3
+        "max_retries": 3,
+        "max_turns": 10
     }
 }

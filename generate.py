@@ -66,8 +66,7 @@ def main():
         # Формируем начальный промпт
         conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
 
-        max_turns = 10  # Ограничение на количество вызовов инструментов
-        for turn in range(max_turns):
+        for turn in range(config.generation.max_turns):
             logging.info(f"\n--- Итерация {turn + 1} ---")
 
             # --- Генерация ответа модели ---

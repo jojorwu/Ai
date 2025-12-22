@@ -53,6 +53,7 @@ class GenerationConfig(BaseModel):
     value_threshold: float = Field(..., description="Порог значения для принятия спекулятивной генерации.")
     max_thought_len: int = Field(..., description="Максимальная длина 'мыслей'.")
     max_retries: int = Field(..., description="Максимальное количество попыток при неудачной спекуляции.")
+    max_turns: int = Field(10, description="Максимальное количество итераций (вызовов инструментов) в цикле агента.")
 
 
 class Config(BaseModel):

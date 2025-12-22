@@ -45,6 +45,7 @@ class Transformer:
         self.d_ff = d_ff
         self.max_seq_len = max_seq_len
         self.dropout_rate = dropout_rate
+        self._flat_params_cache = None  # Кэш для плоского списка параметров
 
         d_k = d_model // num_heads
         self.rotary_emb = RotaryPositionalEmbedding(d_k, max_seq_len)
@@ -63,7 +64,14 @@ class Transformer:
         return children
 
     def get_named_params(self, obj=None, prefix='', flat=False):
-        """Рекурсивно собирает все обучаемые слои и их параметры с именами."""
+        """
+        Рекурсивно собирает все обучаемые слои и их параметры с именами.
+        Использует кэширование для плоского списка параметров.
+        """
+        # Если нужен плоский список и кэш уже есть, возвращаем его
+        if flat and self._flat_params_cache is not None:
+            return self._flat_params_cache
+
         if obj is None:
             obj = self
 
@@ -79,6 +87,10 @@ class Transformer:
             for name, child in obj.get_children().items():
                 child_prefix = f"{prefix}.{name}" if prefix else name
                 named_params.update(self.get_named_params(child, child_prefix, flat=flat))
+
+        # Если был выполнен полный обход для плоского списка, сохраняем в кэш
+        if flat and obj is self:
+            self._flat_params_cache = named_params
 
         return named_params
 
