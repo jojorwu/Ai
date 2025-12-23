@@ -14,6 +14,7 @@ from nn_components.lr_scheduler import cosine_decay_with_warmup
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
 from utils import load_checkpoint, save_checkpoint
+from agent_manager import AgentManager
 
 def setup_logging():
     """Настраивает логирование в файл и в консоль."""
@@ -232,6 +233,34 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
     epoch_time = time.time() - start_time
     return avg_loss, avg_policy, avg_value, epoch_time, current_step
 
+def train_epoch_stage4(model: Transformer, tokenizer: Tokenizer, configs):
+    """
+    Выполняет одну эпоху "агентного" обучения (этап 4).
+    """
+    train_config, _ = configs
+    start_time = time.time()
+
+    # 1. Инициализация менеджера агентов
+    # TODO: Сделать количество агентов и др. параметры настраиваемыми
+    agent_manager = AgentManager(base_model=model, num_agents=8)
+
+    # 2. Специализация агентов на данных
+    agent_manager.specialize_agents(
+        data_dir=train_config.data_dir,
+        tokenizer=tokenizer,
+        tasks_per_agent=10
+    )
+
+    # 3. Оценка и отбор лучших
+    best_agents = agent_manager.evaluate_and_select_best(top_k=4)
+
+    # 4. Слияние весов LTM
+    agent_manager.merge_agents(best_agents)
+
+    epoch_time = time.time() - start_time
+
+    # Для этого этапа возвращаем заглушки, так как "потери" здесь другие
+    return 0.0, 0.0, 0.0, epoch_time, 0 # current_step не меняется
 
 from backend import set_backend
 
@@ -272,18 +301,25 @@ def main():
                 model, train_data, (policy_loss_fn, value_loss_fn), optimizer,
                 (config.training, config.scheduler), max_norm, current_step
             )
+        elif config.training.training_stage == 4:
+            avg_loss, avg_policy, avg_value, epoch_time, current_step = train_epoch_stage4(
+                model, tokenizer, (config.training, config.scheduler)
+            )
         else:
             raise ValueError(f"Неизвестный этап обучения: {config.training.training_stage}")
 
-        log_msg_parts = [
-            f"Эпоха {epoch+1}/{config.training.epochs}",
-            f"Потери: {avg_loss:.4f}",
-            f"(Policy: {avg_policy:.4f}"
-        ]
-        if config.training.training_stage == 3:
-            log_msg_parts.append(f", Value: {avg_value:.4f})")
+        log_msg_parts = [f"Эпоха {epoch+1}/{config.training.epochs}"]
+        if config.training.training_stage == 4:
+            log_msg_parts.append("Agent evolution finished")
         else:
-            log_msg_parts.append(")")
+            log_msg_parts.extend([
+                f"Потери: {avg_loss:.4f}",
+                f"(Policy: {avg_policy:.4f}"
+            ])
+            if config.training.training_stage == 3:
+                log_msg_parts.append(f", Value: {avg_value:.4f})")
+            else:
+                log_msg_parts.append(")")
         log_msg_parts.extend([f"LR: {optimizer.lr:.6f}", f"Время: {epoch_time:.2f}с"])
 
         val_loss = float('inf')

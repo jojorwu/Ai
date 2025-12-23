@@ -64,3 +64,16 @@ class Linear:
 
         dx = dout_reshaped @ self.W.T
         return dx.reshape(original_shape)
+
+    def get_state(self):
+        """Возвращает состояние слоя (веса)."""
+        state = {'W': self.W}
+        if self.use_bias:
+            state['b'] = self.b
+        return state
+
+    def set_state(self, state):
+        """Загружает состояние слоя (веса)."""
+        self.W = state['W']
+        if self.use_bias and 'b' in state:
+            self.b = state['b']

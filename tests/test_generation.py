@@ -83,7 +83,7 @@ class TestGeneration(unittest.TestCase):
 
         # --- Test Execution ---
         start_tokens = [1, 2]
-        generated_tokens = self.model.generate(
+        generated_tokens, _, _ = self.model.generate(
             start_tokens=start_tokens,
             max_len=1,
             speculative_steps=1,

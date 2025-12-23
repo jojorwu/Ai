@@ -80,7 +80,7 @@ def main():
             gen_config.speculative_steps = 0 # Отключаем спекуляцию для более точных вызовов
 
             # Генерируем продолжение диалога
-            generated_tokens_stream = model.generate(
+            generated_tokens_stream, _, _ = model.generate(
                 conversation_history_tokens,
                 **gen_config.dict()
             )

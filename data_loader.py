@@ -48,10 +48,17 @@ def _process_file(file_path: str, handler) -> str:
     logging.info("Обработка файла: %s", os.path.basename(file_path))
     return handler(file_path)
 
-def load_text_from_directory(directory_path: str) -> str:
+def load_text_from_directory(directory_path: str, as_list: bool = False) -> str or list:
     """
-    Сканирует директорию, извлекает текст из поддерживаемых файлов в несколько потоков
-    и объединяет его в одну строку.
+    Сканирует директорию, извлекает текст из поддерживаемых файлов в несколько потоков.
+
+    Args:
+        directory_path (str): Путь к директории.
+        as_list (bool): Если True, возвращает список текстов (по одному на файл).
+                        Иначе объединяет в одну строку.
+
+    Returns:
+        str or list: Содержимое файлов.
     """
     all_text = []
     logging.info("Параллельное сканирование директории '%s' для извлечения текста...", directory_path)
@@ -88,4 +95,4 @@ def load_text_from_directory(directory_path: str) -> str:
             except Exception as exc:
                 logging.error("Ошибка при обработке файла %s: %s", path, exc)
 
-    return "\n".join(all_text)
+    return all_text if as_list else "\n".join(all_text)

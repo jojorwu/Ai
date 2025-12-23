@@ -68,3 +68,25 @@ class LongTermMemory:
                         grad_val = getattr(layer_obj, grad_attr_name)
                         if grad_val is not None:
                             setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
+
+    def get_state(self):
+        """Собирает состояние (веса) всех обучаемых слоев."""
+        state = {}
+        for name, layer in self.get_children().items():
+            state[name] = layer.get_state()
+        return state
+
+    def set_state(self, state):
+        """Загружает состояние (веса) для всех обучаемых слоев."""
+        for name, layer in self.get_children().items():
+            if name in state:
+                layer.set_state(state[name])
+
+    def reinitialize_weights(self):
+        """Переинициализирует веса всех линейных слоев."""
+        for layer in self.layers:
+            if isinstance(layer, Linear):
+                # Используем ту же инициализацию, что и в GPT-2
+                layer.W = np.random.normal(0, 0.02, layer.W.shape)
+                if layer.use_bias:
+                    layer.b = np.zeros(layer.b.shape)

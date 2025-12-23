@@ -48,6 +48,7 @@ class Transformer:
         self.d_ff = model_config.d_ff
         self.max_seq_len = model_config.max_seq_len
         self.dropout_rate = model_config.dropout_rate
+        self.ltm_config = ltm_config
         self._flat_params_cache = None
 
         d_k = self.d_model // self.num_heads
@@ -272,6 +273,10 @@ class Transformer:
         d_k = self.d_model // self.num_heads
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
+        total_surprise = 0
+        total_value = 0
+        num_updates = 0
+
         all_generated_tokens = []
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
         seq_len = prompt_tokens.shape[1]
@@ -309,11 +314,14 @@ class Transformer:
 
                         # Вычисляем норму градиента, игнорируя None значения
                         squared_grads = [np.sum(grad**2) for _, grad in ltm_params.values() if grad is not None]
+                        grad_norm = 0.0
                         if squared_grads:
                             grad_norm = np.sqrt(sum(squared_grads))
                             if grad_norm > self.ltm_surprise_threshold:
                                 self.ltm_optimizer.step(ltm_params)
 
+                        total_surprise += grad_norm
+                        num_updates += 1
 
                         # Обнуляем градиенты LTM после возможного шага оптимизатора
                         self.long_term_memory.zero_grad()
@@ -322,6 +330,8 @@ class Transformer:
                     # Шаг 3: Основной forward pass для генерации следующего токена
                     # Этот forward pass использует обновленное (возможно) состояние LTM
                     temp_logits, final_value, _ = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+                    if final_value is not None:
+                        total_value += final_value.item()
 
                 if final_value is not None and final_value.item() >= value_threshold:
                     all_generated_tokens.extend(speculative_chunk)
@@ -334,4 +344,7 @@ class Transformer:
             if not accepted:
                 break
 
-        return np.array(all_generated_tokens)
+        # Возвращаем сгенерированные токены и среднее удивление / ценность
+        avg_surprise = total_surprise / num_updates if num_updates > 0 else 0
+        avg_value = total_value / num_updates if num_updates > 0 else 0
+        return np.array(all_generated_tokens), avg_surprise, avg_value
