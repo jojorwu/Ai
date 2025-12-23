@@ -1,4 +1,4 @@
-import numpy as np
+from backend import np
 
 class ScaledDotProductAttention:
     """

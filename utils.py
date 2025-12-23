@@ -3,23 +3,21 @@ import json
 import os
 import logging
 
-def save_checkpoint(model, optimizer, epoch, current_step, config, filepath):
+def save_checkpoint(model, optimizer, training_state, config, filepath):
     """Сохраняет состояние модели, оптимизатора и обучения."""
     try:
         model_state = model.get_state()
         optimizer_state = optimizer.get_state()
 
-        training_state = {
-            'epoch': np.array(epoch),
-            'current_step': np.array(current_step)
-        }
+        # Конвертируем значения training_state в numpy массивы для сохранения
+        np_training_state = {key: np.array(value) for key, value in training_state.items()}
 
         checkpoint = {
             **model_state,
             'optimizer_m': optimizer_state['m'],
             'optimizer_v': optimizer_state['v'],
             'optimizer_t': np.array(optimizer_state['t']),
-            **training_state
+            **np_training_state
         }
 
         config_str = json.dumps(config)
@@ -50,8 +48,10 @@ def load_checkpoint(model, optimizer, filepath):
         optimizer.set_state(optimizer_state)
 
         training_state = {
-            'epoch': data['epoch'].item(),
-            'current_step': data['current_step'].item()
+            'epoch': data['epoch'].item() if 'epoch' in data else 0,
+            'current_step': data['current_step'].item() if 'current_step' in data else 0,
+            'best_val_loss': data['best_val_loss'].item() if 'best_val_loss' in data else float('inf'),
+            'epochs_no_improve': data['epochs_no_improve'].item() if 'epochs_no_improve' in data else 0
         }
 
         config = json.loads(data['config'][0])

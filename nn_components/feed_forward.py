@@ -6,10 +6,10 @@ class FeedForward:
     """
     Реализация Feed-Forward Network с SwiGLU активацией.
     """
-    def __init__(self, d_model, d_ff):
-        self.w1 = Linear(d_model, d_ff)
-        self.w2 = Linear(d_ff, d_model)
-        self.w3 = Linear(d_model, d_ff)
+    def __init__(self, d_model, d_ff, bias=True):
+        self.w1 = Linear(d_model, d_ff, bias=bias)
+        self.w2 = Linear(d_ff, d_model, bias=bias)
+        self.w3 = Linear(d_model, d_ff, bias=bias)
         self.silu = SiLU()
         self.x_w1_activated = None
         self.x_w3 = None
