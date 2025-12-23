@@ -3,3 +3,4 @@ pydantic
 PyPDF2
 python-docx
 Pillow
+cupy-cuda12x
