@@ -55,12 +55,15 @@ def load_and_prepare_data(config: TrainingConfig):
 def initialize_components(config: Config, vocab_size: int):
     """Инициализирует модель, функции потерь и оптимизатор."""
     logging.info("Инициализация модели, функций потерь и оптимизатора...")
-    model = Transformer(vocab_size=vocab_size, **config.model.dict())
+    model = Transformer(vocab_size=vocab_size, model_config=config.model, ltm_config=config.ltm)
     policy_loss_fn = SoftmaxCrossEntropy()
     value_loss_fn = MarginRankingLoss(margin=config.training.contrastive_margin)
+
+    # Конфигурация основного оптимизатора
     optim_config = config.optimizer.dict()
-    max_norm = optim_config.pop('max_norm')
-    optimizer = Adam(model.get_named_params(), **optim_config)
+    max_norm = optim_config.pop('max_norm') # max_norm не является параметром Adam
+    optimizer = Adam(**optim_config)
+
     return model, policy_loss_fn, value_loss_fn, optimizer, max_norm
 
 def get_batches(data, batch_size, seq_len):
@@ -98,7 +101,7 @@ def train_epoch_stage1(model: Transformer, data: list, policy_loss_fn, optimizer
     num_batches = len(data) // (train_config.batch_size * train_config.seq_len)
     training_steps = (num_batches // train_config.gradient_accumulation_steps) * train_config.epochs
 
-    optimizer.zero_grad()
+    model.zero_grad()
     for i, (x, y) in enumerate(batch_iterator):
         model.train()
         mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
@@ -117,10 +120,23 @@ def train_epoch_stage1(model: Transformer, data: list, policy_loss_fn, optimizer
         # Обновление весов с накоплением градиентов
         if (i + 1) % train_config.gradient_accumulation_steps == 0:
             clip_gradients(model.get_named_params(flat=False), max_norm)
-            new_lr = cosine_decay_with_warmup(current_step, training_steps, **scheduler_config.dict())
+
+            # Передаем max_lr из конфига оптимизатора
+            max_lr = optimizer.initial_lr
+            new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr=max_lr, **scheduler_config.dict())
             optimizer.lr = new_lr
-            optimizer.step()
-            optimizer.zero_grad()
+
+            # Собираем параметры и градиенты для шага оптимизатора
+            params_with_grads = {}
+            named_layers = model.get_named_params()
+            for layer_name, layer_obj in named_layers.items():
+                if hasattr(layer_obj, 'get_trainable_params'):
+                    params_with_grads.update(
+                        {f"{layer_name}.{k}": v for k, v in layer_obj.get_trainable_params().items()}
+                    )
+            optimizer.step(params_with_grads)
+
+            model.zero_grad()
             current_step += 1
 
     avg_policy_loss = total_policy_loss / num_batches if num_batches > 0 else 0
@@ -139,7 +155,7 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
     num_batches = len(data) // (train_config.batch_size * train_config.seq_len)
     training_steps = (num_batches // train_config.gradient_accumulation_steps) * train_config.epochs
 
-    optimizer.zero_grad()
+    model.zero_grad()
     for i, (x, y) in enumerate(batch_iterator):
         model.train()
 
@@ -185,10 +201,22 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
         # Обновление весов
         if (i + 1) % train_config.gradient_accumulation_steps == 0:
             clip_gradients(model.get_named_params(flat=False), max_norm)
-            new_lr = cosine_decay_with_warmup(current_step, training_steps, **scheduler_config.dict())
+
+            max_lr = optimizer.initial_lr
+            new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr=max_lr, **scheduler_config.dict())
             optimizer.lr = new_lr
-            optimizer.step()
-            optimizer.zero_grad()
+
+            # Собираем параметры и градиенты для шага оптимизатора
+            params_with_grads = {}
+            named_layers = model.get_named_params()
+            for layer_name, layer_obj in named_layers.items():
+                if hasattr(layer_obj, 'get_trainable_params'):
+                    params_with_grads.update(
+                        {f"{layer_name}.{k}": v for k, v in layer_obj.get_trainable_params().items()}
+                    )
+            optimizer.step(params_with_grads)
+
+            model.zero_grad()
             current_step += 1
 
     avg_policy = total_policy_loss / num_batches if num_batches > 0 else 0
@@ -198,11 +226,17 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
     return avg_loss, avg_policy, avg_value, epoch_time, current_step
 
 
+from backend import set_backend
+
 def main():
     """Основной скрипт для обучения модели."""
     setup_logging()
     logging.info("--- Запуск обучения модели Трансформер ---")
+
+    # Загрузка конфигурации и установка бэкенда
     config = Config.from_json('config.json')
+    set_backend(config.hardware.device)
+
     tokenizer, train_data, val_data = load_and_prepare_data(config.training)
     model, policy_loss_fn, value_loss_fn, optimizer, max_norm = initialize_components(config, tokenizer.vocab_size)
 

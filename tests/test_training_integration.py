@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model import Transformer
 from optimizer import Adam
+from config import Config
 from nn_components.loss import SoftmaxCrossEntropy
 
 class TestTrainingIntegration(unittest.TestCase):
@@ -34,7 +35,16 @@ class TestTrainingIntegration(unittest.TestCase):
         seq_len = 4
 
         # --- Model and Data ---
-        model = Transformer(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len)
+        model_config = Config.from_json('config.json').model
+        # Override with test-specific values
+        model_config.d_model = d_model
+        model_config.num_layers = num_layers
+        model_config.num_heads = num_heads
+        model_config.num_kv_heads = num_heads # Ensure consistency for the test
+        model_config.d_ff = d_ff
+        model_config.max_seq_len = max_seq_len
+
+        model = Transformer(vocab_size=vocab_size, model_config=model_config)
         x = np.random.randint(0, vocab_size, (batch_size, seq_len))
         y = np.random.randint(0, vocab_size, (batch_size, seq_len))
         mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)

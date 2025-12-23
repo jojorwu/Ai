@@ -4,6 +4,7 @@ Pydantic модели для строгой типизации и валидац
 
 import json
 from pydantic import BaseModel, Field
+from typing import Literal, Optional
 
 class ModelConfig(BaseModel):
     """Конфигурация архитектуры модели Transformer."""
@@ -14,6 +15,8 @@ class ModelConfig(BaseModel):
     d_ff: int = Field(..., description="Размерность в Feed-Forward слоях.")
     max_seq_len: int = Field(..., description="Максимальная длина последовательности.")
     dropout_rate: float = Field(..., description="Вероятность отключения нейронов в Dropout слоях.")
+    ltm_d_hidden: Optional[int] = Field(None, description="Размерность скрытого слоя в LTM.")
+    ltm_num_layers: Optional[int] = Field(None, description="Количество слоев в LTM.")
 
 class TrainingConfig(BaseModel):
     """Конфигурация процесса обучения."""
@@ -28,7 +31,7 @@ class TrainingConfig(BaseModel):
     data_dir: str = Field(..., description="Директория с данными для pre-training (этап 1 и 3).")
     sft_data_dir: str = Field(..., description="Директория с данными для supervised fine-tuning (этап 2).")
     weights_path: str = Field(..., description="Путь для сохранения финальных весов модели.")
-    checkpoint_path: str = Field(..., description="Путь для сохранения чекпоинтов.")
+    checkpoint_path: Optional[str] = Field(None, description="Путь для сохранения чекпоинтов.")
     early_stopping_patience: int = Field(3, description="Количество эпох без улучшения для ранней остановки.")
     best_model_path: str = Field("best_model.npz", description="Путь для сохранения лучшей модели.")
 
@@ -40,6 +43,19 @@ class OptimizerConfig(BaseModel):
     epsilon: float = Field(..., description="Малое значение для предотвращения деления на ноль.")
     weight_decay: float = Field(..., description="Коэффициент затухания весов (L2 регуляризация).")
     max_norm: float = Field(..., description="Максимальная норма для обрезки градиентов.")
+
+class LTMOptimizerConfig(BaseModel):
+    """Конфигурация оптимизатора Adam для LTM."""
+    learning_rate: float
+    beta1: float
+    beta2: float
+    epsilon: float
+    weight_decay: float
+
+class LTMConfig(BaseModel):
+    """Конфигурация долгосрочной памяти (LTM)."""
+    surprise_threshold: float = Field(..., description="Порог 'удивления' для обновления LTM.")
+    optimizer: LTMOptimizerConfig
 
 class SchedulerConfig(BaseModel):
     """Конфигурация планировщика скорости обучения."""
@@ -59,14 +75,19 @@ class GenerationConfig(BaseModel):
     max_retries: int = Field(..., description="Максимальное количество попыток при неудачной спекуляции.")
     max_turns: int = Field(10, description="Максимальное количество итераций (вызовов инструментов) в цикле агента.")
 
+class HardwareConfig(BaseModel):
+    """Конфигурация оборудования."""
+    device: Literal["cpu", "gpu", "mps"] = Field("cpu", description="Устройство для вычислений (cpu, gpu, mps).")
 
 class Config(BaseModel):
     """Основная конфигурационная модель."""
     model: ModelConfig
     training: TrainingConfig
     optimizer: OptimizerConfig
+    ltm: LTMConfig
     scheduler: SchedulerConfig
     generation: GenerationConfig
+    hardware: HardwareConfig
 
     @classmethod
     def from_json(cls, file_path: str) -> 'Config':

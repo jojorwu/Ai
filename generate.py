@@ -18,11 +18,12 @@ def setup_logging():
     """Настраивает логирование в консоль."""
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-def load_model_and_tokenizer(train_config: TrainingConfig):
+def load_model_and_tokenizer(config: Config):
     """Загружает модель и токенизатор."""
     logging.info("Загрузка модели и токенизатора...")
-    tokenizer = Tokenizer(train_config.data_dir)
-    model, _ = Transformer.load_model(train_config.weights_path, tokenizer.vocab_size)
+    tokenizer = Tokenizer(config.training.data_dir)
+    # Теперь load_model принимает весь конфиг
+    model = Transformer.load_model(config.training.weights_path, tokenizer.vocab_size, config)
     model.eval()
     logging.info("Модель и токенизатор успешно загружены.")
     return model, tokenizer
@@ -49,6 +50,8 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
     except (json.JSONDecodeError, AttributeError):
         return None, None
 
+from backend import set_backend
+
 def main():
     """
     Основной цикл агента.
@@ -56,8 +59,11 @@ def main():
     setup_logging()
 
     try:
+        # Загрузка конфигурации и установка бэкенда
         config = Config.from_json('config.json')
-        model, tokenizer = load_model_and_tokenizer(config.training)
+        set_backend(config.hardware.device)
+
+        model, tokenizer = load_model_and_tokenizer(config)
 
         # Начальная инструкция для модели
         start_text = config.generation.start_text

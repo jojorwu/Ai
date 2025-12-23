@@ -39,43 +39,38 @@ class Transformer:
     """
     Полная модель GPT-style (decoder-only) Трансформера.
     """
-    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len, dropout_rate=0.1, num_kv_heads=None, ltm_d_hidden=None, ltm_num_layers=None):
+    def __init__(self, vocab_size, model_config, ltm_config=None):
         self.vocab_size = vocab_size
-        self.d_model = d_model
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
-        self.d_ff = d_ff
-        self.max_seq_len = max_seq_len
-        self.dropout_rate = dropout_rate
+        self.d_model = model_config.d_model
+        self.num_layers = model_config.num_layers
+        self.num_heads = model_config.num_heads
+        self.num_kv_heads = model_config.num_kv_heads
+        self.d_ff = model_config.d_ff
+        self.max_seq_len = model_config.max_seq_len
+        self.dropout_rate = model_config.dropout_rate
         self._flat_params_cache = None
 
-        d_k = d_model // num_heads
-        self.rotary_emb = RotaryPositionalEmbedding(d_k, max_seq_len)
-        self.embedding = Embedding(vocab_size, d_model)
+        d_k = self.d_model // self.num_heads
+        self.rotary_emb = RotaryPositionalEmbedding(d_k, self.max_seq_len)
+        self.embedding = Embedding(vocab_size, self.d_model)
 
         self.long_term_memory = None
-        if ltm_d_hidden and ltm_num_layers:
-            self.long_term_memory = LongTermMemory(d_model, ltm_d_hidden, ltm_num_layers)
-            self.ltm_optimizer = Adam(learning_rate=1e-5, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01)
-            # Инициализируем состояние оптимизатора для параметров LTM
-            for name, (param, _) in self.long_term_memory.get_trainable_params().items():
-                self.ltm_optimizer.m[name] = np.zeros_like(param)
-                self.ltm_optimizer.v[name] = np.zeros_like(param)
-
-            self.ltm_surprise_threshold = 1.0 # Примерное значение
+        if model_config.ltm_d_hidden and model_config.ltm_num_layers and ltm_config:
+            self.long_term_memory = LongTermMemory(self.d_model, model_config.ltm_d_hidden, model_config.ltm_num_layers)
+            self.ltm_optimizer = Adam(**ltm_config.optimizer.dict())
+            self.ltm_surprise_threshold = ltm_config.surprise_threshold
         else:
             self.long_term_memory = None
 
 
         self.decoder_blocks = [
-            DecoderBlock(d_model, num_heads, d_ff, dropout_rate, self.num_kv_heads,
-                         rotary_emb=self.rotary_emb, num_layers=num_layers,
+            DecoderBlock(self.d_model, self.num_heads, self.d_ff, self.dropout_rate, self.num_kv_heads,
+                         rotary_emb=self.rotary_emb, num_layers=self.num_layers,
                          long_term_memory=self.long_term_memory)
-            for _ in range(num_layers)
+            for _ in range(self.num_layers)
         ]
-        self.final_norm = RMSNorm(d_model)
-        self.value_head_linear = Linear(d_model, 1, bias=False)
+        self.final_norm = RMSNorm(self.d_model)
+        self.value_head_linear = Linear(self.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
 
     def get_children(self):
@@ -193,16 +188,15 @@ class Transformer:
         print(f"Веса и конфиг модели сохранены в {filepath}")
 
     @staticmethod
-    def load_model(filepath, vocab_size):
-        """Загружает модель, ее веса и конфигурацию из .npz файла."""
+    def load_model(filepath, vocab_size, config):
+        """Загружает веса модели из .npz файла."""
+        model = Transformer(vocab_size=vocab_size, model_config=config.model, ltm_config=config.ltm)
         with np.load(filepath, allow_pickle=True) as data:
-            config_str = data['config'][0]
-            config = json.loads(config_str)
-            model_config = config['model']
-            model = Transformer(vocab_size=vocab_size, **model_config)
-            model.set_state(data)
-        print(f"Модель и веса загружены из {filepath}")
-        return model, config
+            # Отфильтровываем 'config' ключ, так как он не является весом
+            state_dict = {k: data[k] for k in data if k != 'config'}
+            model.set_state(state_dict)
+        print(f"Веса модели загружены из {filepath}")
+        return model
 
     def forward(self, x, mask=None, kv_cache=None, seq_offset=0):
         h = self.embedding.forward(x) * np.sqrt(self.d_model)

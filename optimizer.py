@@ -9,6 +9,7 @@ class Adam:
     """
     def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999,
                  epsilon=1e-8, weight_decay=0.01):
+        self.initial_lr = learning_rate
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2

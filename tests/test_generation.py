@@ -12,6 +12,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from model import Transformer
+from config import ModelConfig, LTMConfig, LTMOptimizerConfig
 
 class TestGeneration(unittest.TestCase):
     """
@@ -20,15 +21,16 @@ class TestGeneration(unittest.TestCase):
 
     def setUp(self):
         # A minimal model configuration for testing
-        self.model = Transformer(
-            vocab_size=50,
+        model_config = ModelConfig(
             d_model=32,
             num_layers=2,
             num_heads=4,
+            num_kv_heads=4,
             d_ff=64,
             max_seq_len=100,
-            dropout_rate=0.0
+            dropout_rate=0.0,
         )
+        self.model = Transformer(vocab_size=50, model_config=model_config)
         print("\\nRunning Test: Generation reject and rollback...")
 
     @patch('model.Transformer.backward')
@@ -39,17 +41,22 @@ class TestGeneration(unittest.TestCase):
         and then accepts a higher-value one on retry.
         """
         # For this test, we need a model with LTM enabled.
-        self.model = Transformer(
-            vocab_size=50,
+        model_config_ltm = ModelConfig(
             d_model=32,
             num_layers=2,
             num_heads=4,
+            num_kv_heads=4,
             d_ff=64,
             max_seq_len=100,
             dropout_rate=0.0,
             ltm_d_hidden=32,
             ltm_num_layers=2
         )
+        ltm_optimizer_config = LTMOptimizerConfig(
+            learning_rate=1e-5, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01
+        )
+        ltm_config = LTMConfig(surprise_threshold=1.0, optimizer=ltm_optimizer_config)
+        self.model = Transformer(vocab_size=50, model_config=model_config_ltm, ltm_config=ltm_config)
         # --- Mock Setup ---
         # We need to simulate the forward pass returning different values over time.
         # The first time a speculative chunk is evaluated, its value is low (-0.8).
