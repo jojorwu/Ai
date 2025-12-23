@@ -3,14 +3,16 @@ from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.feed_forward import FeedForward
 from nn_components.rms_norm import RMSNorm
 from nn_components.dropout import Dropout
+from nn_components.long_term_memory import LongTermMemory
 
 class DecoderBlock:
     """
-    Реализация одного блока декодера Трансформера с Dropout.
+    Реализация одного блока декодера Трансформера с Dropout и долгосрочной памятью.
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None, num_layers=1):
+    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None, num_layers=1, long_term_memory=None):
         self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb=rotary_emb, bias=False)
         self.ffn = FeedForward(d_model, d_ff, bias=False)
+        self.ltm = long_term_memory
 
         # Специальная инициализация для остаточных связей
         self.mha.wo.special_residual_init(num_layers)
@@ -23,7 +25,10 @@ class DecoderBlock:
 
     def get_children(self):
         """Возвращает словарь дочерних слоев."""
-        return {'mha': self.mha, 'ffn': self.ffn, 'norm1': self.norm1, 'norm2': self.norm2}
+        children = {'mha': self.mha, 'ffn': self.ffn, 'norm1': self.norm1, 'norm2': self.norm2}
+        if self.ltm:
+            children['ltm'] = self.ltm
+        return children
 
     def train(self):
         """Переключает Dropout в режим обучения."""
@@ -35,8 +40,9 @@ class DecoderBlock:
         self.dropout1.is_training = False
         self.dropout2.is_training = False
 
-    def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
-        x_norm1 = self.norm1.forward(x)
+    def forward(self, x, ltm_state, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
+        x_with_mem = x + ltm_state
+        x_norm1 = self.norm1.forward(x_with_mem)
         attn_output = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask,
                                        kv_cache=kv_cache, layer_idx=layer_idx, seq_offset=seq_offset)
         x = x + self.dropout1.forward(attn_output)
@@ -60,5 +66,9 @@ class DecoderBlock:
         dq, dk, dv = self.mha.backward(d_attn_output)
         d_x_norm1 = dq + dk + dv
         dx_from_norm1 = self.norm1.backward(d_x_norm1)
-        dx = dx_from_norm1 + dx_residual1
-        return dx
+
+        d_x_with_mem = dx_from_norm1
+        dx = d_x_with_mem + dx_residual1
+        d_ltm_state = np.sum(d_x_with_mem, axis=1, keepdims=True)
+
+        return dx, d_ltm_state

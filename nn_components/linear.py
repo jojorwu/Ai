@@ -31,6 +31,10 @@ class Linear:
             params['b'] = (self.b, self.db)
         return params
 
+    def get_named_params(self, prefix=''):
+        """Возвращает словарь с именем и самим слоем."""
+        return {prefix: self}
+
     def forward(self, x):
         """Прямой проход."""
         self.x = x

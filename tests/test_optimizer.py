@@ -19,10 +19,9 @@ class TestOptimizer(unittest.TestCase):
 
         # Создаем простой линейный слой
         linear_layer = Linear(input_size, output_size)
-        named_params = {'linear': linear_layer}
 
         # Инициализируем оптимизатор
-        optimizer = Adam(named_params, learning_rate=learning_rate)
+        optimizer = Adam(learning_rate=learning_rate)
 
         # Создаем фиктивные данные
         x = np.random.randn(1, input_size)
@@ -36,7 +35,7 @@ class TestOptimizer(unittest.TestCase):
         weights_before = np.copy(linear_layer.W)
 
         # Делаем шаг
-        optimizer.step()
+        optimizer.step(linear_layer.get_trainable_params())
 
         # Получаем веса после шага
         weights_after = linear_layer.W

@@ -41,7 +41,7 @@ class TestTrainingIntegration(unittest.TestCase):
 
         # --- Loss and Optimizer ---
         policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer = Adam(model.get_named_params(), learning_rate=0.001)
+        optimizer = Adam(learning_rate=0.001)
 
         # --- Get initial weights ---
         initial_weights = np.copy(model.decoder_blocks[0].ffn.w1.W)
@@ -61,7 +61,15 @@ class TestTrainingIntegration(unittest.TestCase):
         model.backward(dlogits, np.zeros_like(value))
 
         # Optimizer step
-        optimizer.step()
+        params_with_grads = {}
+        named_layers = model.get_named_params()
+        for layer_name, layer_obj in named_layers.items():
+            if hasattr(layer_obj, 'get_trainable_params'):
+                 params_with_grads.update(
+                    {f"{layer_name}.{k}": v for k, v in layer_obj.get_trainable_params().items()}
+                )
+        optimizer.step(params_with_grads)
+
 
         # --- Check if weights have been updated ---
         updated_weights = model.decoder_blocks[0].ffn.w1.W

@@ -31,12 +31,25 @@ class TestGeneration(unittest.TestCase):
         )
         print("\\nRunning Test: Generation reject and rollback...")
 
+    @patch('model.Transformer.backward')
     @patch('model.Transformer.forward')
-    def test_reject_and_rollback(self, mock_forward):
+    def test_reject_and_rollback(self, mock_forward, mock_backward):
         """
         Tests that the generation process correctly rejects a low-value chunk
         and then accepts a higher-value one on retry.
         """
+        # For this test, we need a model with LTM enabled.
+        self.model = Transformer(
+            vocab_size=50,
+            d_model=32,
+            num_layers=2,
+            num_heads=4,
+            d_ff=64,
+            max_seq_len=100,
+            dropout_rate=0.0,
+            ltm_d_hidden=32,
+            ltm_num_layers=2
+        )
         # --- Mock Setup ---
         # We need to simulate the forward pass returning different values over time.
         # The first time a speculative chunk is evaluated, its value is low (-0.8).
