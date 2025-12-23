@@ -74,11 +74,11 @@ class TestGeneration(unittest.TestCase):
         # The mock will be called multiple times. We set up the sequence of return values.
         mock_forward.side_effect = [
             # Initial prompt processing
-            (mock_logits_1, None),
+            (mock_logits_1, None, 0.0),
             # 1st speculative attempt (generates 1 token, gets a low value)
-            (mock_logits_2, mock_value_low),
+            (mock_logits_2, mock_value_low, 0.0),
             # 2nd speculative attempt (generates 1 token, gets a high value)
-            (mock_logits_3, mock_value_high)
+            (mock_logits_3, mock_value_high, 0.0)
         ]
 
         # --- Test Execution ---

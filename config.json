@@ -6,7 +6,9 @@
         "num_kv_heads": 2,
         "d_ff": 256,
         "max_seq_len": 128,
-        "dropout_rate": 0.1
+        "dropout_rate": 0.1,
+        "num_experts": 8,
+        "top_k_experts": 2
     },
     "training": {
         "training_stage": 3,
@@ -22,7 +24,8 @@
         "weights_path": "model_weights.npz",
         "checkpoint_path": "checkpoint.npz",
         "early_stopping_patience": 3,
-        "best_model_path": "best_model.npz"
+        "best_model_path": "best_model.npz",
+        "moe_aux_loss_coeff": 0.01
     },
     "optimizer": {
         "learning_rate": 0.0001,

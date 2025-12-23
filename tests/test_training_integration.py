@@ -54,14 +54,15 @@ class TestTrainingIntegration(unittest.TestCase):
         optimizer = Adam(learning_rate=0.001)
 
         # --- Get initial weights ---
-        initial_weights = np.copy(model.decoder_blocks[0].ffn.w1.W)
+        # Accessing the weights of the first expert in the MoE layer
+        initial_weights = np.copy(model.decoder_blocks[0].moe_layer.experts[0].w1.W)
 
         # --- Perform a single training step ---
         model.train()
         model.zero_grad()
 
         # Forward pass
-        logits, value = model.forward(x, mask)
+        logits, value, _ = model.forward(x, mask)
 
         # Policy loss calculation
         _ = policy_loss_fn.forward(logits, y)
@@ -82,7 +83,7 @@ class TestTrainingIntegration(unittest.TestCase):
 
 
         # --- Check if weights have been updated ---
-        updated_weights = model.decoder_blocks[0].ffn.w1.W
+        updated_weights = model.decoder_blocks[0].moe_layer.experts[0].w1.W
 
         self.assertFalse(np.allclose(initial_weights, updated_weights),
                          "Weights were not updated after a training step.")

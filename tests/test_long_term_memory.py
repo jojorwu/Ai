@@ -51,13 +51,12 @@ class TestLongTermMemory(unittest.TestCase):
 
             # Calculate numerical gradient
             numerical_grad_val = numerical_gradient(
-                lambda: forward_pass_for_grad_check(),
+                forward_pass_for_grad_check,
                 param,
                 dout
             )
 
             check_gradient(self, analytical_grad, numerical_grad_val, param_name)
-
         print("LTM Backward Pass Gradient Check PASSED.")
 
 if __name__ == '__main__':

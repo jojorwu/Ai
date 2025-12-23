@@ -85,7 +85,7 @@ def run_validation(model: Transformer, val_data: list, loss_fn: SoftmaxCrossEntr
     batch_iterator = get_batches(val_data, config.batch_size, config.seq_len)
     for x, y in batch_iterator:
         mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
-        logits, _ = model.forward(x, mask)
+        logits, _, _ = model.forward(x, mask)
         total_loss += loss_fn.forward(logits, y)
         num_batches += 1
     model.train()
@@ -107,9 +107,12 @@ def train_epoch_stage1(model: Transformer, data: list, policy_loss_fn, optimizer
         mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
 
         # Прямой проход
-        logits, _ = model.forward(x, mask)
+        logits, _, aux_loss = model.forward(x, mask)
         policy_loss = policy_loss_fn.forward(logits, y)
-        total_policy_loss += policy_loss
+
+        # Добавляем вспомогательную потерю MoE
+        total_loss = policy_loss + train_config.moe_aux_loss_coeff * aux_loss
+        total_policy_loss += total_loss
 
         # Обратный проход
         dlogits = policy_loss_fn.backward()
@@ -167,7 +170,7 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
         mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
 
         # Прямой проход для всех кандидатов
-        logits, values = model.forward(x_expanded, mask)
+        logits, values, aux_loss = model.forward(x_expanded, mask)
 
         # Векторизованный выбор лучших/худших
         candidate_losses = policy_loss_fn.forward(logits, y_expanded, reduction='none')
@@ -181,8 +184,12 @@ def train_epoch_stage3(model: Transformer, data: list, loss_fns, optimizer, conf
         # Расчет потерь
         policy_loss = np.mean(candidate_losses[best_global_indices])
         value_loss = value_loss_fn.forward(values[best_global_indices], values[worst_global_indices])
-        total_policy_loss += policy_loss
-        total_value_loss += value_loss
+
+        # Добавляем вспомогательную потерю MoE
+        total_loss = policy_loss + value_loss + train_config.moe_aux_loss_coeff * aux_loss
+
+        total_policy_loss += policy_loss # Отдельно для логирования
+        total_value_loss += value_loss   # Отдельно для логирования
 
         # Расчет и маскирование градиентов
         dlogits = policy_loss_fn.backward()

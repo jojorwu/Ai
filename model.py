@@ -64,9 +64,12 @@ class Transformer:
 
 
         self.decoder_blocks = [
-            DecoderBlock(self.d_model, self.num_heads, self.d_ff, self.dropout_rate, self.num_kv_heads,
+            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff,
+                         dropout_rate=self.dropout_rate, num_kv_heads=self.num_kv_heads,
                          rotary_emb=self.rotary_emb, num_layers=self.num_layers,
-                         long_term_memory=self.long_term_memory)
+                         long_term_memory=self.long_term_memory,
+                         num_experts=model_config.num_experts,
+                         top_k_experts=model_config.top_k_experts)
             for _ in range(self.num_layers)
         ]
         self.final_norm = RMSNorm(self.d_model)
@@ -211,14 +214,11 @@ class Transformer:
 
         current_ltm_state = self.initial_ltm_state
         self.ltm_states_history = [current_ltm_state]
+        total_aux_loss = 0
 
         for i, block in enumerate(self.decoder_blocks):
-            h = block.forward(h, current_ltm_state, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
-            # В текущей реализации состояние LTM не меняется между блоками,
-            # но можно было бы реализовать и такую логику.
-            # current_ltm_state = new_ltm_state
-            # self.ltm_states_history.append(current_ltm_state)
-
+            h, aux_loss = block.forward(h, current_ltm_state, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
+            total_aux_loss += aux_loss
 
         h = self.final_norm.forward(h)
         self.final_norm_output = h
@@ -228,7 +228,7 @@ class Transformer:
         value_hidden = self.value_head_linear.forward(last_token_hidden_state)
         value = self.value_head_activation.forward(value_hidden)
 
-        return logits, value
+        return logits, value, total_aux_loss
 
     def backward(self, dlogits, dvalue):
         x_norm_reshaped = self.final_norm_output.reshape(-1, self.d_model)
@@ -246,6 +246,7 @@ class Transformer:
         dx = self.final_norm.backward(dx)
 
         total_d_ltm_state = 0
+        # Градиент для aux_loss пока не передается, так как backward MoE упрощен
         for block in reversed(self.decoder_blocks):
             dx, d_ltm_state_block = block.backward(dx)
             total_d_ltm_state += d_ltm_state_block
@@ -274,7 +275,7 @@ class Transformer:
         all_generated_tokens = []
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
         seq_len = prompt_tokens.shape[1]
-        logits, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+        logits, _, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
         current_seq_len = seq_len
 
         while len(all_generated_tokens) < max_len:
@@ -296,7 +297,7 @@ class Transformer:
                         self.zero_grad()
                         self.long_term_memory.zero_grad()
 
-                        logits_for_grad, token_val = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+                        logits_for_grad, token_val, _ = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
 
                         # Обратный проход только для получения градиента LTM
                         d_val = np.ones_like(token_val)
@@ -320,7 +321,7 @@ class Transformer:
 
                     # Шаг 3: Основной forward pass для генерации следующего токена
                     # Этот forward pass использует обновленное (возможно) состояние LTM
-                    temp_logits, final_value = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+                    temp_logits, final_value, _ = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
 
                 if final_value is not None and final_value.item() >= value_threshold:
                     all_generated_tokens.extend(speculative_chunk)

@@ -17,6 +17,8 @@ class ModelConfig(BaseModel):
     dropout_rate: float = Field(..., description="Вероятность отключения нейронов в Dropout слоях.")
     ltm_d_hidden: Optional[int] = Field(None, description="Размерность скрытого слоя в LTM.")
     ltm_num_layers: Optional[int] = Field(None, description="Количество слоев в LTM.")
+    num_experts: Optional[int] = Field(None, description="Количество 'экспертов' в слое MoE.")
+    top_k_experts: Optional[int] = Field(None, description="Количество выбираемых 'экспертов' для каждого токена.")
 
 class TrainingConfig(BaseModel):
     """Конфигурация процесса обучения."""
@@ -34,6 +36,7 @@ class TrainingConfig(BaseModel):
     checkpoint_path: Optional[str] = Field(None, description="Путь для сохранения чекпоинтов.")
     early_stopping_patience: int = Field(3, description="Количество эпох без улучшения для ранней остановки.")
     best_model_path: str = Field("best_model.npz", description="Путь для сохранения лучшей модели.")
+    moe_aux_loss_coeff: float = Field(0.01, description="Коэффициент для вспомогательной 'балансировочной' потери MoE.")
 
 class OptimizerConfig(BaseModel):
     """Конфигурация оптимизатора Adam."""
