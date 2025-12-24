@@ -3,8 +3,10 @@ Main agent script for interacting with the Transformer model.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
+import argparse
 import json
 import logging
+import os
 import re
 from copy import deepcopy
 
@@ -20,11 +22,57 @@ def setup_logging():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
-def load_model_and_tokenizer(config: Config):
-    """Loads the model and tokenizer."""
-    logging.info("Loading model and tokenizer...")
+def select_model_interactively() -> str | None:
+    """
+    Lists available models in the 'models' directory and prompts the user to select one.
+    Returns the name of the selected model or None if no models are found.
+    """
+    models_dir = 'models'
+    if not os.path.isdir(models_dir) or not os.listdir(models_dir):
+        logging.error(f"No models found in the '{models_dir}' directory.")
+        return None
+
+    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+
+    if not available_models:
+        logging.error(f"No valid model directories found in '{models_dir}'.")
+        return None
+    if len(available_models) == 1:
+        logging.info(f"Automatically selecting the only available model: {available_models[0]}")
+        return available_models[0]
+
+    print("Available models:")
+    for i, model_name in enumerate(available_models):
+        print(f"  {i + 1}: {model_name}")
+
+    while True:
+        try:
+            choice = int(input("Please select a model by number: "))
+            if 1 <= choice <= len(available_models):
+                return available_models[choice - 1]
+            print("Invalid number. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except (KeyboardInterrupt, EOFError):
+            print("\nSelection cancelled.")
+            return None
+
+
+def load_model_and_tokenizer(model_name: str, config: Config):
+    """Loads the model and tokenizer for a specific model."""
+    logging.info(f"Loading model '{model_name}' and tokenizer...")
+    model_dir = os.path.join('models', model_name)
+
+    # Prioritize best_model.npz, fall back to model.npz
+    weights_path = os.path.join(model_dir, 'best_model.npz')
+    if not os.path.exists(weights_path):
+        weights_path = os.path.join(model_dir, 'model.npz')
+        if not os.path.exists(weights_path):
+            raise FileNotFoundError(f"No weights file ('best_model.npz' or 'model.npz') "
+                                    f"found in {model_dir}")
+
     tokenizer = Tokenizer(config.evolution.data_dir)
-    model = Transformer.load_model(config.evolution.weights_path, tokenizer.vocab_size, config)
+    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
@@ -54,16 +102,29 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
 
 
 def main():
-    """
-    Main agent loop.
-    """
+    """Main agent loop."""
     setup_logging()
+    parser = argparse.ArgumentParser(description="Interact with a trained Transformer model.")
+    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
+    args = parser.parse_args()
 
     try:
-        config = Config.from_json('config.json')
+        model_name = args.model_name
+        if not model_name:
+            model_name = select_model_interactively()
+            if not model_name:
+                return  # Exit if no model was selected
+
+        model_dir = os.path.join('models', model_name)
+        config_path = os.path.join(model_dir, 'config.json')
+
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+
+        config = Config.from_json(config_path)
         set_backend(config.hardware.device)
 
-        model, tokenizer = load_model_and_tokenizer(config)
+        model, tokenizer = load_model_and_tokenizer(model_name, config)
 
         start_text = config.generation.start_text
         logging.info(f"Initial task: {start_text}")
@@ -74,24 +135,21 @@ def main():
             logging.info(f"\n--- Iteration {turn + 1} ---")
 
             gen_config = deepcopy(config.generation)
-            gen_config.speculative_steps = 0  # Disable speculation for more precise calls
+            gen_config.speculative_steps = 0
 
             generated_tokens_stream = model.generate(
                 conversation_history_tokens,
                 **gen_config.model_dump()
             )
-
             generated_text = tokenizer.decode(list(generated_tokens_stream))
             logging.info(f"Model generated:\n{generated_text}")
 
-            conversation_history_tokens.extend(list(generated_tokens_stream))
+            conversation_history_tokens.extend(tokenizer.encode(generated_text))
 
             tool_name, args = parse_tool_call(generated_text)
-
             if tool_name and args is not None:
                 tool_output = execute_tool(tool_name, args)
                 logging.info(f"Output of tool '{tool_name}':\n{tool_output}")
-
                 tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
                 tool_output_tokens = tokenizer.encode(tool_output_formatted)
                 conversation_history_tokens.extend(tool_output_tokens)
@@ -104,7 +162,7 @@ def main():
             logging.warning("Maximum number of iterations reached. Terminating.")
 
     except FileNotFoundError as e:
-        logging.error(f"Error: {e}. Make sure the model is trained and 'config.json' is configured.")
+        logging.error(f"Error: {e}. Ensure the model name is correct and the model files exist.")
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
 

@@ -53,22 +53,51 @@ pip install -r requirements.txt
 1.  Place your text (`.txt`) and image (`.jpg`, `.png`) files for training in the `data` directory. The `DataLoader` will automatically pair files with the same basename (e.g., `story.txt` and `story.png`).
 2.  (Optional) Adjust parameters in `config.json` to fit your needs.
 
-### Step 3: Train the Model
+### Step 3: Model Management
 
-To start the evolutionary training process, run the main training script:
+This project includes a system for managing, training, and running different models. All models are stored in their own subdirectories within the `models/` folder.
+
+#### Training a New Model
+
+To train a new model from scratch, you must give it a unique name. The script will create a new directory inside `models/` with this name and save the model weights, configuration, and training logs there.
 
 ```bash
-python3 train.py
+python3 train.py --model-name <your-model-name>
 ```
+*Example:* `python3 train.py --model-name my-first-model`
 
-The script will read the configuration, initialize a population of agents, and run the evolutionary training loop. It saves the best-performing model's weights to the path specified by `best_model_path` in the config.
+This will create `models/my-first-model/` and start the training process.
 
-### Step 4: Generate Text
+#### Resuming Training (Fine-tuning)
 
-To generate text using the trained model, run:
+You can continue training a previously saved model. This is useful for fine-tuning or simply resuming an interrupted session. Use the `--resume-from` flag to specify which existing model to load, and the `--model-name` flag to define where to save the results of the new training session (you can use the same name to overwrite or a new name to create a fine-tuned version).
+
+```bash
+python3 train.py --resume-from <existing-model-name> --model-name <your-model-name>
+```
+*Example to continue training:*
+`python3 train.py --resume-from my-first-model --model-name my-first-model`
+
+*Example to fine-tune:*
+`python3 train.py --resume-from my-first-model --model-name my-finetuned-model`
+
+#### Generating Text
+
+To generate text, you can either specify which model to use or have the script prompt you to choose from the available models.
+
+**Option A: Specify the model directly**
+
+```bash
+python3 generate.py --model-name <your-model-name>
+```
+*Example:* `python3 generate.py --model-name my-first-model`
+
+**Option B: Choose from a list**
+
+If you run the script without specifying a model name, it will scan the `models/` directory and present a list of all available models for you to choose from.
 
 ```bash
 python3 generate.py
 ```
 
-This script loads the best model and generates a response based on the `start_text` and other parameters in the `generation` section of `config.json`. It also features an agentic loop that can use tools defined in `tools.py`.
+The script will load the selected model and its associated configuration to run the agentic generation loop.
