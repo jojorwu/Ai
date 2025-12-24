@@ -134,14 +134,22 @@ def main():
         for turn in range(config.generation.max_turns):
             logging.info(f"\n--- Iteration {turn + 1} ---")
 
+            # Trim conversation history to the context window size
+            context_window = config.generation.context_window_size
+            if len(conversation_history_tokens) > context_window:
+                logging.info(f"Trimming context from {len(conversation_history_tokens)} "
+                             f"to {context_window} tokens.")
+                conversation_history_tokens = conversation_history_tokens[-context_window:]
+
             gen_config = deepcopy(config.generation)
-            gen_config.speculative_steps = 0
 
             generated_tokens_stream = model.generate(
                 conversation_history_tokens,
                 **gen_config.model_dump()
             )
-            generated_text = tokenizer.decode(list(generated_tokens_stream))
+            # We yield from the generator to handle the token stream
+            generated_tokens = list(generated_tokens_stream)
+            generated_text = tokenizer.decode(generated_tokens)
             logging.info(f"Model generated:\n{generated_text}")
 
             conversation_history_tokens.extend(tokenizer.encode(generated_text))

@@ -99,6 +99,8 @@ class GenerationConfig(BaseModel):
     max_retries: int = Field(..., description="Maximum number of retries on failed speculation.")
     max_turns: int = Field(10,
                              description="Maximum number of iterations (tool calls) in the agent loop.")
+    context_window_size: int = Field(2048,
+                                       description="The number of tokens to retain in the conversation history.")
 
 
 class HardwareConfig(BaseModel):

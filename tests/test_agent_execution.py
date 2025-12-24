@@ -28,6 +28,7 @@ class TestAgentExecution(unittest.TestCase):
         # Mock config and model loading
         mock_config.return_value.generation.max_turns = 5
         mock_config.return_value.generation.start_text = "Initial prompt"
+        mock_config.return_value.generation.context_window_size = 1024  # Fix TypeError
         mock_config.return_value.hardware.device = "cpu"
 
         mock_tokenizer = MagicMock()

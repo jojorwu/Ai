@@ -37,7 +37,10 @@ All key parameters are managed in `config.json`.
 - `optimizer`: AdamW optimizer settings.
 - `ltm`: Long-Term Memory update parameters.
 - `scheduler`: Learning rate scheduler settings.
-- `generation`: Parameters for text generation (`temperature`, `top_k`, `top_p`, etc.).
+- `generation`: Parameters for text generation. This includes:
+    - `temperature`, `top_k`, `top_p`: Standard sampling parameters.
+    - `context_window_size`: The maximum number of tokens to keep in the conversation history to manage memory usage.
+    - `speculative_steps`: The number of steps the model "looks ahead" to accelerate generation. A value > 0 enables speculative decoding.
 - `hardware`: Set the computation device (`cpu`, `gpu`, `mps`).
 
 ## How to Run
