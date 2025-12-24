@@ -30,11 +30,12 @@ def get_agent_batches(data, batch_size, seq_len):
         return
 
     end_idx = num_batches * batch_size * seq_len
-    x = np.array(data[:end_idx], dtype=np.int64).reshape(batch_size, -1)
-    y = np.array(data[1:end_idx + 1], dtype=np.int64).reshape(batch_size, -1)
+    x = np.array([item[0] for item in data[:end_idx]], dtype=np.int64).reshape(batch_size, -1)
+    y = np.array([item[0] for item in data[1:end_idx + 1]], dtype=np.int64).reshape(batch_size, -1)
+    images = np.array([item[1] for item in data[:end_idx]], dtype=object).reshape(batch_size, -1)
 
     for i in range(0, x.shape[1], seq_len):
-        yield x[:, i:i + seq_len], y[:, i:i + seq_len]
+        yield x[:, i:i + seq_len], y[:, i:i + seq_len], images[:, i:i + seq_len]
 
 
 class AgentManager:
@@ -75,18 +76,15 @@ class AgentManager:
                 logging.info(f"  - Skipping {agent.agent_id}, no data assigned.")
                 continue
 
-            agent_text_data = [item[0] for item in agent_data]
-            flat_token_list = [token for sublist in agent_text_data for token in sublist]
+            logging.info(f"  - Specializing {agent.agent_id} on {len(agent_data)} items...")
 
-            logging.info(f"  - Specializing {agent.agent_id} on {len(flat_token_list)} tokens...")
-
-            batch_generator = get_agent_batches(flat_token_list, batch_size, seq_len)
+            batch_generator = get_agent_batches(agent_data, batch_size, seq_len)
 
             steps_done = 0
-            for x_batch, y_batch in batch_generator:
+            for x_batch, y_batch, image_batch in batch_generator:
                 if steps_done >= steps_per_agent:
                     break
-                agent.experience(x_batch, y_batch)
+                agent.experience(x_batch, y_batch, image_batch)
                 steps_done += 1
 
             if steps_done < steps_per_agent:

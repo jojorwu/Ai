@@ -49,7 +49,7 @@ class TestTrainingIntegration(unittest.TestCase):
         policy_loss_fn = SoftmaxCrossEntropy()
         optimizer = Adam(learning_rate=0.001)
 
-        initial_state = model.get_state()
+        initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
 
         model.train()
         model.zero_grad()
