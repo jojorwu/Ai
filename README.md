@@ -1,99 +1,74 @@
-# Трансформер с Нуля на NumPy
+# Transformer from Scratch using NumPy
 
-Это реализация нейросети-трансформера в стиле GPT (decoder-only) с нуля, используя только библиотеку NumPy. Модель способна обучаться на любых текстовых файлах и генерировать текст на их основе.
+This project is a decoder-only Transformer (GPT-style) implemented from scratch using only NumPy. It features an agent-based evolutionary training system and is capable of multimodal learning (text and images).
 
-## Ключевые архитектурные особенности
+## Core Architectural Features
 
-- **Модульная структура**: Все компоненты (`Embedding`, `MultiHeadAttention`, `RMSNorm` и т.д.) реализованы как отдельные классы в директории `nn_components/`.
-- **Архитектура без смещений (Bias-free)**: В соответствии с современными практиками (например, Llama), линейные слои в блоках трансформера (`MultiHeadAttention` и `FeedForward`) не используют векторы смещения (bias), что способствует стабильности обучения.
-- **Инициализация весов в стиле GPT-2**: Для улучшения стабильности обучения используется схема инициализации весов, аналогичная GPT-2. Веса остаточных слоев дополнительно масштабируются с учетом глубины сети.
-- **Grouped-Query Attention (GQA)**: Реализован GQA для ускорения работы и уменьшения размера KV-кэша. Это компромисс между Multi-Head и Multi-Query Attention.
-- **RMSNorm**: Вместо `LayerNormalization` используется `RMSNorm` (Root Mean Square Normalization) для повышения вычислительной эффективности.
-- **KV-Кэширование**: Реализован KV-кэш для значительного ускорения процесса генерации текста (инференса).
-- **Rotary Positional Embeddings (RoPE)**: Вместо абсолютных синусоидальных эмбеддингов используются Rotary Embeddings, которые применяются напрямую к Query и Key векторам в механизме внимания. Это улучшает понимание относительных позиций токенов.
-- **SwiGLU Feed-Forward**: Вместо стандартного FFN с GELU активацией используется более продвинутый `SwiGLU` (Swish-Gated Linear Unit), который часто показывает лучшие результаты.
-- **Weight Tying**: Веса `Embedding` слоя и финального `Linear` слоя связаны (являются одной и той же матрицей). Это значительно сокращает количество параметров и улучшает производительность модели.
-- **Оптимизатор AdamW**: Для обучения используется оптимизатор `Adam` с `Decoupled Weight Decay` (AdamW) для лучшей регуляризации и предотвращения переобучения.
-- **Накопление градиентов (Gradient Accumulation)**: Реализована техника накопления градиентов, позволяющая эмулировать больший размер батча и обучать модель на системах с ограниченной памятью.
-- **Сохранение и возобновление обучения (Checkpointing)**: Скрипт обучения поддерживает сохранение контрольных точек, включая состояние модели, оптимизатора и процесса обучения, и может автоматически возобновлять обучение с последней точки.
-- **Ранняя остановка (Early Stopping)**: Реализован механизм ранней остановки. Обучение автоматически прекращается, если производительность на валидационном наборе данных не улучшается в течение заданного числа эпох (`early_stopping_patience`), сохраняя при этом лучшую версию модели.
-- **LR Scheduler**: Реализован планировщик скорости обучения с "прогревом" и косинусным спадом (`Cosine Decay with Warmup`) для более стабильного и качественного обучения.
-- **Dropout**: Реализован и используется Dropout для регуляризации во время обучения.
-- **Численно стабильная функция потерь**: Для вычисления потерь используется комбинация `log_softmax` и `Negative Log-Likelihood`, что обеспечивает большую численную стабильность.
+- **Modular Design**: Components like `Embedding`, `MultiHeadAttention`, `RMSNorm`, etc., are implemented as separate, reusable classes in the `nn_components/` directory.
+- **Agent-based Evolutionary Learning**: Instead of a traditional single-model training loop, this project uses a population of agents. The `AgentManager` class controls their lifecycle: forking, specialization through experience, collaborative evaluation, and merging the best agents back into a base model.
+- **Multimodality**: The model can process both text and images. A `VisionEncoder` converts images into patch embeddings, which are seamlessly integrated into the Transformer's input sequence.
+- **Actor-Critic Architecture**: The Transformer has a dual-head design: a **Policy Head** for generating token logits and a **Value Head** for predicting a "usefulness" score of a sequence, crucial for the agent evaluation process.
+- **Long-Term Memory (LTM)**: Each agent possesses a separate LTM module (a smaller MLP) that allows it to specialize. The LTM is updated during inference based on a "surprise metric," enabling continuous learning.
+- **Bias-Free Architecture**: Following modern practices (e.g., Llama), linear layers in the Transformer blocks do not use bias vectors, enhancing training stability.
+- **GPT-2 Style Weight Initialization**: Improves training stability by using a proven weight initialization scheme.
+- **Grouped-Query Attention (GQA)**: Accelerates inference and reduces the KV cache size by allowing multiple query heads to share key/value heads.
+- **RMSNorm**: Uses Root Mean Square Normalization for computational efficiency over standard LayerNormalization.
+- **KV Caching**: Implemented for significantly faster text generation.
+- **Rotary Positional Embeddings (RoPE)**: Improves the model's understanding of relative token positions.
+- **SwiGLU Feed-Forward Network**: Uses the advanced Swish-Gated Linear Unit for better performance compared to standard FFNs.
+- **Mixture of Experts (MoE)**: Can be configured to use MoE layers for a massive increase in parameters with only a small increase in computational cost during inference. Includes an auxiliary load-balancing loss.
+- **Weight Tying**: The `Embedding` layer and the final `Linear` projection layer share weights, reducing the total parameter count.
+- **AdamW Optimizer**: Uses the Adam optimizer with Decoupled Weight Decay for better regularization.
+- **Advanced Training Techniques**:
+    - **Gradient Accumulation**: Emulates a larger batch size on memory-constrained hardware.
+    - **Gradient Clipping**: Prevents exploding gradients.
+    - **Checkpointing**: Automatically saves and resumes training from checkpoints.
+    - **Early Stopping**: Halts training if validation performance doesn't improve, saving the best model.
+    - **Cosine Decay with Warmup LR Scheduler**: For more stable and effective training.
+    - **Dropout**: For regularization during training.
 
-## Трехэтапное обучение
+## Configuration
 
-Проект реализует трехэтапный процесс обучения для создания эффективного агента, следуя лучшим практикам индустрии:
+All key parameters are managed in `config.json`.
 
-### Этап 1: Поиск закономерностей (Unsupervised Pre-training)
+- `model`: Core Transformer architecture settings (e.g., `d_model`, `num_layers`, `num_heads`).
+- `vision`: Vision encoder parameters.
+- `evolution`: Parameters for the agent-based training process (`num_agents`, `evolution_epochs`, `batch_size`, etc.).
+- `optimizer`: AdamW optimizer settings.
+- `ltm`: Long-Term Memory update parameters.
+- `scheduler`: Learning rate scheduler settings.
+- `generation`: Parameters for text generation (`temperature`, `top_k`, `top_p`, etc.).
+- `hardware`: Set the computation device (`cpu`, `gpu`, `mps`).
 
-**Цель:** Сформировать базовые знания языка.
-На этом этапе модель обучается на большом объеме неструктурированного текста (`data_dir`). Она учится предсказывать следующее слово, что позволяет ей усвоить грамматику, факты о мире и общие языковые паттерны. Используется только Policy Head.
+## How to Run
 
-### Этап 2: Обучение с учителем (Supervised Fine-Tuning, SFT)
-
-**Цель:** Научить модель следовать инструкциям и формату диалога.
-После предварительного обучения модель дообучается на специальном, высококачественном наборе данных (`sft_data_dir`), который состоит из пар "инструкция-ответ". Это учит модель быть полезным ассистентом, отвечать на вопросы и следовать командам.
-
-### Этап 3: ИИ думает сам (Contrastive Fine-tuning)
-
-**Цель:** Отточить способность к рассуждению и самооценке.
-На финальном этапе используется **Actor-Critic** механизм с **Contrastive Learning**. Модель учится генерировать несколько вариантов ответа и самостоятельно выбирать лучший из них, используя Value Head. Это позволяет ей улучшить качество ответов и развить способность к рассуждению.
-
-## Настройка
-
-Все основные параметры находятся в файле `config.json`.
-
-- `model`: параметры архитектуры (глубина модели, количество слоев, dropout и т.д.).
-- `training`: параметры обучения. Включает `epochs`, `batch_size`, пути к данным, а также параметры для ранней остановки:
-    - `early_stopping_patience`: Количество эпох без улучшения на валидации, после которого обучение остановится.
-    - `best_model_path`: Путь для сохранения весов модели с лучшей производительностью.
-- `optimizer`: параметры оптимизатора AdamW (`learning_rate`, `beta1`, `beta2`, `weight_decay`) и порог для обрезки градиентов (`max_norm`).
-- `scheduler`: параметры для планировщика LR (`warmup_steps`, `min_lr`).
-- `generation`: параметры для генерации текста:
-    - `start_text`: Стартовая фраза.
-    - `max_len`: Максимальная длина генерируемого текста.
-    - `temperature`: "Температура" сэмплинга. Чем выше значение, тем случайнее текст.
-    - `top_k`: Оставляет только `k` самых вероятных токенов для сэмплинга, делая текст более осмысленным (установите `0` для отключения).
-
-## Как запустить
-
-### Шаг 1: Установка зависимостей
+### Step 1: Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Шаг 2: Подготовка данных
+### Step 2: Prepare Data
 
-1.  Положите ваши текстовые файлы (`.txt`) для **Этапа 1 и 3** в папку `data`.
-2.  Положите ваши текстовые файлы (`.txt`) для **Этапа 2 (SFT)** в папку `sft_data`.
-3.  (Опционально) Настройте остальные параметры в `config.json` под ваши нужды.
+1.  Place your text (`.txt`) and image (`.jpg`, `.png`) files for training in the `data` directory. The `DataLoader` will automatically pair files with the same basename (e.g., `story.txt` and `story.png`).
+2.  (Optional) Adjust parameters in `config.json` to fit your needs.
 
-### Шаг 3: Обучение модели
+### Step 3: Train the Model
 
-Процесс обучения разделен на три этапа. Вы можете выбрать этап, изменив параметр `"training_stage"` в `config.json`.
-
--   **Этап 1 (Pre-training):** Установите `"training_stage": 1`.
--   **Этап 2 (SFT):** Установите `"training_stage": 2`.
--   **Этап 3 (Fine-tuning):** Установите `"training_stage": 3`.
-
-Рекомендуемая последовательность: запустить Этап 1, затем Этап 2, и в конце Этап 3.
-
-Чтобы запустить процесс обучения, выполните скрипт:
+To start the evolutionary training process, run the main training script:
 
 ```bash
-./start/train.sh
+python3 train.py
 ```
 
-Скрипт прочитает настройки из `config.json`, обучит модель с использованием оптимизатора Adam и сохранит обученные веса вместе с конфигом в файл `model_weights.npz`.
+The script will read the configuration, initialize a population of agents, and run the evolutionary training loop. It saves the best-performing model's weights to the path specified by `best_model_path` in the config.
 
-### Шаг 4: Генерация текста
+### Step 4: Generate Text
 
-После обучения модели, запустите генерацию:
+To generate text using the trained model, run:
 
 ```bash
-./start/generate.sh
+python3 generate.py
 ```
 
-Скрипт загрузит обученную модель и сгенерирует текст на основе параметров из секции `generation` в `config.json`.
+This script loads the best model and generates a response based on the `start_text` and other parameters in the `generation` section of `config.json`. It also features an agentic loop that can use tools defined in `tools.py`.
