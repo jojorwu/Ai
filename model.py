@@ -132,6 +132,15 @@ class Transformer:
 
         return named_params
 
+    def count_parameters(self):
+        """Counts the total number of trainable parameters in the model."""
+        total_params = 0
+        # We use flat=True to get a dictionary of individual parameter tensors
+        named_params = self.get_named_params(flat=True)
+        for _, (param_val, _) in named_params.items():
+            total_params += param_val.size
+        return total_params
+
     def zero_grad(self):
         """Resets gradients in all trainable layers to zero."""
         for layer_obj in self.get_named_params().values():
