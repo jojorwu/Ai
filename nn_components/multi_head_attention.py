@@ -16,28 +16,27 @@ class MultiHeadAttention:
     This optimized version uses a single projection for Q, K, and V for efficiency.
     """
 
-    def __init__(self, d_model: int, num_heads: int, num_kv_heads: int,
-                 rotary_emb=None, bias: bool = False, num_layers: int = 1):
-        if d_model % num_heads != 0:
+    def __init__(self, config, rotary_emb=None, bias: bool = False):
+        if config.d_model % config.num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads.")
-        if num_heads % num_kv_heads != 0:
+        if config.num_heads % config.num_kv_heads != 0:
             raise ValueError("num_heads must be divisible by num_kv_heads.")
 
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.num_kv_heads = num_kv_heads
-        self.num_q_per_kv = num_heads // num_kv_heads
-        self.d_k = d_model // num_heads
-        self.q_dim = d_model
+        self.d_model = config.d_model
+        self.num_heads = config.num_heads
+        self.num_kv_heads = config.num_kv_heads
+        self.num_q_per_kv = config.num_heads // config.num_kv_heads
+        self.d_k = config.d_model // config.num_heads
+        self.q_dim = config.d_model
         self.kv_dim = self.d_k * self.num_kv_heads
 
         # Combined projection for Q, K, V
-        self.qkv_proj = Linear(d_model, self.q_dim + 2 * self.kv_dim, bias=bias)
+        self.qkv_proj = Linear(config.d_model, self.q_dim + 2 * self.kv_dim, bias=bias)
         # Apply special initialization for residual connections
-        self.qkv_proj.special_residual_init(num_layers)
+        self.qkv_proj.special_residual_init(config.num_layers)
 
-        self.wo = Linear(d_model, d_model, bias=bias)
-        self.wo.special_residual_init(num_layers)
+        self.wo = Linear(config.d_model, config.d_model, bias=bias)
+        self.wo.special_residual_init(config.num_layers)
 
         self.attention = ScaledDotProductAttention()
         self.rotary_emb = rotary_emb
@@ -72,7 +71,7 @@ class MultiHeadAttention:
     def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         """Performs the forward pass of the GQA layer."""
         self.x_input = x
-        batch_size, seq_len, _ = x.shape
+        _, seq_len, _ = x.shape
 
         # --- 1. Combined QKV Projection ---
         qkv = self.qkv_proj.forward(x)

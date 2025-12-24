@@ -4,6 +4,7 @@ Implementation of a single Transformer Decoder Block.
 from typing import TYPE_CHECKING
 
 from backend import np
+from config import MultiHeadAttentionConfig
 from nn_components.dropout import Dropout
 from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
@@ -21,10 +22,13 @@ class DecoderBlock:
     """
 
     def __init__(self, config, rotary_emb=None, long_term_memory=None):
-
-        self.mha = MultiHeadAttention(config.d_model, config.num_heads,
-                                      config.num_kv_heads, rotary_emb,
-                                      bias=False, num_layers=config.num_layers)
+        mha_config = MultiHeadAttentionConfig(
+            d_model=config.d_model,
+            num_heads=config.num_heads,
+            num_kv_heads=config.num_kv_heads,
+            num_layers=config.num_layers
+        )
+        self.mha = MultiHeadAttention(mha_config, rotary_emb=rotary_emb, bias=False)
         self.ltm = long_term_memory
 
         self.use_moe = config.num_experts is not None and config.top_k_experts is not None

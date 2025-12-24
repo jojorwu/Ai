@@ -39,6 +39,13 @@ class DecoderBlockConfig(BaseModel):
     top_k_experts: Optional[int]
 
 
+class MultiHeadAttentionConfig(BaseModel):
+    d_model: int
+    num_heads: int
+    num_kv_heads: int
+    num_layers: int
+
+
 class VisionConfig(BaseModel):
     """Configuration for the Vision Encoder."""
     image_size: tuple[int, int] = Field((224, 224), description="Input image size (height, width).")
