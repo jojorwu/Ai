@@ -96,9 +96,28 @@ class Agent:
     def generate_response(self, prompt_tokens: np.ndarray, image_data: np.ndarray = None, max_len=50) -> list[int]:
         """
         Generates a response based on a prompt (text + image).
-        STUB: This method is intended to be mocked in tests.
         """
-        raise NotImplementedError("generate_response should be mocked in tests or implemented.")
+        self.model.eval()
+
+        # Ensure prompt_tokens is a 2D array for batch processing
+        if prompt_tokens.ndim == 1:
+            prompt_tokens = np.expand_dims(prompt_tokens, axis=0)
+
+        # Handle image data if provided
+        images = np.array([image_data]) if image_data is not None else None
+
+        # Generate the response using the model's generate method
+        # Assuming model.generate handles batch inputs and returns a list of lists
+        generated_tokens_list = self.model.generate(
+            prompt_tokens,
+            images=images,
+            max_new_tokens=max_len,
+            temperature=0.7,
+            top_k=50
+        )
+
+        # Return the first generated sequence (as this method handles one prompt at a time)
+        return generated_tokens_list[0] if generated_tokens_list else []
 
     def critique_response(self, prompt_tokens: list[int], image_data: np.ndarray, response_tokens: list[int]) -> float:
         """

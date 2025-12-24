@@ -10,7 +10,9 @@ class Tokenizer:
         self.special_tokens = [
             '<THINK>', '<ANSWER>',
             '<TOOL_CALL>', '</TOOL_CALL>',
-            '<TOOL_OUTPUT>', '</TOOL_OUTPUT>'
+            '<TOOL_OUTPUT>', '</TOOL_OUTPUT>',
+            '<ASK_FOR_HELP>',
+            '<I_DONT_KNOW>'
         ]
         self.chars = []
         self.char_to_idx = {}
