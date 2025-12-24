@@ -16,3 +16,6 @@ env/
 
 # Model weights
 *.npz
+
+# Log files
+*.log

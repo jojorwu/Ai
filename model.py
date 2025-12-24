@@ -32,36 +32,56 @@ def _sample_from_logits(logits, temperature, top_k, top_p):
         token_id = np.argmax(logits)
     return token_id
 
+from nn_components.long_term_memory import LongTermMemory
+from optimizer import Adam
+
 class Transformer:
     """
     Полная модель GPT-style (decoder-only) Трансформера.
     """
-    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len, dropout_rate=0.1, num_kv_heads=None):
+    def __init__(self, vocab_size, model_config, ltm_config=None):
         self.vocab_size = vocab_size
-        self.d_model = d_model
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
-        self.d_ff = d_ff
-        self.max_seq_len = max_seq_len
-        self.dropout_rate = dropout_rate
-        self._flat_params_cache = None  # Кэш для плоского списка параметров
+        self.d_model = model_config.d_model
+        self.num_layers = model_config.num_layers
+        self.num_heads = model_config.num_heads
+        self.num_kv_heads = model_config.num_kv_heads
+        self.d_ff = model_config.d_ff
+        self.max_seq_len = model_config.max_seq_len
+        self.dropout_rate = model_config.dropout_rate
+        self.ltm_config = ltm_config
+        self._flat_params_cache = None
 
-        d_k = d_model // num_heads
-        self.rotary_emb = RotaryPositionalEmbedding(d_k, max_seq_len)
+        d_k = self.d_model // self.num_heads
+        self.rotary_emb = RotaryPositionalEmbedding(d_k, self.max_seq_len)
+        self.embedding = Embedding(vocab_size, self.d_model)
 
-        self.embedding = Embedding(vocab_size, d_model)
+        self.long_term_memory = None
+        if model_config.ltm_d_hidden and model_config.ltm_num_layers and ltm_config:
+            self.long_term_memory = LongTermMemory(self.d_model, model_config.ltm_d_hidden, model_config.ltm_num_layers)
+            self.ltm_optimizer = Adam(**ltm_config.optimizer.dict())
+            self.ltm_surprise_threshold = ltm_config.surprise_threshold
+        else:
+            self.long_term_memory = None
+
+
         self.decoder_blocks = [
-            DecoderBlock(d_model, num_heads, d_ff, dropout_rate, self.num_kv_heads, rotary_emb=self.rotary_emb, num_layers=num_layers)
-            for _ in range(num_layers)
+            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff,
+                         dropout_rate=self.dropout_rate, num_kv_heads=self.num_kv_heads,
+                         rotary_emb=self.rotary_emb, num_layers=self.num_layers,
+                         long_term_memory=self.long_term_memory,
+                         num_experts=model_config.num_experts,
+                         top_k_experts=model_config.top_k_experts)
+            for _ in range(self.num_layers)
         ]
-        self.final_norm = RMSNorm(d_model)
-        self.value_head_linear = Linear(d_model, 1, bias=False)
+        self.final_norm = RMSNorm(self.d_model)
+        self.value_head_linear = Linear(self.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
 
     def get_children(self):
         """Возвращает словарь дочерних слоев."""
         children = {'embedding': self.embedding, 'final_norm': self.final_norm, 'value_head_linear': self.value_head_linear}
+        if self.long_term_memory:
+            children['long_term_memory'] = self.long_term_memory
         for i, block in enumerate(self.decoder_blocks):
             children[f'decoder_blocks.{i}'] = block
         return children
@@ -172,22 +192,34 @@ class Transformer:
         print(f"Веса и конфиг модели сохранены в {filepath}")
 
     @staticmethod
-    def load_model(filepath, vocab_size):
-        """Загружает модель, ее веса и конфигурацию из .npz файла."""
+    def load_model(filepath, vocab_size, config):
+        """Загружает веса модели из .npz файла."""
+        model = Transformer(vocab_size=vocab_size, model_config=config.model, ltm_config=config.ltm)
         with np.load(filepath, allow_pickle=True) as data:
-            config_str = data['config'][0]
-            config = json.loads(config_str)
-            model_config = config['model']
-            model = Transformer(vocab_size=vocab_size, **model_config)
-            model.set_state(data)
-        print(f"Модель и веса загружены из {filepath}")
-        return model, config
+            # Отфильтровываем 'config' ключ, так как он не является весом
+            state_dict = {k: data[k] for k in data if k != 'config'}
+            model.set_state(state_dict)
+        print(f"Веса модели загружены из {filepath}")
+        return model
 
     def forward(self, x, mask=None, kv_cache=None, seq_offset=0):
         h = self.embedding.forward(x) * np.sqrt(self.d_model)
 
+        # Обработка долгосрочной памяти
+        if self.long_term_memory:
+            # Начальное состояние LTM - это среднее значение вложений на входе
+            ltm_input = np.mean(h, axis=1, keepdims=True)
+            self.initial_ltm_state = self.long_term_memory.forward(ltm_input)
+        else:
+            self.initial_ltm_state = 0 # Если LTM нет, состояние - ноль
+
+        current_ltm_state = self.initial_ltm_state
+        self.ltm_states_history = [current_ltm_state]
+        total_aux_loss = 0
+
         for i, block in enumerate(self.decoder_blocks):
-            h = block.forward(h, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
+            h, aux_loss = block.forward(h, current_ltm_state, mask, kv_cache=kv_cache, layer_idx=i, seq_offset=seq_offset)
+            total_aux_loss += aux_loss
 
         h = self.final_norm.forward(h)
         self.final_norm_output = h
@@ -197,7 +229,7 @@ class Transformer:
         value_hidden = self.value_head_linear.forward(last_token_hidden_state)
         value = self.value_head_activation.forward(value_hidden)
 
-        return logits, value
+        return logits, value, total_aux_loss
 
     def backward(self, dlogits, dvalue):
         x_norm_reshaped = self.final_norm_output.reshape(-1, self.d_model)
@@ -213,8 +245,19 @@ class Transformer:
         dx = d_h_policy + d_h_value
 
         dx = self.final_norm.backward(dx)
+
+        total_d_ltm_state = 0
+        # Градиент для aux_loss пока не передается, так как backward MoE упрощен
         for block in reversed(self.decoder_blocks):
-            dx = block.backward(dx)
+            dx, d_ltm_state_block = block.backward(dx)
+            total_d_ltm_state += d_ltm_state_block
+
+        if self.long_term_memory:
+            d_ltm_input = self.long_term_memory.backward(total_d_ltm_state)
+            # Распределяем градиент от LTM обратно по всем токенам в h
+            batch_size, seq_len, _ = dx.shape
+            dx += d_ltm_input / seq_len
+
 
         self.embedding.backward(dx * np.sqrt(self.d_model))
         if self.embedding.dW is not None:
@@ -230,10 +273,14 @@ class Transformer:
         d_k = self.d_model // self.num_heads
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
+        total_surprise = 0
+        total_value = 0
+        num_updates = 0
+
         all_generated_tokens = []
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
         seq_len = prompt_tokens.shape[1]
-        logits, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
+        logits, _, _ = self.forward(prompt_tokens, kv_cache=kv_cache, seq_offset=0)
         current_seq_len = seq_len
 
         while len(all_generated_tokens) < max_len:
@@ -247,7 +294,44 @@ class Transformer:
                 for i in range(chunk_len):
                     token_id = _sample_from_logits(temp_logits[0, -1, :], temperature, top_k, top_p)
                     speculative_chunk.append(token_id)
-                    temp_logits, final_value = self.forward(np.array([[token_id]]), kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+                    next_token_arr = np.array([[token_id]])
+
+                    if self.long_term_memory:
+                        # Шаг 1: Рассчитать "удивление" (градиент LTM)
+                        # Мы не хотим, чтобы градиенты основной модели накапливались
+                        self.zero_grad()
+                        self.long_term_memory.zero_grad()
+
+                        logits_for_grad, token_val, _ = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+
+                        # Обратный проход только для получения градиента LTM
+                        d_val = np.ones_like(token_val)
+                        d_logits = np.zeros_like(logits_for_grad)
+                        self.backward(d_logits, d_val)
+
+                        # Шаг 2: Обновить LTM, если "удивление" велико
+                        ltm_params = self.long_term_memory.get_trainable_params()
+
+                        # Вычисляем норму градиента, игнорируя None значения
+                        squared_grads = [np.sum(grad**2) for _, grad in ltm_params.values() if grad is not None]
+                        grad_norm = 0.0
+                        if squared_grads:
+                            grad_norm = np.sqrt(sum(squared_grads))
+                            if grad_norm > self.ltm_surprise_threshold:
+                                self.ltm_optimizer.step(ltm_params)
+
+                        total_surprise += grad_norm
+                        num_updates += 1
+
+                        # Обнуляем градиенты LTM после возможного шага оптимизатора
+                        self.long_term_memory.zero_grad()
+
+
+                    # Шаг 3: Основной forward pass для генерации следующего токена
+                    # Этот forward pass использует обновленное (возможно) состояние LTM
+                    temp_logits, final_value, _ = self.forward(next_token_arr, kv_cache=attempt_cache, seq_offset=current_seq_len + i)
+                    if final_value is not None:
+                        total_value += final_value.item()
 
                 if final_value is not None and final_value.item() >= value_threshold:
                     all_generated_tokens.extend(speculative_chunk)
@@ -260,4 +344,7 @@ class Transformer:
             if not accepted:
                 break
 
-        return np.array(all_generated_tokens)
+        # Возвращаем сгенерированные токены и среднее удивление / ценность
+        avg_surprise = total_surprise / num_updates if num_updates > 0 else 0
+        avg_value = total_value / num_updates if num_updates > 0 else 0
+        return np.array(all_generated_tokens), avg_surprise, avg_value

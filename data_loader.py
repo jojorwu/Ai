@@ -1,24 +1,25 @@
 """
-Модуль для загрузки и извлечения текста из файлов различных форматов.
-Поддерживает .txt, .pdf и .docx файлы.
+Module for loading multimodal data (text, images).
 """
 import os
 import logging
+from typing import List, Tuple, Optional
 import docx
 import PyPDF2
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from PIL import Image
+from backend import np
 
 def _read_txt(file_path: str) -> str:
-    """Извлекает текст из .txt файла."""
+    """Extracts text from a .txt file."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
-        logging.error("Ошибка при чтении TXT файла %s: %s", file_path, e)
+        logging.error(f"Error reading TXT file {file_path}: {e}")
         return ""
 
 def _read_pdf(file_path: str) -> str:
-    """Извлекает текст из .pdf файла."""
+    """Extracts text from a .pdf file."""
     text = []
     try:
         reader = PyPDF2.PdfReader(file_path)
@@ -28,11 +29,11 @@ def _read_pdf(file_path: str) -> str:
                 text.append(page_text)
         return "\n".join(text)
     except Exception as e:
-        logging.error("Ошибка при чтении PDF файла %s: %s", file_path, e)
+        logging.error(f"Error reading PDF file {file_path}: {e}")
         return ""
 
 def _read_docx(file_path: str) -> str:
-    """Извлекает текст из .docx файла."""
+    """Extracts text from a .docx file."""
     text = []
     try:
         doc = docx.Document(file_path)
@@ -40,52 +41,64 @@ def _read_docx(file_path: str) -> str:
             text.append(para.text)
         return "\n".join(text)
     except Exception as e:
-        logging.error("Ошибка при чтении DOCX файла %s: %s", file_path, e)
+        logging.error(f"Error reading DOCX file {file_path}: {e}")
         return ""
 
-def _process_file(file_path: str, handler) -> str:
-    """Обертка для вызова обработчика файла с логированием."""
-    logging.info("Обработка файла: %s", os.path.basename(file_path))
-    return handler(file_path)
+def _read_image(file_path: str) -> Optional[np.ndarray]:
+    """Loads an image and converts it to a numpy array."""
+    try:
+        with Image.open(file_path) as img:
+            img_rgb = img.convert('RGB')
+            return np.array(img_rgb)
+    except Exception as e:
+        logging.error(f"Error reading image {file_path}: {e}")
+        return None
 
-def load_text_from_directory(directory_path: str) -> str:
+def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, Optional[np.ndarray]]]:
     """
-    Сканирует директорию, извлекает текст из поддерживаемых файлов в несколько потоков
-    и объединяет его в одну строку.
+    Scans a directory, finds text-image pairs, and loads them.
     """
-    all_text = []
-    logging.info("Параллельное сканирование директории '%s' для извлечения текста...", directory_path)
+    multimodal_data = []
+    logging.info(f"Scanning directory '{directory_path}' for multimodal data...")
 
-    file_handlers = {
-        '.txt': _read_txt,
-        '.pdf': _read_pdf,
-        '.docx': _read_docx,
-    }
+    text_handlers = {'.txt': _read_txt, '.pdf': _read_pdf, '.docx': _read_docx}
+    image_extensions = {'.jpg', '.jpeg', '.png'}
 
-    files_to_process = []
+    text_files = []
     for filename in os.listdir(directory_path):
-        file_path = os.path.join(directory_path, filename)
-        if os.path.isfile(file_path):
-            _, extension = os.path.splitext(filename)
-            handler = file_handlers.get(extension.lower())
+        _, extension = os.path.splitext(filename)
+        if extension.lower() in text_handlers:
+            text_files.append(os.path.join(directory_path, filename))
 
+    for text_path in text_files:
+        try:
+            base_name, _ = os.path.splitext(text_path)
+            text_content = ""
+
+            handler = text_handlers.get(os.path.splitext(text_path)[1].lower())
             if handler:
-                files_to_process.append((file_path, handler))
-            else:
-                logging.warning("Файл с неподдерживаемым расширением '%s' пропущен: %s", extension, filename)
+                text_content = handler(text_path)
 
-    # Используем ThreadPoolExecutor для параллельной обработки файлов
-    with ThreadPoolExecutor() as executor:
-        # Отправляем задачи на выполнение
-        future_to_path = {executor.submit(_process_file, path, handler): path for path, handler in files_to_process}
+            if not text_content:
+                continue
 
-        for future in as_completed(future_to_path):
-            path = future_to_path[future]
-            try:
-                content = future.result()
-                if content:
-                    all_text.append(content)
-            except Exception as exc:
-                logging.error("Ошибка при обработке файла %s: %s", path, exc)
+            image_data = None
+            if '<IMAGE>' in text_content:
+                found_image = False
+                for img_ext in image_extensions:
+                    image_path = base_name + img_ext
+                    if os.path.exists(image_path):
+                        logging.info(f"Found pair: {os.path.basename(text_path)} and {os.path.basename(image_path)}")
+                        image_data = _read_image(image_path)
+                        if image_data is not None:
+                           found_image = True
+                           break
+                if not found_image:
+                     logging.warning(f"Text {os.path.basename(text_path)} contains <IMAGE>, but no image was found.")
 
-    return "\n".join(all_text)
+            multimodal_data.append((text_content, image_data))
+
+        except Exception as e:
+            logging.error(f"Error processing file {text_path}: {e}")
+
+    return multimodal_data

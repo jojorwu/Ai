@@ -31,6 +31,10 @@ class Linear:
             params['b'] = (self.b, self.db)
         return params
 
+    def get_named_params(self, prefix=''):
+        """Возвращает словарь с именем и самим слоем."""
+        return {prefix: self}
+
     def forward(self, x):
         """Прямой проход."""
         self.x = x
@@ -60,3 +64,16 @@ class Linear:
 
         dx = dout_reshaped @ self.W.T
         return dx.reshape(original_shape)
+
+    def get_state(self):
+        """Возвращает состояние слоя (веса)."""
+        state = {'W': self.W}
+        if self.use_bias:
+            state['b'] = self.b
+        return state
+
+    def set_state(self, state):
+        """Загружает состояние слоя (веса)."""
+        self.W = state['W']
+        if self.use_bias and 'b' in state:
+            self.b = state['b']

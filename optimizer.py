@@ -7,9 +7,9 @@ class Adam:
     """
     Оптимизатор Adam с поддержкой Decoupled Weight Decay (AdamW).
     """
-    def __init__(self, named_params, learning_rate=0.001, beta1=0.9, beta2=0.999,
+    def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999,
                  epsilon=1e-8, weight_decay=0.01):
-        self.named_params = named_params
+        self.initial_lr = learning_rate
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
@@ -18,39 +18,33 @@ class Adam:
         self.t = 0
         self.m = {}
         self.v = {}
-        for layer_name, layer_obj in self.named_params.items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (p, _) in layer_obj.get_trainable_params().items():
-                    if p is not None:
-                        key = f"{layer_name}.{param_name}"
-                        self.m[key] = np.zeros_like(p)
-                        self.v[key] = np.zeros_like(p)
 
-    def step(self):
+    def step(self, params_with_grads):
         """Выполняет один шаг оптимизации."""
         self.t += 1
-        for layer_name, layer_obj in self.named_params.items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (param, grad) in layer_obj.get_trainable_params().items():
-                    if grad is None or param is None:
-                        continue
 
-                    key = f"{layer_name}.{param_name}"
+        for name, (param, grad) in params_with_grads.items():
+            if grad is None or param is None:
+                continue
 
-                    # AdamW-style weight decay
-                    param -= self.lr * self.weight_decay * param
+            # Lazy initialization of optimizer state
+            if name not in self.m:
+                self.m[name] = np.zeros_like(param)
+                self.v[name] = np.zeros_like(param)
 
-                    # Update moments
-                    self.m[key] = self.beta1 * self.m[key] + (1 - self.beta1) * grad
-                    self.v[key] = self.beta2 * self.v[key] + (1 - self.beta2) * (grad ** 2)
+            # AdamW-style weight decay
+            param -= self.lr * self.weight_decay * param
 
-                    # Bias correction
-                    m_hat = self.m[key] / (1 - self.beta1 ** self.t)
-                    v_hat = self.v[key] / (1 - self.beta2 ** self.t)
+            # Update moments
+            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * grad
+            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (grad ** 2)
 
-                    # Update weights
-                    update = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-                    setattr(layer_obj, param_name, param - update)
+            # Bias correction
+            m_hat = self.m[name] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[name] / (1 - self.beta2 ** self.t)
+
+            # Update weights
+            param -= self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
 
     def get_state(self):
         """Возвращает состояние оптимизатора."""
