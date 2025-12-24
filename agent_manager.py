@@ -125,60 +125,64 @@ class AgentManager:
 
     def collaborative_evaluation(self, evaluation_data: list, tokenizer: Tokenizer, top_k: int) -> List[Agent]:
         """
-        Evaluates agents using a collaborative method where they can ask for help,
-        admit they don't know, or provide help, with corresponding rewards.
+        Evaluates agents with a more nuanced scoring system that rewards independent success
+        and penalizes failure and bad help, based on peer critique.
         """
         if not self.agents or len(self.agents) < 2:
             print("Warning: Collaborative evaluation requires at least 2 agents.")
             return self.agents[:top_k]
 
         agent_scores = {agent.agent_id: 0.0 for agent in self.agents}
-        REWARD_ASK_HELP = 1.0
+        REWARD_INDEPENDENT_SUCCESS = 5.0
+        PENALTY_INDEPENDENT_FAILURE = -5.0
+        REWARD_GOOD_HELP = 3.0
+        PENALTY_BAD_HELP = -3.0
+        REWARD_ASKING_FOR_HELP = 0.5
         REWARD_ADMIT_IGNORANCE = 1.0
-        REWARD_PROVIDE_HELP = 1.5
-        PENALTY_UNSOLICITED_HELP = -2.0
-        REWARD_CRITIQUE_BASE = 0.5
+        SUCCESS_THRESHOLD = 0.5
 
         ask_help_token_id = tokenizer.char_to_idx.get('<ASK_FOR_HELP>')
         i_dont_know_token_id = tokenizer.char_to_idx.get('<I_DONT_KNOW>')
-        provide_help_token_id = tokenizer.char_to_idx.get('<PROVIDE_HELP>')
 
         eval_prompts = evaluation_data[:min(len(evaluation_data), self.num_agents * 2)]
 
         for prompt_data in eval_prompts:
             prompt_tokens, prompt_image = prompt_data
             for i, proposer in enumerate(self.agents):
-                context = list(prompt_tokens)
-                proposer_response = proposer.generate_response(np.array(context), prompt_image)
+                critics = [a for a in self.agents if a.agent_id != proposer.agent_id]
+                proposer_response = proposer.generate_response(np.array(prompt_tokens), prompt_image)
 
                 if ask_help_token_id in proposer_response:
-                    agent_scores[proposer.agent_id] += REWARD_ASK_HELP
+                    agent_scores[proposer.agent_id] += REWARD_ASKING_FOR_HELP
                     helper = self.agents[(i + 1) % len(self.agents)]
-                    context.extend(proposer_response)
+                    if helper.agent_id == proposer.agent_id: continue
+
+                    context = list(prompt_tokens) + proposer_response
                     helper_response = helper.generate_response(np.array(context), prompt_image)
 
-                    if provide_help_token_id in helper_response:
-                        agent_scores[helper.agent_id] += REWARD_PROVIDE_HELP
-                        final_response = proposer_response + helper_response
-                        critics = [a for a in self.agents if a.agent_id not in [proposer.agent_id, helper.agent_id]]
-                        if not critics: critics = [proposer]
+                    critics_for_helper = [a for a in self.agents if a.agent_id not in [proposer.agent_id, helper.agent_id]]
+                    if not critics_for_helper: critics_for_helper = [proposer]
 
-                        critique_scores = [c.critique_response(prompt_tokens, prompt_image, final_response) for c in critics]
-                        avg_score = np.mean(critique_scores) if critique_scores else 0
-                        agent_scores[proposer.agent_id] += avg_score * REWARD_CRITIQUE_BASE
-                        agent_scores[helper.agent_id] += avg_score * REWARD_CRITIQUE_BASE
+                    critique_scores = [c.critique_response(context, prompt_image, helper_response) for c in critics_for_helper]
+                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+
+                    if avg_critique_score > SUCCESS_THRESHOLD:
+                        agent_scores[helper.agent_id] += REWARD_GOOD_HELP * avg_critique_score
+                        agent_scores[proposer.agent_id] += REWARD_GOOD_HELP * avg_critique_score
+                    else:
+                        agent_scores[helper.agent_id] += PENALTY_BAD_HELP * (1 - avg_critique_score)
 
                 elif i_dont_know_token_id in proposer_response:
                     agent_scores[proposer.agent_id] += REWARD_ADMIT_IGNORANCE
 
                 else:
-                    if provide_help_token_id in proposer_response:
-                        agent_scores[proposer.agent_id] += PENALTY_UNSOLICITED_HELP
-
-                    critics = self.agents[:i] + self.agents[i+1:]
                     critique_scores = [c.critique_response(prompt_tokens, prompt_image, proposer_response) for c in critics]
-                    avg_score = np.mean(critique_scores) if critique_scores else 0
-                    agent_scores[proposer.agent_id] += avg_score * REWARD_CRITIQUE_BASE
+                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+
+                    if avg_critique_score > SUCCESS_THRESHOLD:
+                        agent_scores[proposer.agent_id] += REWARD_INDEPENDENT_SUCCESS * avg_critique_score
+                    else:
+                        agent_scores[proposer.agent_id] += PENALTY_INDEPENDENT_FAILURE * (1 - avg_critique_score)
 
         for agent in self.agents:
             agent.update_fitness_score(agent_scores[agent.agent_id])

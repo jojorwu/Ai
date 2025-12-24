@@ -33,9 +33,9 @@ class TestTokenizer(unittest.TestCase):
         Проверяет, что размер словаря правильный и включает все
         специальные токены и уникальные символы.
         """
-        # 9 спец. токенов + уникальные символы из файла
+        # 8 спец. токенов + уникальные символы из файла
         unique_chars = set("abcstart{{\"tool\": \"test\"}}end")
-        expected_vocab_size = 9 + len(unique_chars)
+        expected_vocab_size = 8 + len(unique_chars)
         self.assertEqual(self.tokenizer.vocab_size, expected_vocab_size)
         self.assertIn('<TOOL_CALL>', self.tokenizer.char_to_idx)
         self.assertIn('{', self.tokenizer.char_to_idx)
