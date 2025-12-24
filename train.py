@@ -151,7 +151,11 @@ def run_evolution_cycle(base_model, tokenizer, data, config: Config):
 
     # 3. Оценка и отбор лучших
     logging.info("Оценка и отбор лучших агентов...")
-    best_agents = agent_manager.evaluate_and_select_best(top_k=evo_config.num_survivors)
+    best_agents = agent_manager.collaborative_evaluation(
+        evaluation_data=data[:50],  # Используем небольшую часть данных для оценки
+        tokenizer=tokenizer,
+        top_k=evo_config.num_survivors
+    )
     if not best_agents:
         logging.warning("Не найдено ни одного подходящего агента для слияния. Пропуск слияния.")
         return time.time() - start_time

@@ -60,13 +60,22 @@ class TestAgentEvolution(unittest.TestCase):
         # 2. --- Agent Evolution Cycle ---
         agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
-        # Mock the experience of agents to create a clear winner
-        # Agent 0 will have a high "surprise" (fitness)
-        agent_manager.agents[0].total_surprise = 10.0
-        agent_manager.agents[0].experience_count = 1
-        # Agent 1 will have low "surprise"
-        agent_manager.agents[1].total_surprise = 1.0
-        agent_manager.agents[1].experience_count = 1
+        # Mock the generate_response and critique_response methods
+        import types
+        def mock_generate_response(agent_self, prompt, image_data=None, max_len=50):
+            # Agent 0 asks for help
+            if agent_self.agent_id == 'agent_0':
+                return [tokenizer.char_to_idx['<ASK_FOR_HELP>']]
+            # Agent 1 provides help
+            else:
+                return [tokenizer.char_to_idx['<PROVIDE_HELP>']]
+
+        def mock_critique_response(agent_self, prompt, image_data, response):
+            return 1.0
+
+        for agent in agent_manager.agents:
+            agent.generate_response = types.MethodType(mock_generate_response, agent)
+            agent.critique_response = types.MethodType(mock_critique_response, agent)
 
         # Also, let's manually change the LTM of the winning agent to see the merge
         winning_agent_ltm = agent_manager.agents[0].model.long_term_memory
@@ -74,7 +83,11 @@ class TestAgentEvolution(unittest.TestCase):
         changed_weights += 0.5 # Introduce a noticeable change
         winning_agent_ltm.layers[0].W = changed_weights
 
-        best_agents = agent_manager.evaluate_and_select_best(top_k=1)
+        best_agents = agent_manager.collaborative_evaluation(
+            evaluation_data=[([1, 2, 3], None)],
+            tokenizer=tokenizer,
+            top_k=1
+        )
         agent_manager.merge_agents(best_agents)
 
         # 3. --- Assertions ---

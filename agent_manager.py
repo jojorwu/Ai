@@ -94,23 +94,6 @@ class AgentManager:
 
         print("Agent specialization complete.")
 
-    def evaluate_and_select_best(self, top_k: int) -> List[Agent]:
-        """
-        Evaluates all agents based on their internally tracked fitness and returns the top_k best.
-        """
-        print(f"Evaluating agents and selecting top {top_k}...")
-        if not self.agents:
-            return []
-
-        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
-
-        top_agents = sorted_agents[:top_k]
-        print("  - Fitness scores:")
-        for agent in sorted_agents:
-             print(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
-
-        return top_agents
-
     def merge_agents(self, best_agents: List[Agent]):
         """
         Averages the LTM weights of the "best" agents and updates the base model's LTM.
@@ -140,41 +123,68 @@ class AgentManager:
             self.base_model.long_term_memory.set_state(avg_ltm_state)
             print("Base model's LTM has been updated with merged weights.")
 
-    def cross_critique_evaluation(self, evaluation_data: list, tokenizer: Tokenizer, top_k: int) -> List[Agent]:
+    def collaborative_evaluation(self, evaluation_data: list, tokenizer: Tokenizer, top_k: int) -> List[Agent]:
         """
-        Evaluates agents using a cross-critique method.
-        Each agent generates a response, and the others critique it.
+        Evaluates agents using a collaborative method where they can ask for help,
+        admit they don't know, or provide help, with corresponding rewards.
         """
         if not self.agents or len(self.agents) < 2:
-            print("Warning: Cross-critique requires at least 2 agents.")
+            print("Warning: Collaborative evaluation requires at least 2 agents.")
             return self.agents[:top_k]
 
-        agent_scores = {agent.agent_id: [] for agent in self.agents}
+        agent_scores = {agent.agent_id: 0.0 for agent in self.agents}
+        REWARD_ASK_HELP = 1.0
+        REWARD_ADMIT_IGNORANCE = 1.0
+        REWARD_PROVIDE_HELP = 1.5
+        PENALTY_UNSOLICITED_HELP = -2.0
+        REWARD_CRITIQUE_BASE = 0.5
+
+        ask_help_token_id = tokenizer.char_to_idx.get('<ASK_FOR_HELP>')
+        i_dont_know_token_id = tokenizer.char_to_idx.get('<I_DONT_KNOW>')
+        provide_help_token_id = tokenizer.char_to_idx.get('<PROVIDE_HELP>')
 
         eval_prompts = evaluation_data[:min(len(evaluation_data), self.num_agents * 2)]
 
         for prompt_data in eval_prompts:
             prompt_tokens, prompt_image = prompt_data
-
             for i, proposer in enumerate(self.agents):
-                response_tokens = proposer.generate_response(prompt_tokens, prompt_image)
-                critique_scores = []
-                critics = self.agents[:i] + self.agents[i+1:]
-                for critic in critics:
-                    score = critic.critique_response(prompt_tokens, prompt_image, response_tokens)
-                    critique_scores.append(score)
+                context = list(prompt_tokens)
+                proposer_response = proposer.generate_response(np.array(context), prompt_image)
 
-                avg_score = np.mean(critique_scores) if critique_scores else 0
-                agent_scores[proposer.agent_id].append(avg_score)
+                if ask_help_token_id in proposer_response:
+                    agent_scores[proposer.agent_id] += REWARD_ASK_HELP
+                    helper = self.agents[(i + 1) % len(self.agents)]
+                    context.extend(proposer_response)
+                    helper_response = helper.generate_response(np.array(context), prompt_image)
+
+                    if provide_help_token_id in helper_response:
+                        agent_scores[helper.agent_id] += REWARD_PROVIDE_HELP
+                        final_response = proposer_response + helper_response
+                        critics = [a for a in self.agents if a.agent_id not in [proposer.agent_id, helper.agent_id]]
+                        if not critics: critics = [proposer]
+
+                        critique_scores = [c.critique_response(prompt_tokens, prompt_image, final_response) for c in critics]
+                        avg_score = np.mean(critique_scores) if critique_scores else 0
+                        agent_scores[proposer.agent_id] += avg_score * REWARD_CRITIQUE_BASE
+                        agent_scores[helper.agent_id] += avg_score * REWARD_CRITIQUE_BASE
+
+                elif i_dont_know_token_id in proposer_response:
+                    agent_scores[proposer.agent_id] += REWARD_ADMIT_IGNORANCE
+
+                else:
+                    if provide_help_token_id in proposer_response:
+                        agent_scores[proposer.agent_id] += PENALTY_UNSOLICITED_HELP
+
+                    critics = self.agents[:i] + self.agents[i+1:]
+                    critique_scores = [c.critique_response(prompt_tokens, prompt_image, proposer_response) for c in critics]
+                    avg_score = np.mean(critique_scores) if critique_scores else 0
+                    agent_scores[proposer.agent_id] += avg_score * REWARD_CRITIQUE_BASE
 
         for agent in self.agents:
-            final_score = np.mean(agent_scores[agent.agent_id]) if agent_scores[agent.agent_id] else 0
-            agent.update_fitness_score(final_score)
+            agent.update_fitness_score(agent_scores[agent.agent_id])
 
         sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
-
-        print("  - Cross-Critique Fitness scores:")
+        print("  - Collaborative Evaluation Fitness scores:")
         for agent in sorted_agents:
-             print(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
-
+            print(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
         return sorted_agents[:top_k]
