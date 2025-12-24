@@ -34,7 +34,7 @@ class TestRotaryEmbedding(unittest.TestCase):
 
         dx_analytic = rotary_backward(dout, x, cos, sin)
 
-        dx_numerical = numerical_gradient(lambda: apply_rotary_pos_emb(x, cos, sin), x, dout)
+        dx_numerical = numerical_gradient(lambda x_arg: apply_rotary_pos_emb(x_arg, cos, sin), x, dout)
 
         check_gradient(self, dx_analytic, dx_numerical, "dx")
         logging.info("All Rotary Embedding gradient checks passed!")

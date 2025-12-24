@@ -30,10 +30,12 @@ def numerical_gradient(model_forward, param, dout, epsilon=1e-5):
         original_value = param[ix]
 
         param[ix] = original_value + epsilon
-        fx_plus_h = np.sum(model_forward() * dout)
+        # Pass the perturbed parameter to the forward function
+        fx_plus_h = np.sum(model_forward(param) * dout)
 
         param[ix] = original_value - epsilon
-        fx_minus_h = np.sum(model_forward() * dout)
+        # Pass the perturbed parameter to the forward function
+        fx_minus_h = np.sum(model_forward(param) * dout)
 
         grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
 

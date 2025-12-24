@@ -31,13 +31,13 @@ class TestLinear(unittest.TestCase):
         dw = layer.dW
         db = layer.db
 
-        dx_num = numerical_gradient(lambda: layer.forward(x), x, dout)
+        dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")
 
-        dw_num = numerical_gradient(lambda: layer.forward(x), layer.W, dout)
+        dw_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.W, dout)
         check_gradient(self, dw, dw_num, "dW")
 
-        db_num = numerical_gradient(lambda: layer.forward(x), layer.b, dout)
+        db_num = numerical_gradient(lambda b_arg: layer.forward(x), layer.b, dout)
         check_gradient(self, db, db_num, "db")
 
         logging.info("All Linear gradient checks passed!")

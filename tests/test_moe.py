@@ -45,7 +45,7 @@ class TestMoE(unittest.TestCase):
             if analytical_grad is None:
                 continue
             numerical_grad_val = numerical_gradient(
-                lambda: self.moe.forward(self.input_data)[0], param, dout
+                lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
             )
             check_gradient(self, analytical_grad, numerical_grad_val, f"gate.{param_name}")
 
@@ -57,7 +57,7 @@ class TestMoE(unittest.TestCase):
                     if analytical_grad is None:
                         continue
                     numerical_grad_val = numerical_gradient(
-                        lambda: self.moe.forward(self.input_data)[0], param, dout
+                        lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
                     )
                     check_gradient(self, analytical_grad, numerical_grad_val,
                                  f"expert_{i}.{layer_name}.{param_name}")

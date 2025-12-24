@@ -32,15 +32,13 @@ class TestAttention(unittest.TestCase):
         _ = attention.forward(q, k, v)
         dq, dk, dv = attention.backward(dout)
 
-        forward_fn = lambda: attention.forward(q, k, v)
-
-        dq_num = numerical_gradient(forward_fn, q, dout)
+        dq_num = numerical_gradient(lambda q_arg: attention.forward(q_arg, k, v), q, dout)
         check_gradient(self, dq, dq_num, "dQ")
 
-        dk_num = numerical_gradient(forward_fn, k, dout)
+        dk_num = numerical_gradient(lambda k_arg: attention.forward(q, k_arg, v), k, dout)
         check_gradient(self, dk, dk_num, "dK")
 
-        dv_num = numerical_gradient(forward_fn, v, dout)
+        dv_num = numerical_gradient(lambda v_arg: attention.forward(q, k, v_arg), v, dout)
         check_gradient(self, dv, dv_num, "dV")
 
         logging.info("All ScaledDotProductAttention gradient checks passed!")

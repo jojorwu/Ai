@@ -32,10 +32,10 @@ class TestRMSNorm(unittest.TestCase):
         dx = norm.backward(dout)
         dgamma = norm.dgamma
 
-        dgamma_num = numerical_gradient(lambda: norm.forward(x), norm.gamma, dout)
+        dgamma_num = numerical_gradient(lambda gamma_arg: norm.forward(x), norm.gamma, dout)
         check_gradient(self, dgamma, dgamma_num, "dgamma")
 
-        dx_num = numerical_gradient(lambda: norm.forward(x), x, dout)
+        dx_num = numerical_gradient(lambda x_arg: norm.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")
 
         logging.info("All RMSNorm gradient checks passed!")

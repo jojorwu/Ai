@@ -32,7 +32,7 @@ class TestFeedForward(unittest.TestCase):
         dx_analytic = ffn.backward(dout)
 
         logging.info("Checking gradients for input: dx...")
-        dx_numerical = numerical_gradient(lambda: ffn.forward(x), x, dout)
+        dx_numerical = numerical_gradient(lambda x_arg: ffn.forward(x_arg), x, dout)
         check_gradient(self, dx_analytic, dx_numerical, "input dx")
 
         all_linear_layers = {'w1': ffn.w1, 'w2': ffn.w2, 'w3': ffn.w3}
@@ -40,7 +40,7 @@ class TestFeedForward(unittest.TestCase):
             params = layer_obj.get_trainable_params()
             for p_name, (p_param, p_grad) in params.items():
                 logging.info(f"Checking gradients for parameter: {layer_name}.{p_name}...")
-                grad_numerical = numerical_gradient(lambda: ffn.forward(x), p_param, dout)
+                grad_numerical = numerical_gradient(lambda p_arg: ffn.forward(x), p_param, dout)
                 check_gradient(self, p_grad, grad_numerical, f"parameter {layer_name}.{p_name}")
 
         logging.info("All SwiGLU FeedForward gradient checks passed!")
