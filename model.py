@@ -283,6 +283,51 @@ class Transformer:
         self.embedding.dW += d_embedding_w_from_output
         return dx
 
+    def _update_ltm_if_surprised(self, token_arr, kv_cache, seq_offset):
+        """Calculates 'surprise' and updates LTM if the threshold is exceeded."""
+        if not self.long_term_memory:
+            return
+
+        self.zero_grad()
+        self.long_term_memory.zero_grad()
+
+        logits_for_grad, token_val, _ = self.forward(token_arr,
+                                                     kv_cache=kv_cache,
+                                                     seq_offset=seq_offset)
+        d_val = np.ones_like(token_val)
+        d_logits = np.zeros_like(logits_for_grad)
+        self.backward(d_logits, d_val)
+
+        ltm_params = self.long_term_memory.get_trainable_params()
+        squared_grads = [np.sum(grad ** 2) for _, grad in ltm_params.values() if grad is not None]
+
+        if squared_grads:
+            grad_norm = np.sqrt(sum(squared_grads))
+            if grad_norm > self.ltm_surprise_threshold:
+                self.ltm_optimizer.step(ltm_params)
+
+        self.long_term_memory.zero_grad()
+
+    def _generate_speculative_chunk(self, temp_logits, kv_cache, current_seq_len,
+                                    max_new_tokens, speculative_steps,
+                                    temperature, top_k, top_p):
+        """Generates a small 'chunk' of tokens speculatively."""
+        speculative_chunk = []
+        chunk_len = min(speculative_steps, max_new_tokens - len(speculative_chunk))
+        final_value = None
+
+        for i in range(chunk_len):
+            token_id = _sample_from_logits(temp_logits[0, -1, :], temperature, top_k, top_p)
+            speculative_chunk.append(token_id)
+            next_token_arr = np.array([[token_id]])
+
+            self._update_ltm_if_surprised(next_token_arr, kv_cache, current_seq_len + i)
+
+            temp_logits, final_value, _ = self.forward(next_token_arr,
+                                                       kv_cache=kv_cache,
+                                                       seq_offset=current_seq_len + i)
+        return speculative_chunk, temp_logits, final_value
+
     # pylint: disable=too-many-locals, too-many-arguments, too-many-branches, too-many-statements
     def generate(self, start_tokens, max_new_tokens, images=None, temperature=1.0, top_k=0, top_p=0.0,
                  speculative_steps=5, value_threshold=-1.0, max_retries=3):
@@ -296,62 +341,30 @@ class Transformer:
         all_generated_tokens = []
         prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
 
-        # The initial forward pass can contain an image.
+        # Initial forward pass for the prompt (can contain an image).
         logits, _, _ = self.forward(prompt_tokens, images=images, kv_cache=kv_cache, seq_offset=0)
-        # After the first pass, the image has been processed into the KV cache.
-        # Subsequent steps are text-only.
-        # We need to calculate the new sequence length if an image was present.
-        if images is not None and self.tokenizer is not None and self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens:
-             # This is a simplification. A robust implementation would calculate the exact number of patches.
+
+        # Calculate new sequence length if an image was present.
+        if (images is not None and self.tokenizer is not None and
+                self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens):
             num_patches = (self.vision_encoder.patch_size // 16) ** 2
             current_seq_len = prompt_tokens.shape[1] - 1 + num_patches
         else:
             current_seq_len = prompt_tokens.shape[1]
 
-
         while len(all_generated_tokens) < max_new_tokens:
             accepted = False
             for _ in range(max_retries):
                 attempt_cache = kv_cache.copy()
-                speculative_chunk = []
-                chunk_len = min(speculative_steps, max_new_tokens - len(all_generated_tokens))
-                temp_logits = logits
 
-                for i in range(chunk_len):
-                    token_id = _sample_from_logits(temp_logits[0, -1, :], temperature, top_k, top_p)
-                    speculative_chunk.append(token_id)
-                    next_token_arr = np.array([[token_id]])
-
-                    if self.long_term_memory:
-                        self.zero_grad()
-                        self.long_term_memory.zero_grad()
-
-                        logits_for_grad, token_val, _ = self.forward(next_token_arr,
-                                                                     kv_cache=attempt_cache,
-                                                                     seq_offset=current_seq_len + i)
-
-                        d_val = np.ones_like(token_val)
-                        d_logits = np.zeros_like(logits_for_grad)
-                        self.backward(d_logits, d_val)
-
-                        ltm_params = self.long_term_memory.get_trainable_params()
-
-                        squared_grads = [np.sum(grad ** 2) for _, grad in ltm_params.values() if
-                                         grad is not None]
-                        if squared_grads:
-                            grad_norm = np.sqrt(sum(squared_grads))
-                            if grad_norm > self.ltm_surprise_threshold:
-                                self.ltm_optimizer.step(ltm_params)
-
-                        self.long_term_memory.zero_grad()
-
-                    temp_logits, final_value, _ = self.forward(next_token_arr,
-                                                               kv_cache=attempt_cache,
-                                                               seq_offset=current_seq_len + i)
+                chunk, temp_logits, final_value = self._generate_speculative_chunk(
+                    logits, attempt_cache, current_seq_len,
+                    max_new_tokens - len(all_generated_tokens),
+                    speculative_steps, temperature, top_k, top_p)
 
                 if final_value is not None and final_value.item() >= value_threshold:
-                    all_generated_tokens.extend(speculative_chunk)
-                    current_seq_len += chunk_len
+                    all_generated_tokens.extend(chunk)
+                    current_seq_len += len(chunk)
                     logits = temp_logits
                     kv_cache.restore(attempt_cache.snapshot())
                     accepted = True
