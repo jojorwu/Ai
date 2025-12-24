@@ -61,16 +61,26 @@ class Transformer:
         self._flat_params_cache = None
         self.tokenizer = tokenizer
 
+        self._init_layers(model_config, vision_config, ltm_config)
+
+        self.value_head_linear = Linear(self.d_model, 1, bias=False)
+        self.value_head_activation = Tanh()
+        self.initial_ltm_state = None
+        self.final_norm_output = None
+
+    def _init_layers(self, model_config, vision_config, ltm_config):
+        """Initializes the layers of the model."""
         d_k = self.d_model // self.num_heads
         self.rotary_emb = RotaryPositionalEmbedding(d_k, self.max_seq_len)
-        self.embedding = Embedding(vocab_size, self.d_model)
+        self.embedding = Embedding(self.vocab_size, self.d_model)
         self.vision_encoder = VisionEncoder(d_model=self.d_model,
                                             patch_size=vision_config.patch_size,
                                             num_channels=vision_config.num_channels)
 
         self.long_term_memory = None
         if model_config.ltm_d_hidden and model_config.ltm_num_layers and ltm_config:
-            self.long_term_memory = LongTermMemory(self.d_model, model_config.ltm_d_hidden,
+            self.long_term_memory = LongTermMemory(self.d_model,
+                                                   model_config.ltm_d_hidden,
                                                    model_config.ltm_num_layers)
             self.ltm_optimizer = Adam(**ltm_config.optimizer.model_dump())
             self.ltm_surprise_threshold = ltm_config.surprise_threshold
@@ -78,19 +88,16 @@ class Transformer:
             self.long_term_memory = None
 
         self.decoder_blocks = [
-            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff,
-                         dropout_rate=self.dropout_rate, num_kv_heads=self.num_kv_heads,
-                         rotary_emb=self.rotary_emb, num_layers=self.num_layers,
+            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads,
+                         d_ff=self.d_ff, dropout_rate=self.dropout_rate,
+                         num_kv_heads=self.num_kv_heads, rotary_emb=self.rotary_emb,
+                         num_layers=self.num_layers,
                          long_term_memory=self.long_term_memory,
                          num_experts=model_config.num_experts,
                          top_k_experts=model_config.top_k_experts)
             for _ in range(self.num_layers)
         ]
         self.final_norm = RMSNorm(self.d_model)
-        self.value_head_linear = Linear(self.d_model, 1, bias=False)
-        self.value_head_activation = Tanh()
-        self.initial_ltm_state = None
-        self.final_norm_output = None
 
     def get_children(self):
         """Returns a dictionary of child layers."""
@@ -145,7 +152,7 @@ class Transformer:
         """Resets gradients in all trainable layers to zero."""
         for layer_obj in self.get_named_params().values():
             if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+                for param_name, _ in layer_obj.get_trainable_params().items():
                     grad_attr_name = f"d{param_name}"
                     if hasattr(layer_obj, grad_attr_name):
                         grad_val = getattr(layer_obj, grad_attr_name)
@@ -224,7 +231,8 @@ class Transformer:
                             # Replace the <IMAGE> token embedding with patch embeddings
                             pre_image_part = text_embeddings[i, :start_idx]
                             post_image_part = text_embeddings[i, start_idx + 1:]
-                            combined = np.concatenate([pre_image_part, patch_embeddings[i], post_image_part], axis=0)
+                            combined = np.concatenate(
+                                [pre_image_part, patch_embeddings[i], post_image_part], axis=0)
                             final_embeddings.append(combined)
                         else:
                             final_embeddings.append(text_embeddings[i])
@@ -308,7 +316,8 @@ class Transformer:
         self.backward(d_logits, d_val)
 
         ltm_params = self.long_term_memory.get_trainable_params()
-        squared_grads = [np.sum(grad ** 2) for _, grad in ltm_params.values() if grad is not None]
+        squared_grads = [np.sum(grad ** 2) for _, grad in ltm_params.values()
+                         if grad is not None]
 
         if squared_grads:
             grad_norm = np.sqrt(sum(squared_grads))
@@ -337,29 +346,35 @@ class Transformer:
                                                        seq_offset=current_seq_len + i)
         return speculative_chunk, temp_logits, final_value
 
-    # pylint: disable=too-many-locals, too-many-arguments, too-many-branches, too-many-statements
-    def generate(self, start_tokens, max_new_tokens, images=None, temperature=1.0, top_k=0, top_p=0.0,
-                 speculative_steps=5, value_threshold=-1.0, max_retries=3):
-        """Generates a sequence of tokens."""
-        self.eval()
-
-        batch_size = 1
+    def _initialize_kv_cache(self, batch_size):
+        """Initializes the KV cache for generation."""
         d_k = self.d_model // self.num_heads
-        kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
+        return KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
-        all_generated_tokens = []
-        prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
-
-        # Initial forward pass for the prompt (can contain an image).
+    def _process_prompt(self, start_tokens, images, kv_cache):
+        """Processes the initial prompt and returns logits and sequence length."""
+        prompt_tokens = np.array(start_tokens).reshape(1, -1)
         logits, _, _ = self.forward(prompt_tokens, images=images, kv_cache=kv_cache, seq_offset=0)
 
-        # Calculate new sequence length if an image was present.
         if (images is not None and self.tokenizer is not None and
                 self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens):
             num_patches = (self.vision_encoder.patch_size // 16) ** 2
             current_seq_len = prompt_tokens.shape[1] - 1 + num_patches
         else:
             current_seq_len = prompt_tokens.shape[1]
+
+        return logits, current_seq_len
+
+    # pylint: disable=too-many-locals, too-many-arguments, too-many-branches, too-many-statements
+    def generate(self, start_tokens, max_new_tokens, images=None, temperature=1.0,
+                 top_k=0, top_p=0.0, speculative_steps=5, value_threshold=-1.0,
+                 max_retries=3):
+        """Generates a sequence of tokens."""
+        self.eval()
+        kv_cache = self._initialize_kv_cache(batch_size=1)
+        all_generated_tokens = []
+
+        logits, current_seq_len = self._process_prompt(start_tokens, images, kv_cache)
 
         while len(all_generated_tokens) < max_new_tokens:
             accepted = False
