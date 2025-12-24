@@ -105,5 +105,39 @@ class TestAgentEvolution(unittest.TestCase):
                 self.assertEqual(best_agents[0].agent_id, details["expected_winner"])
                 print(f"  - Scenario '{scenario_name}' PASSED.")
 
+    def test_merge_agents_functionality(self):
+        """
+        Tests that the merge_agents method correctly updates the base model's LTM.
+        """
+        print("\\nRunning Test: Agent Merging Functionality...")
+        config = Config.from_json('config.json')
+        config.model.d_model, config.model.num_layers, config.model.num_heads, config.model.d_ff = 16, 1, 2, 32
+        config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
+
+        tokenizer = Tokenizer(self.data_dir)
+        base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model, ltm_config=config.ltm)
+        initial_ltm_state = base_model.long_term_memory.get_state()
+        initial_ltm_weights = initial_ltm_state['linear_0']['W']
+
+        agent_manager = AgentManager(base_model=base_model, num_agents=2)
+
+        # Manually create a "best agent" and modify its LTM weights
+        best_agent = agent_manager.agents[0]
+        winning_agent_ltm = best_agent.model.long_term_memory
+        changed_weights = np.copy(winning_agent_ltm.layers[0].W)
+        changed_weights += 0.5  # Introduce a noticeable change
+        winning_agent_ltm.layers[0].W = changed_weights
+
+        agent_manager.merge_agents([best_agent])
+
+        updated_ltm_state = base_model.long_term_memory.get_state()
+        updated_ltm_weights = updated_ltm_state['linear_0']['W']
+
+        self.assertFalse(np.allclose(initial_ltm_weights, updated_ltm_weights),
+                         "Base model's LTM weights did not change after merge.")
+        self.assertTrue(np.allclose(updated_ltm_weights, changed_weights),
+                        "Merged LTM weights do not match the winning agent's weights.")
+        print("Agent Merging Functionality test PASSED.")
+
 if __name__ == "__main__":
     unittest.main()
