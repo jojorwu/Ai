@@ -1,25 +1,27 @@
 """
-Утилиты для численной проверки градиентов в тестах.
+Utilities for numerical gradient checking in tests.
 """
+import logging
 
 import numpy as np
 
+
 def check_gradient(test_case, analytical_grad, numerical_grad, name):
-    """Сравнивает аналитический и численный градиенты."""
+    """Compares analytical and numerical gradients."""
     is_close = np.allclose(analytical_grad, numerical_grad, rtol=1e-4, atol=1e-4)
     if not is_close:
-        print(f"Gradient check for {name} FAILED")
-        print("Analytical grad:", analytical_grad)
-        print("Numerical grad:", numerical_grad)
-        print("Difference:", np.abs(analytical_grad - numerical_grad))
+        logging.error(f"Gradient check for {name} FAILED")
+        logging.error(f"Analytical grad: {analytical_grad}")
+        logging.error(f"Numerical grad: {numerical_grad}")
+        logging.error(f"Difference: {np.abs(analytical_grad - numerical_grad)}")
     test_case.assertTrue(is_close, f"Gradient check for {name} FAILED")
-    print(f"Gradient check for {name} PASSED.")
+    logging.info(f"Gradient check for {name} PASSED.")
 
 
 def numerical_gradient(model_forward, param, dout, epsilon=1e-5):
     """
-    Вычисляет численный градиент для параметра `param` с использованием
-    функции прямого прохода `model_forward`.
+    Computes the numerical gradient for a parameter `param` using
+    the forward pass function `model_forward`.
     """
     grad_numerical = np.zeros_like(param)
     it = np.nditer(param, flags=['multi_index'], op_flags=['readwrite'])

@@ -3,20 +3,23 @@ This module contains the Trainer class, which encapsulates the core training log
 """
 import logging
 import time
+
 import numpy as np
+
+from agent_manager import AgentManager
 from config import Config
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from nn_components.lr_scheduler import cosine_decay_with_warmup
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
-from agent_manager import AgentManager
 from utils import get_batches
 
 class Trainer:
     """
     Encapsulates the training and validation logic.
     """
+    # pylint: disable=too-many-arguments
     def __init__(self, config: Config, model: Transformer, optimizer: Adam,
                  loss_fn: SoftmaxCrossEntropy, tokenizer: Tokenizer,
                  train_data: list, val_data: list):
@@ -42,6 +45,7 @@ class Trainer:
         self.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')
 
+    # pylint: disable=too-many-locals
     def train_pretrain_epoch(self, current_step):
         """Runs one epoch of pre-training."""
         evo_config, scheduler_config = self.config.evolution, self.config.scheduler
@@ -69,7 +73,7 @@ class Trainer:
                 clip_gradients(self.model.get_named_params(flat=False), self.max_norm)
 
                 max_lr = self.optimizer.initial_lr
-                new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr, **scheduler_config.dict())
+                new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr, **scheduler_config.model_dump())
                 self.optimizer.lr = new_lr
 
                 params_with_grads = {f"{name}.{k}": v for name, layer in self.model.get_named_params().items()

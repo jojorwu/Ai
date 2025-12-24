@@ -1,44 +1,41 @@
 """
-Переключаемый бэкенд для вычислений.
-Позволяет выбирать между NumPy (cpu), CuPy (gpu) и будущей поддержкой MPS.
+Switchable backend for computations.
+Allows choosing between NumPy (cpu), CuPy (gpu), and future MPS support.
 """
 import importlib
-import os
+import logging
 
-# Глобальная переменная для хранения текущего бэкенда.
-# Изначально None, устанавливается функцией set_backend.
+# Global variable to hold the current backend.
+# Initially None, set by the set_backend function.
 np = None
+
 
 def set_backend(device='cpu'):
     """
-    Устанавливает и импортирует необходимый бэкенд для вычислений.
-
+    Sets and imports the required backend for computations.
     Args:
-        device (str): Устройство для вычислений. 'cpu', 'gpu', или 'mps'.
+        device (str): The device for computations. 'cpu', 'gpu', or 'mps'.
     """
     global np
     if device == 'gpu':
         try:
-            # CuPy для вычислений на GPU NVIDIA
             np = importlib.import_module('cupy')
-            print("Using CuPy for GPU acceleration")
+            logging.info("Using CuPy for GPU acceleration")
         except ImportError:
-            print("CuPy not found, falling back to NumPy on CPU for 'gpu' device.")
+            logging.warning("CuPy not found, falling back to NumPy on CPU for 'gpu' device.")
             np = importlib.import_module('numpy')
     elif device == 'mps':
-        # В будущем здесь может быть реализация для Apple Silicon (MPS).
-        # На данный момент NumPy является наиболее совместимым вариантом.
-        print("MPS backend is not yet fully supported, falling back to NumPy on CPU.")
+        logging.warning("MPS backend is not yet fully supported, falling back to NumPy on CPU.")
         np = importlib.import_module('numpy')
     elif device == 'cpu':
-        # NumPy для вычислений на CPU
         np = importlib.import_module('numpy')
-        print("Using NumPy on CPU")
+        logging.info("Using NumPy on CPU")
     else:
         raise ValueError(f"Unsupported device: {device}. Choose from 'cpu', 'gpu', 'mps'.")
 
-# Устанавливаем CPU (NumPy) как бэкенд по умолчанию при первом импорте.
-# Основные скрипты (train.py, generate.py) должны вызывать set_backend
-# с нужным значением из конфига, чтобы переопределить это.
+
+# Set CPU (NumPy) as the default backend on first import.
+# Main scripts (train.py, generate.py) should call set_backend
+# with the value from the config to override this.
 if np is None:
     set_backend('cpu')

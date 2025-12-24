@@ -1,23 +1,28 @@
+"""
+Tests for multimodal integration.
+"""
+import os
 import unittest
-from backend import np
+
 from config import Config
 from model import Transformer
 from tokenizer import Tokenizer
-import os
+
 
 class TestMultimodalIntegration(unittest.TestCase):
+    """
+    Tests for multimodal integration.
+    """
+
     @classmethod
     def setUpClass(cls):
-        """Настройка, выполняемая один раз перед всеми тестами."""
-        # Создаем временную директорию и файл для токенизатора
+        """Set up the test environment."""
         cls.temp_dir = "temp_test_dir"
         os.makedirs(cls.temp_dir, exist_ok=True)
-        with open(os.path.join(cls.temp_dir, "vocab.txt"), "w") as f:
+        with open(os.path.join(cls.temp_dir, "vocab.txt"), "w", encoding='utf-8') as f:
             f.write("a b c <IMAGE>")
 
-        # Загружаем конфигурацию
         cls.config = Config.from_json('config.json')
-        # Уменьшаем размеры для скорости тестов
         cls.config.model.d_model = 16
         cls.config.model.num_heads = 2
         cls.config.model.d_ff = 32
@@ -35,7 +40,7 @@ class TestMultimodalIntegration(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        """Очистка после всех тестов."""
+        """Clean up after tests."""
         os.remove(os.path.join(cls.temp_dir, "vocab.txt"))
         os.rmdir(cls.temp_dir)
 
