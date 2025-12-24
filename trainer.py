@@ -76,7 +76,7 @@ class Trainer:
                 new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr, **scheduler_config.model_dump())
                 self.optimizer.lr = new_lr
 
-                params_with_grads = {f"{name}.{k}": v for name, layer in self.model.get_named_params().items()
+                params_with_grads = {f"{name}.{k}": (v[0], v[1]) for name, layer in self.model.get_named_params().items()
                                      if hasattr(layer, 'get_trainable_params')
                                      for k, v in layer.get_trainable_params().items()}
                 self.optimizer.step(params_with_grads)

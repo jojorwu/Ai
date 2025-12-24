@@ -45,7 +45,7 @@ class TestAgentEvolution(unittest.TestCase):
 
         tokenizer = Tokenizer(self.data_dir)
         base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
-                                 ltm_config=config.ltm)
+                                 vision_config=config.vision, ltm_config=config.ltm)
 
         scenarios = {
             "INDEPENDENT_SUCCESS": {
@@ -117,7 +117,7 @@ class TestAgentEvolution(unittest.TestCase):
 
         tokenizer = Tokenizer(self.data_dir)
         base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
-                                 ltm_config=config.ltm)
+                                 vision_config=config.vision, ltm_config=config.ltm)
         initial_ltm_state = base_model.long_term_memory.get_state()
         initial_ltm_weights = initial_ltm_state['linear_0']['W']
 

@@ -32,7 +32,7 @@ class TestTokenizer(unittest.TestCase):
         special tokens and unique characters.
         """
         unique_chars = set("abcstart{{\"tool\": \"test\"}}end")
-        expected_vocab_size = 8 + len(unique_chars)
+        expected_vocab_size = 9 + len(unique_chars)
         self.assertEqual(self.tokenizer.vocab_size, expected_vocab_size)
         self.assertIn('<TOOL_CALL>', self.tokenizer.char_to_idx)
         self.assertIn('{', self.tokenizer.char_to_idx)

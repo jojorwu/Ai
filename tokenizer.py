@@ -17,7 +17,8 @@ class Tokenizer:
             '<TOOL_CALL>', '</TOOL_CALL>',
             '<TOOL_OUTPUT>', '</TOOL_OUTPUT>',
             '<ASK_FOR_HELP>',
-            '<I_DONT_KNOW>'
+            '<I_DONT_KNOW>',
+            '<IMAGE>'
         ]
         self.chars = []
         self.char_to_idx = {}

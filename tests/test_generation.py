@@ -18,6 +18,7 @@ class TestGeneration(unittest.TestCase):
         self.model = Transformer(
             vocab_size=50,
             model_config=self.config.model,
+            vision_config=self.config.vision,
             ltm_config=self.config.ltm
         )
 
