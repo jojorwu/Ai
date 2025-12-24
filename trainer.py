@@ -108,9 +108,7 @@ class Trainer:
         logging.info("Specializing %d agents...", evo_config.num_agents)
         agent_manager.specialize_agents_on_dataset(
             full_data=self.train_data,
-            tokenizer=self.tokenizer,
-            seq_len=evo_config.seq_len,
-            batch_size=evo_config.batch_size,
+            evo_config=evo_config,
             steps_per_agent=10
         )
 
