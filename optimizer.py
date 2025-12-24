@@ -1,11 +1,12 @@
 """
-Реализация оптимизатора AdamW.
+Implementation of the AdamW optimizer.
 """
 from backend import np
 
+
 class Adam:
     """
-    Оптимизатор Adam с поддержкой Decoupled Weight Decay (AdamW).
+    Adam optimizer with Decoupled Weight Decay (AdamW).
     """
     def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999,
                  epsilon=1e-8, weight_decay=0.01):
@@ -20,7 +21,7 @@ class Adam:
         self.v = {}
 
     def step(self, params_with_grads):
-        """Выполняет один шаг оптимизации."""
+        """Performs a single optimization step."""
         self.t += 1
 
         for name, (param, grad) in params_with_grads.items():
@@ -40,22 +41,23 @@ class Adam:
             self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (grad ** 2)
 
             # Bias correction
-            m_hat = self.m[name] / (1 - self.beta1 ** self.t)
-            v_hat = self.v[name] / (1 - self.beta2 ** self.t)
+            m_corrected = self.m[name] / (1 - self.beta1 ** self.t)
+            v_corrected = self.v[name] / (1 - self.beta2 ** self.t)
 
             # Update weights
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+            param -= self.lr * m_corrected / (np.sqrt(v_corrected) + self.epsilon)
 
     def get_state(self):
-        """Возвращает состояние оптимизатора."""
+        """Returns the state of the optimizer."""
         return {'m': self.m, 'v': self.v, 't': self.t}
 
     def set_state(self, state):
-        """Устанавливает состояние оптимизатора."""
+        """Sets the state of the optimizer."""
         self.m, self.v, self.t = state['m'], state['v'], state['t']
 
+
 def clip_gradients(named_params, max_norm):
-    """Обрезает градиенты по общей норме."""
+    """Clips gradients by their total norm."""
     grads_to_clip = []
     for layer_obj in named_params.values():
         if hasattr(layer_obj, 'get_trainable_params'):

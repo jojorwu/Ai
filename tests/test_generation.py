@@ -1,16 +1,11 @@
 """
 Tests for the text generation functionality.
 """
-
-import os
-import sys
 import unittest
-import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from model import Transformer
 from config import Config
+from model import Transformer
+
 
 class TestGeneration(unittest.TestCase):
     """
@@ -18,10 +13,12 @@ class TestGeneration(unittest.TestCase):
     """
 
     def setUp(self):
+        """Set up the test environment."""
         self.config = Config.from_json('config.json')
         self.model = Transformer(
             vocab_size=50,
             model_config=self.config.model,
+            vision_config=self.config.vision,
             ltm_config=self.config.ltm
         )
 

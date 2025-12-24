@@ -3,10 +3,13 @@ Implementation of the Agent class for the evolutionary training approach.
 """
 import copy
 import uuid
+
 from backend import np
+
 from model import Transformer
-from optimizer import Adam
 from nn_components.loss import SoftmaxCrossEntropy
+from optimizer import Adam
+
 
 class Agent:
     """
@@ -14,6 +17,7 @@ class Agent:
     The agent encapsulates a Transformer model and the logic to train its LTM
     based on new experiences (Test-Time Training).
     """
+
     def __init__(self, base_model: Transformer, agent_id=None):
         """
         Initializes an agent by cloning a base model.
@@ -93,33 +97,30 @@ class Agent:
         """Updates the agent's fitness score (used by AgentManager)."""
         self._fitness_score = score
 
-    def generate_response(self, prompt_tokens: np.ndarray, image_data: np.ndarray = None, max_len=50) -> list[int]:
+    def generate_response(self, prompt_tokens: np.ndarray,
+                          image_data: np.ndarray = None, max_new_tokens=50) -> list[int]:
         """
         Generates a response based on a prompt (text + image).
         """
         self.model.eval()
 
-        # Ensure prompt_tokens is a 2D array for batch processing
         if prompt_tokens.ndim == 1:
             prompt_tokens = np.expand_dims(prompt_tokens, axis=0)
 
-        # Handle image data if provided
         images = np.array([image_data]) if image_data is not None else None
 
-        # Generate the response using the model's generate method
-        # Assuming model.generate handles batch inputs and returns a list of lists
-        generated_tokens_list = self.model.generate(
-            prompt_tokens,
+        generated_tokens = self.model.generate(
+            start_tokens=prompt_tokens,
             images=images,
-            max_new_tokens=max_len,
+            max_new_tokens=max_new_tokens,
             temperature=0.7,
             top_k=50
         )
 
-        # Return the first generated sequence (as this method handles one prompt at a time)
-        return generated_tokens_list[0] if generated_tokens_list else []
+        return generated_tokens.tolist()
 
-    def critique_response(self, prompt_tokens: list[int], image_data: np.ndarray, response_tokens: list[int]) -> float:
+    def critique_response(self, prompt_tokens: list[int],
+                          image_data: np.ndarray, response_tokens: list[int]) -> float:
         """
         Evaluates the "usefulness" of a generated response using its Value head.
         """

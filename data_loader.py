@@ -1,14 +1,18 @@
 """
 Module for loading multimodal data (text, images).
 """
-import os
 import logging
-from typing import List, Tuple, Optional
+import os
+from typing import List, Optional, Tuple
+
 import docx
 import PyPDF2
 from PIL import Image
+
 from backend import np
 
+
+# pylint: disable=broad-except-in-catch
 def _read_txt(file_path: str) -> str:
     """Extracts text from a .txt file."""
     try:
@@ -17,6 +21,7 @@ def _read_txt(file_path: str) -> str:
     except Exception as e:
         logging.error(f"Error reading TXT file {file_path}: {e}")
         return ""
+
 
 def _read_pdf(file_path: str) -> str:
     """Extracts text from a .pdf file."""
@@ -32,6 +37,7 @@ def _read_pdf(file_path: str) -> str:
         logging.error(f"Error reading PDF file {file_path}: {e}")
         return ""
 
+
 def _read_docx(file_path: str) -> str:
     """Extracts text from a .docx file."""
     text = []
@@ -44,6 +50,7 @@ def _read_docx(file_path: str) -> str:
         logging.error(f"Error reading DOCX file {file_path}: {e}")
         return ""
 
+
 def _read_image(file_path: str) -> Optional[np.ndarray]:
     """Loads an image and converts it to a numpy array."""
     try:
@@ -53,6 +60,7 @@ def _read_image(file_path: str) -> Optional[np.ndarray]:
     except Exception as e:
         logging.error(f"Error reading image {file_path}: {e}")
         return None
+
 
 def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, Optional[np.ndarray]]]:
     """
@@ -91,10 +99,11 @@ def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, 
                         logging.info(f"Found pair: {os.path.basename(text_path)} and {os.path.basename(image_path)}")
                         image_data = _read_image(image_path)
                         if image_data is not None:
-                           found_image = True
-                           break
+                            found_image = True
+                            break
                 if not found_image:
-                     logging.warning(f"Text {os.path.basename(text_path)} contains <IMAGE>, but no image was found.")
+                    logging.warning(
+                        f"Text {os.path.basename(text_path)} contains <IMAGE>, but no image was found.")
 
             multimodal_data.append((text_content, image_data))
 

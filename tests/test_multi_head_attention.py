@@ -1,105 +1,70 @@
 """
-Tests for the MultiHeadAttention layer.
+Tests for the optimized MultiHeadAttention layer.
 """
-
-import os
-import sys
+import logging
 import unittest
-import numpy as np
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from backend import np
 
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import RotaryPositionalEmbedding
+from tests.gradient_check import check_gradient, numerical_gradient
+
 
 class TestMultiHeadAttention(unittest.TestCase):
     """
-    Tests for the MultiHeadAttention layer.
+    Tests for the optimized MultiHeadAttention layer with a single QKV projection.
     """
-    def test_gqa_with_rope_backward_gradient_check(self):
-        """Численная проверка градиентов для `backward` метода GQA с RoPE."""
-        print("\\nRunning Test: Gradient check for GQA with RoPE backward pass...")
 
-        batch_size, seq_len, d_model, num_heads, num_kv_heads = 2, 6, 32, 8, 2
+    def test_gqa_with_rope_backward_gradient_check(self):
+        """
+        Numerically checks the gradients for the GQA backward method with RoPE
+        and a combined QKV projection.
+        """
+        logging.info("\nRunning Test: Gradient check for optimized GQA with RoPE...")
+
+        batch_size, seq_len, d_model, num_heads, num_kv_heads = 2, 8, 32, 4, 2
         d_k = d_model // num_heads
 
         np.random.seed(1337)
 
-        # Создаем и передаем RoPE
+        # Use a real RoPE instance for a more thorough test
         rope = RotaryPositionalEmbedding(d_k, max_seq_len=seq_len)
-        mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb=rope)
+        mha = MultiHeadAttention(d_model=d_model,
+                                 num_heads=num_heads,
+                                 num_kv_heads=num_kv_heads,
+                                 rotary_emb=rope,
+                                 bias=False,
+                                 num_layers=1)
 
-        q = np.random.randn(batch_size, seq_len, d_model)
-        k = np.random.randn(batch_size, seq_len, d_model)
-        v = np.random.randn(batch_size, seq_len, d_model)
+        # Single input tensor 'x' instead of separate Q, K, V
+        x_input = np.random.randn(batch_size, seq_len, d_model)
+        # Gradient from the subsequent layer
         dout = np.random.randn(batch_size, seq_len, d_model)
 
-        # --- Аналитические градиенты ---
-        _ = mha.forward(q, k, v)
-        dq, dk, dv = mha.backward(dout)
+        # --- Forward and Backward Pass ---
+        _ = mha.forward(x_input)
+        dx_analytic = mha.backward(dout)
 
-        epsilon = 1e-5
+        # --- Numerical Gradient Check ---
+        # Define a lambda for the forward pass for the numerical gradient checker
+        model_forward = lambda t: mha.forward(t)
 
-        # --- Численная проверка градиентов для входов (dq, dk, dv) ---
-        for name, x, dx_analytic in zip(['q', 'k', 'v'], [q, k, v], [dq, dk, dv]):
-            print(f"Checking gradients for input: d{name}...")
-            dx_numerical = self._numerical_gradient_input(mha, q, k, v, x, dout, epsilon)
-            self.assertTrue(np.allclose(dx_analytic, dx_numerical, rtol=1e-4, atol=1e-4),
-                            f"Gradient check for d{name} FAILED")
-            print(f"Gradient check for d{name} PASSED.")
+        # Check gradients with respect to the input tensor 'x'
+        logging.info("Checking gradients for input: dx...")
+        dx_numerical = numerical_gradient(model_forward, x_input, dout)
+        check_gradient(self, dx_analytic, dx_numerical, "dx")
 
-        # --- Численная проверка градиентов для весов (Wq, Wk, Wv, Wo) ---
-        all_linear_layers = {'wq': mha.wq, 'wk': mha.wk, 'wv': mha.wv, 'wo': mha.wo}
-        for layer_name, layer_obj in all_linear_layers.items():
-            params = layer_obj.get_trainable_params()
-            for p_name, (p_param, p_grad) in params.items():
-                print(f"Checking gradients for parameter: {layer_name}.{p_name}...")
-                grad_numerical = self._numerical_gradient_weights(mha, q, k, v, p_param, dout, epsilon)
-                self.assertTrue(np.allclose(p_grad, grad_numerical, rtol=1e-4, atol=1e-4),
-                                f"Gradient check for {layer_name}.{p_name} FAILED")
-                print(f"Gradient check for parameter {layer_name}.{p_name} PASSED.")
+        # Check gradients for all trainable parameters (qkv_proj.W and wo.W)
+        all_params = mha.get_trainable_params()
+        for param_name, (param_val, param_grad) in all_params.items():
+            logging.info(f"Checking gradients for parameter: {param_name}...")
+            # Use a lambda that captures the current parameter being tested
+            param_forward = lambda p: mha.forward(x_input)
+            grad_numerical = numerical_gradient(param_forward, param_val, dout)
+            check_gradient(self, param_grad, grad_numerical, f"d{param_name}")
 
-        print("All MultiHeadAttention gradient checks passed!")
-
-    def _numerical_gradient_input(self, model, q, k, v, x, dout, epsilon):
-        """Helper for numerical gradient checking of the input."""
-        dx_numerical = np.zeros_like(x)
-        it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            original_value = x[ix]
-
-            x[ix] = original_value + epsilon
-            fx_plus_h = np.sum(model.forward(q, k, v) * dout)
-
-            x[ix] = original_value - epsilon
-            fx_minus_h = np.sum(model.forward(q, k, v) * dout)
-
-            dx_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-            x[ix] = original_value
-            it.iternext()
-        return dx_numerical
-
-    def _numerical_gradient_weights(self, model, q, k, v, p_param, dout, epsilon):
-        """Helper for numerical gradient checking of the weights."""
-        grad_numerical = np.zeros_like(p_param)
-        it = np.nditer(p_param, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            ix = it.multi_index
-            original_value = p_param[ix]
-
-            p_param[ix] = original_value + epsilon
-            fx_plus_h = np.sum(model.forward(q, k, v) * dout)
-
-            p_param[ix] = original_value - epsilon
-            fx_minus_h = np.sum(model.forward(q, k, v) * dout)
-
-            grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-            p_param[ix] = original_value
-            it.iternext()
-        return grad_numerical
+        logging.info("Optimized MultiHeadAttention gradient checks passed!")
 
 
 if __name__ == "__main__":

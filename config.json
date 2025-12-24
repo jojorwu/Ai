@@ -63,7 +63,8 @@
         "value_threshold": -1.0,
         "max_thought_len": 50,
         "max_retries": 3,
-        "max_turns": 10
+    "max_turns": 10,
+    "context_window_size": 2048
     },
     "hardware": {
         "device": "cpu"

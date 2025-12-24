@@ -1,21 +1,21 @@
 """
 Tests for the KVCache.
 """
-
-import os
-import sys
+import logging
 import unittest
+
 import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from nn_components.kv_cache import KVCache
+
 
 class TestKVCache(unittest.TestCase):
     """
     Tests for the KVCache.
     """
+
     def setUp(self):
+        """Set up the test environment."""
         self.num_layers = 2
         self.batch_size = 1
         self.num_kv_heads = 4
@@ -23,7 +23,7 @@ class TestKVCache(unittest.TestCase):
         self.max_seq_len = 16
         self.cache = KVCache(self.num_layers, self.batch_size,
                              self.num_kv_heads, self.d_k, self.max_seq_len)
-        print("\\nRunning Test: KVCache snapshot and restore...")
+        logging.info("\nRunning Test: KVCache snapshot and restore...")
 
     def test_snapshot_and_restore(self):
         """Test the snapshot and restore functionality of the KVCache."""
@@ -50,7 +50,8 @@ class TestKVCache(unittest.TestCase):
         np.testing.assert_array_equal(self.cache.k_cache, initial_snapshot['k_cache'])
         np.testing.assert_array_equal(self.cache.v_cache, initial_snapshot['v_cache'])
 
-        print("KVCache snapshot and restore PASSED.")
+        logging.info("KVCache snapshot and restore PASSED.")
+
 
 if __name__ == '__main__':
     unittest.main()
