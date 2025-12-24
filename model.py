@@ -6,6 +6,7 @@ import json
 import numpy as np
 
 from nn_components.activations import Tanh
+from config import DecoderBlockConfig, ForwardPassInput
 from nn_components.decoder_block import DecoderBlock
 from nn_components.embedding import Embedding
 from nn_components.kv_cache import KVCache
@@ -87,14 +88,20 @@ class Transformer:
         else:
             self.long_term_memory = None
 
+        decoder_config = DecoderBlockConfig(
+            d_model=self.d_model,
+            num_heads=self.num_heads,
+            d_ff=self.d_ff,
+            dropout_rate=self.dropout_rate,
+            num_kv_heads=self.num_kv_heads,
+            num_layers=self.num_layers,
+            num_experts=model_config.num_experts,
+            top_k_experts=model_config.top_k_experts
+        )
+
         self.decoder_blocks = [
-            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads,
-                         d_ff=self.d_ff, dropout_rate=self.dropout_rate,
-                         num_kv_heads=self.num_kv_heads, rotary_emb=self.rotary_emb,
-                         num_layers=self.num_layers,
-                         long_term_memory=self.long_term_memory,
-                         num_experts=model_config.num_experts,
-                         top_k_experts=model_config.top_k_experts)
+            DecoderBlock(config=decoder_config, rotary_emb=self.rotary_emb,
+                         long_term_memory=self.long_term_memory)
             for _ in range(self.num_layers)
         ]
         self.final_norm = RMSNorm(self.d_model)
@@ -256,8 +263,15 @@ class Transformer:
         total_aux_loss = 0
 
         for i, block in enumerate(self.decoder_blocks):
-            h, aux_loss = block.forward(h, current_ltm_state, mask, kv_cache=kv_cache,
-                                        layer_idx=i, seq_offset=seq_offset)
+            forward_input = ForwardPassInput(
+                x=h,
+                ltm_state=current_ltm_state,
+                mask=mask,
+                kv_cache=kv_cache,
+                layer_idx=i,
+                seq_offset=seq_offset
+            )
+            h, aux_loss = block.forward(forward_input)
             total_aux_loss += aux_loss
 
         h = self.final_norm.forward(h)
