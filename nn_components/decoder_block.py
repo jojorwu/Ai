@@ -1,59 +1,109 @@
-import numpy as np
-from nn_components.multi_head_attention import MultiHeadAttention
-from nn_components.feed_forward import FeedForward
-from nn_components.rms_norm import RMSNorm
-from nn_components.dropout import Dropout
+"""
+Implementation of a single Transformer Decoder Block.
+"""
+from backend import np
 
+from nn_components.dropout import Dropout
+from nn_components.feed_forward import FeedForward
+from nn_components.moe import MixtureOfExperts
+from nn_components.multi_head_attention import MultiHeadAttention
+from nn_components.rms_norm import RMSNorm
+
+
+# pylint: disable=too-many-instance-attributes
 class DecoderBlock:
     """
-    Реализация одного блока декодера Трансформера с Dropout.
+    Implements a single Transformer Decoder block with Dropout, optional LTM, and optional MoE.
     """
-    def __init__(self, d_model, num_heads, d_ff, dropout_rate, num_kv_heads, rotary_emb=None):
-        self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb=rotary_emb)
-        self.ffn = FeedForward(d_model, d_ff)
+
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout_rate: float,
+                 num_kv_heads: int, rotary_emb=None, num_layers: int = 1,
+                 long_term_memory=None, num_experts: int = None, top_k_experts: int = None):
+
+        self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb,
+                                      bias=False, num_layers=num_layers)
+        self.ltm = long_term_memory
+
+        self.use_moe = num_experts is not None and top_k_experts is not None
+        if self.use_moe:
+            self.moe_layer = MixtureOfExperts(d_model, d_ff, num_experts, top_k_experts,
+                                              bias=False)
+        else:
+            self.ffn = FeedForward(d_model, d_ff, bias=False, num_layers=num_layers)
+
         self.norm1 = RMSNorm(d_model)
         self.norm2 = RMSNorm(d_model)
         self.dropout1 = Dropout(dropout_rate)
         self.dropout2 = Dropout(dropout_rate)
 
     def get_children(self):
-        """Возвращает словарь дочерних слоев."""
-        return {'mha': self.mha, 'ffn': self.ffn, 'norm1': self.norm1, 'norm2': self.norm2}
+        """Returns a dictionary of child layers for parameter traversal."""
+        children = {'mha': self.mha, 'norm1': self.norm1, 'norm2': self.norm2}
+        if self.use_moe:
+            children['moe_layer'] = self.moe_layer
+        else:
+            children['ffn'] = self.ffn
+        # Note: LTM is managed by the parent Transformer model, not as a child here
+        return children
 
     def train(self):
-        """Переключает Dropout в режим обучения."""
+        """Switches Dropout layers to training mode."""
         self.dropout1.is_training = True
         self.dropout2.is_training = True
 
     def eval(self):
-        """Переключает Dropout в режим генерации."""
+        """Switches Dropout layers to evaluation (inference) mode."""
         self.dropout1.is_training = False
         self.dropout2.is_training = False
 
-    def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
-        x_norm1 = self.norm1.forward(x)
-        attn_output = self.mha.forward(q=x_norm1, k=x_norm1, v=x_norm1, mask=mask,
-                                       kv_cache=kv_cache, layer_idx=layer_idx, seq_offset=seq_offset)
+    def forward(self, x, ltm_state, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
+        """Performs the forward pass of the Decoder Block."""
+        aux_loss = 0
+        # Additive memory injection before the first sub-layer
+        x_with_mem = x + ltm_state if self.ltm else x
+        x_norm1 = self.norm1.forward(x_with_mem)
+
+        attn_output = self.mha.forward(x_norm1, mask=mask, kv_cache=kv_cache,
+                                       layer_idx=layer_idx, seq_offset=seq_offset)
+
+        # First residual connection
         x = x + self.dropout1.forward(attn_output)
 
         x_norm2 = self.norm2.forward(x)
-        ffn_output = self.ffn.forward(x_norm2)
+
+        if self.use_moe:
+            ffn_output, aux_loss = self.moe_layer.forward(x_norm2)
+        else:
+            ffn_output = self.ffn.forward(x_norm2)
+
+        # Second residual connection
         x = x + self.dropout2.forward(ffn_output)
-        return x
+        return x, aux_loss
 
     def backward(self, dout):
+        """Performs the backward pass of the Decoder Block."""
+        # --- Second Residual Connection Backward ---
         d_ffn_output = self.dropout2.backward(dout)
         dx_residual2 = dout
 
-        d_x_norm2 = self.ffn.backward(d_ffn_output)
-        dx_from_norm2 = self.norm2.backward(d_x_norm2)
-        dx_after_attn = dx_from_norm2 + dx_residual2
+        # --- FFN/MoE Backward ---
+        if self.use_moe:
+            d_x_norm2 = self.moe_layer.backward(d_ffn_output)
+        else:
+            d_x_norm2 = self.ffn.backward(d_ffn_output)
 
-        d_attn_output = self.dropout1.backward(dx_after_attn)
-        dx_residual1 = dx_after_attn
+        d_x_after_attn = self.norm2.backward(d_x_norm2) + dx_residual2
 
-        dq, dk, dv = self.mha.backward(d_attn_output)
-        d_x_norm1 = dq + dk + dv
-        dx_from_norm1 = self.norm1.backward(d_x_norm1)
-        dx = dx_from_norm1 + dx_residual1
-        return dx
+        # --- First Residual Connection Backward ---
+        d_attn_output = self.dropout1.backward(d_x_after_attn)
+        dx_residual1 = d_x_after_attn
+
+        # --- MHA Backward ---
+        d_x_norm1 = self.mha.backward(d_attn_output)
+        d_x_with_mem = self.norm1.backward(d_x_norm1)
+
+        # --- LTM State Gradient ---
+        dx = d_x_with_mem + dx_residual1
+        d_ltm_state = np.sum(d_x_with_mem, axis=1, keepdims=True) if self.ltm else 0
+
+        return dx, d_ltm_state

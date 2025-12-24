@@ -1,72 +1,128 @@
 """
-Pydantic модели для строгой типизации и валидации конфигурации проекта.
+Pydantic models for strong typing and validation of the project configuration.
 """
-
 import json
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
 
-class ModelConfig(BaseModel):
-    """Конфигурация архитектуры модели Transformer."""
-    d_model: int = Field(..., description="Размерность векторов модели.")
-    num_layers: int = Field(..., description="Количество слоев в энкодере и декодере.")
-    num_heads: int = Field(..., description="Количество голов в Multi-Head Attention.")
-    num_kv_heads: int = Field(..., description="Количество голов для Key/Value в Grouped-Query Attention.")
-    d_ff: int = Field(..., description="Размерность в Feed-Forward слоях.")
-    max_seq_len: int = Field(..., description="Максимальная длина последовательности.")
-    dropout_rate: float = Field(..., description="Вероятность отключения нейронов в Dropout слоях.")
 
-class TrainingConfig(BaseModel):
-    """Конфигурация процесса обучения."""
-    epochs: int = Field(..., description="Количество эпох обучения.")
-    batch_size: int = Field(..., description="Размер одного батча.")
-    seq_len: int = Field(..., description="Длина последовательности для обучения.")
-    gradient_accumulation_steps: int = Field(..., description="Количество шагов для накопления градиентов.")
-    validation_split: float = Field(..., description="Доля данных для валидации.")
-    contrastive_margin: float = Field(..., description="Маржа для contrastive loss.")
-    num_candidates: int = Field(..., description="Количество кандидатов для contrastive loss.")
-    data_dir: str = Field(..., description="Директория с обучающими данными.")
-    weights_path: str = Field(..., description="Путь для сохранения финальных весов модели.")
-    checkpoint_path: str = Field(..., description="Путь для сохранения чекпоинтов.")
+class ModelConfig(BaseModel):
+    """Configuration for the Transformer model architecture."""
+    d_model: int = Field(..., description="Dimensionality of the model's vectors.")
+    num_layers: int = Field(..., description="Number of layers in the encoder and decoder.")
+    num_heads: int = Field(..., description="Number of heads in Multi-Head Attention.")
+    num_kv_heads: int = Field(...,
+                                description="Number of heads for Key/Value in Grouped-Query Attention.")
+    d_ff: int = Field(..., description="Dimensionality in Feed-Forward layers.")
+    max_seq_len: int = Field(..., description="Maximum sequence length.")
+    dropout_rate: float = Field(..., description="Dropout probability.")
+    ltm_d_hidden: Optional[int] = Field(None, description="Dimensionality of the hidden layer in LTM.")
+    ltm_num_layers: Optional[int] = Field(None, description="Number of layers in LTM.")
+    num_experts: Optional[int] = Field(None, description="Number of 'experts' in the MoE layer.")
+    top_k_experts: Optional[int] = Field(None,
+                                       description="Number of 'experts' to select for each token.")
+
+
+class VisionConfig(BaseModel):
+    """Configuration for the Vision Encoder."""
+    image_size: tuple[int, int] = Field((224, 224), description="Input image size (height, width).")
+    patch_size: int = Field(16, description="Size of a single image patch.")
+    num_channels: int = Field(3, description="Number of channels in the image (e.g., 3 for RGB).")
+
+
+class EvolutionConfig(BaseModel):
+    """Configuration for the evolutionary training process."""
+    pretrain_epochs: int = Field(...,
+                                 description="Number of epochs for initial pre-training of the base model.")
+    evolution_epochs: int = Field(..., description="Number of evolution cycles (generations) for agents.")
+    num_agents: int = Field(..., description="Number of agents in a single population.")
+    num_survivors: int = Field(...,
+                                 description="Number of best agents whose LTMs will be merged.")
+    batch_size: int = Field(..., description="Size of a single batch.")
+    seq_len: int = Field(..., description="Sequence length for training.")
+    gradient_accumulation_steps: int = Field(...,
+                                               description="Number of steps to accumulate gradients.")
+    validation_split: float = Field(..., description="Fraction of data to use for validation.")
+    data_dir: str = Field(..., description="Directory with training data.")
+    weights_path: str = Field(..., description="Path to save the final model weights.")
+    checkpoint_path: Optional[str] = Field(None, description="Path to save checkpoints.")
+    early_stopping_patience: int = Field(3,
+                                         description="Number of epochs without improvement for early stopping.")
+    best_model_path: str = Field("best_model.npz", description="Path to save the best model.")
+    moe_aux_loss_coeff: float = Field(0.01,
+                                      description="Coefficient for the MoE auxiliary 'balancing' loss.")
+
 
 class OptimizerConfig(BaseModel):
-    """Конфигурация оптимизатора Adam."""
-    learning_rate: float = Field(..., description="Скорость обучения.")
-    beta1: float = Field(..., description="Коэффициент beta1 для Adam.")
-    beta2: float = Field(..., description="Коэффициент beta2 для Adam.")
-    epsilon: float = Field(..., description="Малое значение для предотвращения деления на ноль.")
-    weight_decay: float = Field(..., description="Коэффициент затухания весов (L2 регуляризация).")
-    max_norm: float = Field(..., description="Максимальная норма для обрезки градиентов.")
+    """Configuration for the Adam optimizer."""
+    learning_rate: float = Field(..., description="Learning rate.")
+    beta1: float = Field(..., description="Beta1 coefficient for Adam.")
+    beta2: float = Field(..., description="Beta2 coefficient for Adam.")
+    epsilon: float = Field(..., description="Small value to prevent division by zero.")
+    weight_decay: float = Field(..., description="Weight decay coefficient (L2 regularization).")
+    max_norm: float = Field(..., description="Maximum norm for gradient clipping.")
+
+
+class LTMOptimizerConfig(BaseModel):
+    """Configuration for the LTM's Adam optimizer."""
+    learning_rate: float
+    beta1: float
+    beta2: float
+    epsilon: float
+    weight_decay: float
+
+
+class LTMConfig(BaseModel):
+    """Configuration for the Long-Term Memory (LTM)."""
+    surprise_threshold: float = Field(..., description="'Surprise' threshold for updating the LTM.")
+    optimizer: LTMOptimizerConfig
+
 
 class SchedulerConfig(BaseModel):
-    """Конфигурация планировщика скорости обучения."""
-    warmup_steps: int = Field(..., description="Количество шагов для 'прогрева'.")
-    min_lr: float = Field(..., description="Минимальное значение скорости обучения.")
+    """Configuration for the learning rate scheduler."""
+    warmup_steps: int = Field(..., description="Number of 'warm-up' steps.")
+    min_lr: float = Field(..., description="Minimum learning rate value.")
+
 
 class GenerationConfig(BaseModel):
-    """Конфигурация процесса генерации текста."""
-    start_text: str = Field(..., description="Начальный текст для генерации.")
-    max_len: int = Field(..., description="Максимальная длина генерируемого текста.")
-    temperature: float = Field(..., description="Температура для сэмплирования.")
-    top_k: int = Field(..., description="Top-k для сэмплирования.")
-    top_p: float = Field(..., description="Top-p (nucleus) для сэмплирования.")
-    speculative_steps: int = Field(..., description="Количество спекулятивных шагов.")
-    value_threshold: float = Field(..., description="Порог значения для принятия спекулятивной генерации.")
-    max_thought_len: int = Field(..., description="Максимальная длина 'мыслей'.")
-    max_retries: int = Field(..., description="Максимальное количество попыток при неудачной спекуляции.")
-    max_turns: int = Field(10, description="Максимальное количество итераций (вызовов инструментов) в цикле агента.")
+    """Configuration for the text generation process."""
+    start_text: str = Field(..., description="Initial text for generation.")
+    max_len: int = Field(..., description="Maximum length of the generated text.")
+    temperature: float = Field(..., description="Temperature for sampling.")
+    top_k: int = Field(..., description="Top-k for sampling.")
+    top_p: float = Field(..., description="Top-p (nucleus) for sampling.")
+    speculative_steps: int = Field(..., description="Number of speculative steps.")
+    value_threshold: float = Field(...,
+                                     description="Value threshold for accepting speculative generation.")
+    max_thought_len: int = Field(..., description="Maximum length of 'thoughts'.")
+    max_retries: int = Field(..., description="Maximum number of retries on failed speculation.")
+    max_turns: int = Field(10,
+                             description="Maximum number of iterations (tool calls) in the agent loop.")
+    context_window_size: int = Field(2048,
+                                       description="The number of tokens to retain in the conversation history.")
+
+
+class HardwareConfig(BaseModel):
+    """Hardware configuration."""
+    device: Literal["cpu", "gpu", "mps"] = Field("cpu",
+                                                  description="Device for computations (cpu, gpu, mps).")
 
 
 class Config(BaseModel):
-    """Основная конфигурационная модель."""
+    """Main configuration model."""
     model: ModelConfig
-    training: TrainingConfig
+    vision: VisionConfig
+    evolution: EvolutionConfig
     optimizer: OptimizerConfig
+    ltm: LTMConfig
     scheduler: SchedulerConfig
     generation: GenerationConfig
+    hardware: HardwareConfig
 
     @classmethod
     def from_json(cls, file_path: str) -> 'Config':
-        """Загружает конфигурацию из JSON файла и валидирует ее."""
+        """Loads and validates the configuration from a JSON file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return cls(**data)

@@ -1,53 +1,45 @@
-import numpy as np
+"""
+Реализация Dropout для регуляризации.
+"""
+from backend import np
 
 class Dropout:
     """
-    Слой Dropout для регуляризации.
+    Слой Dropout. Во время обучения случайным образом обнуляет часть
+    входных элементов с вероятностью `rate`, чтобы предотвратить переобучение.
+    Во время оценки (evaluation) слой ничего не меняет.
     """
-    def __init__(self, dropout_rate):
+    def __init__(self, rate=0.1):
         """
-        Инициализация слоя.
-
+        Инициализация.
         Args:
-            dropout_rate (float): Вероятность обнуления нейрона (от 0 до 1).
+            rate (float): Вероятность обнуления элемента.
         """
-        self.dropout_rate = dropout_rate
-        self.is_training = True  # По умолчанию слой в режиме обучения
+        self.rate = rate
         self.mask = None
+        self.is_training = True
+
+    def train(self):
+        """Включает режим обучения."""
+        self.is_training = True
+
+    def eval(self):
+        """Включает режим оценки."""
+        self.is_training = False
 
     def forward(self, x):
         """
-        Прямой проход.
-
-        Args:
-            x (np.ndarray): Входной тензор.
-
-        Returns:
-            np.ndarray: Выходной тензор.
+        Прямой проход Dropout.
         """
         if self.is_training:
-            # Во время обучения создаем маску и применяем ее
-            # Используем инвертированный dropout: масштабируем на этапе обучения,
-            # чтобы ничего не делать на этапе генерации.
-            self.mask = (np.random.rand(*x.shape) > self.dropout_rate) / (1.0 - self.dropout_rate)
+            self.mask = np.random.binomial(1, 1.0 - self.rate, size=x.shape) / (1.0 - self.rate)
             return x * self.mask
-        else:
-            # Во время генерации просто возвращаем вход
-            return x
+        return x
 
-    def backward(self, dout):
+    def backward(self, d_out):
         """
-        Обратный проход.
-
-        Args:
-            dout (np.ndarray): Градиент с предыдущего слоя.
-
-        Returns:
-            np.ndarray: Градиент, пропущенный через dropout-маску.
+        Обратный проход для Dropout.
         """
-        # Градиент проходит только через те нейроны, которые были активны
-        return dout * self.mask
-
-    def get_params(self):
-        # Dropout не имеет обучаемых параметров
-        return []
+        if self.mask is None or not self.is_training:
+            return d_out
+        return d_out * self.mask

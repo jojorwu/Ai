@@ -1,66 +1,106 @@
-# Трансформер с Нуля на NumPy
+# Transformer from Scratch using NumPy
 
-Это реализация нейросети-трансформера в стиле GPT (decoder-only) с нуля, используя только библиотеку NumPy. Модель способна обучаться на любых текстовых файлах и генерировать текст на их основе.
+This project is a decoder-only Transformer (GPT-style) implemented from scratch using only NumPy. It features an agent-based evolutionary training system and is capable of multimodal learning (text and images).
 
-## Ключевые архитектурные особенности
+## Core Architectural Features
 
-- **Модульная структура**: Все компоненты (`Embedding`, `MultiHeadAttention`, `RMSNorm` и т.д.) реализованы как отдельные классы в директории `nn_components/`.
-- **Grouped-Query Attention (GQA)**: Реализован GQA для ускорения работы и уменьшения размера KV-кэша. Это компромисс между Multi-Head и Multi-Query Attention.
-- **RMSNorm**: Вместо `LayerNormalization` используется `RMSNorm` (Root Mean Square Normalization) для повышения вычислительной эффективности.
-- **KV-Кэширование**: Реализован KV-кэш для значительного ускорения процесса генерации текста (инференса).
-- **Rotary Positional Embeddings (RoPE)**: Вместо абсолютных синусоидальных эмбеддингов используются Rotary Embeddings, которые применяются напрямую к Query и Key векторам в механизме внимания. Это улучшает понимание относительных позиций токенов.
-- **SwiGLU Feed-Forward**: Вместо стандартного FFN с GELU активацией используется более продвинутый `SwiGLU` (Swish-Gated Linear Unit), который часто показывает лучшие результаты.
-- **Weight Tying**: Веса `Embedding` слоя и финального `Linear` слоя связаны (являются одной и той же матрицей). Это значительно сокращает количество параметров и улучшает производительность модели.
-- **Оптимизатор AdamW**: Для обучения используется оптимизатор `Adam` с `Decoupled Weight Decay` (AdamW) для лучшей регуляризации и предотвращения переобучения.
-- **Накопление градиентов (Gradient Accumulation)**: Реализована техника накопления градиентов, позволяющая эмулировать больший размер батча и обучать модель на системах с ограниченной памятью.
-- **Сохранение и возобновление обучения (Checkpointing)**: Скрипт обучения поддерживает сохранение контрольных точек, включая состояние модели, оптимизатора и процесса обучения, и может автоматически возобновлять обучение с последней точки.
-- **LR Scheduler**: Реализован планировщик скорости обучения с "прогревом" и косинусным спадом (`Cosine Decay with Warmup`) для более стабильного и качественного обучения.
-- **Dropout**: Реализован и используется Dropout для регуляризации во время обучения.
-- **Численно стабильная функция потерь**: Для вычисления потерь используется комбинация `log_softmax` и `Negative Log-Likelihood`, что обеспечивает большую численную стабильность.
+- **Modular Design**: Components like `Embedding`, `MultiHeadAttention`, `RMSNorm`, etc., are implemented as separate, reusable classes in the `nn_components/` directory.
+- **Agent-based Evolutionary Learning**: Instead of a traditional single-model training loop, this project uses a population of agents. The `AgentManager` class controls their lifecycle: forking, specialization through experience, collaborative evaluation, and merging the best agents back into a base model.
+- **Multimodality**: The model can process both text and images. A `VisionEncoder` converts images into patch embeddings, which are seamlessly integrated into the Transformer's input sequence.
+- **Actor-Critic Architecture**: The Transformer has a dual-head design: a **Policy Head** for generating token logits and a **Value Head** for predicting a "usefulness" score of a sequence, crucial for the agent evaluation process.
+- **Long-Term Memory (LTM)**: Each agent possesses a separate LTM module (a smaller MLP) that allows it to specialize. The LTM is updated during inference based on a "surprise metric," enabling continuous learning.
+- **Bias-Free Architecture**: Following modern practices (e.g., Llama), linear layers in the Transformer blocks do not use bias vectors, enhancing training stability.
+- **GPT-2 Style Weight Initialization**: Improves training stability by using a proven weight initialization scheme.
+- **Grouped-Query Attention (GQA)**: Accelerates inference and reduces the KV cache size by allowing multiple query heads to share key/value heads.
+- **RMSNorm**: Uses Root Mean Square Normalization for computational efficiency over standard LayerNormalization.
+- **KV Caching**: Implemented for significantly faster text generation.
+- **Rotary Positional Embeddings (RoPE)**: Improves the model's understanding of relative token positions.
+- **SwiGLU Feed-Forward Network**: Uses the advanced Swish-Gated Linear Unit for better performance compared to standard FFNs.
+- **Mixture of Experts (MoE)**: Can be configured to use MoE layers for a massive increase in parameters with only a small increase in computational cost during inference. Includes an auxiliary load-balancing loss.
+- **Weight Tying**: The `Embedding` layer and the final `Linear` projection layer share weights, reducing the total parameter count.
+- **AdamW Optimizer**: Uses the Adam optimizer with Decoupled Weight Decay for better regularization.
+- **Advanced Training Techniques**:
+    - **Gradient Accumulation**: Emulates a larger batch size on memory-constrained hardware.
+    - **Gradient Clipping**: Prevents exploding gradients.
+    - **Checkpointing**: Automatically saves and resumes training from checkpoints.
+    - **Early Stopping**: Halts training if validation performance doesn't improve, saving the best model.
+    - **Cosine Decay with Warmup LR Scheduler**: For more stable and effective training.
+    - **Dropout**: For regularization during training.
 
-## Настройка
+## Configuration
 
-Все основные параметры находятся в файле `config.json`.
+All key parameters are managed in `config.json`.
 
-- `model`: параметры архитектуры (глубина модели, количество слоев, dropout и т.д.).
-- `training`: параметры обучения (эпохи, батч, путь к данным и чекпоинтам, шаги накопления градиентов).
-- `optimizer`: параметры оптимизатора AdamW (`learning_rate`, `beta1`, `beta2`, `weight_decay`) и порог для обрезки градиентов (`max_norm`).
-- `scheduler`: параметры для планировщика LR (`warmup_steps`, `min_lr`).
-- `generation`: параметры для генерации текста:
-    - `start_text`: Стартовая фраза.
-    - `max_len`: Максимальная длина генерируемого текста.
-    - `temperature`: "Температура" сэмплинга. Чем выше значение, тем случайнее текст.
-    - `top_k`: Оставляет только `k` самых вероятных токенов для сэмплинга, делая текст более осмысленным (установите `0` для отключения).
+- `model`: Core Transformer architecture settings (e.g., `d_model`, `num_layers`, `num_heads`).
+- `vision`: Vision encoder parameters.
+- `evolution`: Parameters for the agent-based training process (`num_agents`, `evolution_epochs`, `batch_size`, etc.).
+- `optimizer`: AdamW optimizer settings.
+- `ltm`: Long-Term Memory update parameters.
+- `scheduler`: Learning rate scheduler settings.
+- `generation`: Parameters for text generation. This includes:
+    - `temperature`, `top_k`, `top_p`: Standard sampling parameters.
+    - `context_window_size`: The maximum number of tokens to keep in the conversation history to manage memory usage.
+    - `speculative_steps`: The number of steps the model "looks ahead" to accelerate generation. A value > 0 enables speculative decoding.
+- `hardware`: Set the computation device (`cpu`, `gpu`, `mps`).
 
-## Как запустить
+## How to Run
 
-### Шаг 1: Установка зависимостей
+### Step 1: Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Шаг 2: Подготовка данных
+### Step 2: Prepare Data
 
-1.  Положите ваши текстовые файлы (`.txt`) в папку `data`.
-2.  (Опционально) Настройте параметры в `config.json` под ваши нужды.
+1.  Place your text (`.txt`) and image (`.jpg`, `.png`) files for training in the `data` directory. The `DataLoader` will automatically pair files with the same basename (e.g., `story.txt` and `story.png`).
+2.  (Optional) Adjust parameters in `config.json` to fit your needs.
 
-### Шаг 3: Обучение модели
+### Step 3: Model Management
 
-Чтобы запустить процесс обучения, выполните скрипт:
+This project includes a system for managing, training, and running different models. All models are stored in their own subdirectories within the `models/` folder.
 
-```bash
-./start/train.sh
-```
+#### Training a New Model
 
-Скрипт прочитает настройки из `config.json`, обучит модель с использованием оптимизатора Adam и сохранит обученные веса вместе с конфигом в файл `model_weights.npz`.
-
-### Шаг 4: Генерация текста
-
-После обучения модели, запустите генерацию:
+To train a new model from scratch, you must give it a unique name. The script will create a new directory inside `models/` with this name and save the model weights, configuration, and training logs there.
 
 ```bash
-./start/generate.sh
+python3 train.py --model-name <your-model-name>
+```
+*Example:* `python3 train.py --model-name my-first-model`
+
+This will create `models/my-first-model/` and start the training process.
+
+#### Resuming Training (Fine-tuning)
+
+You can continue training a previously saved model. This is useful for fine-tuning or simply resuming an interrupted session. Use the `--resume-from` flag to specify which existing model to load, and the `--model-name` flag to define where to save the results of the new training session (you can use the same name to overwrite or a new name to create a fine-tuned version).
+
+```bash
+python3 train.py --resume-from <existing-model-name> --model-name <your-model-name>
+```
+*Example to continue training:*
+`python3 train.py --resume-from my-first-model --model-name my-first-model`
+
+*Example to fine-tune:*
+`python3 train.py --resume-from my-first-model --model-name my-finetuned-model`
+
+#### Generating Text
+
+To generate text, you can either specify which model to use or have the script prompt you to choose from the available models.
+
+**Option A: Specify the model directly**
+
+```bash
+python3 generate.py --model-name <your-model-name>
+```
+*Example:* `python3 generate.py --model-name my-first-model`
+
+**Option B: Choose from a list**
+
+If you run the script without specifying a model name, it will scan the `models/` directory and present a list of all available models for you to choose from.
+
+```bash
+python3 generate.py
 ```
 
-Скрипт загрузит обученную модель и сгенерирует текст на основе параметров из секции `generation` в `config.json`.
+The script will load the selected model and its associated configuration to run the agentic generation loop.

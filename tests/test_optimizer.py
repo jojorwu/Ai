@@ -1,50 +1,43 @@
 """
-Tests for the Adam optimizer.
+Tests for the `Adam` optimizer.
 """
-
-import os
-import sys
+import logging
 import unittest
-import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from backend import np
 
-from optimizer import Adam
 from nn_components.linear import Linear
+from optimizer import Adam
+
 
 class TestOptimizer(unittest.TestCase):
-    """
-    Tests for the Adam optimizer.
-    """
+    """Tests for `Adam`."""
 
     def test_adam_optimizer(self):
         """Tests the Adam optimizer with a simple linear layer."""
-        print("\\nRunning Test: Adam Optimizer...")
+        logging.info("\nRunning Test: Adam Optimizer...")
 
-        input_size, output_size = 10, 5
+        input_size = 10
+        output_size = 2
+        learning_rate = 0.01
+
         linear_layer = Linear(input_size, output_size)
+        optimizer = Adam(learning_rate=learning_rate)
 
-        named_params = {'linear': linear_layer}
+        x = np.random.randn(1, input_size)
+        d_out = np.random.randn(1, output_size)
 
-        optimizer = Adam(named_params, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-8)
+        _ = linear_layer.forward(x)
+        _ = linear_layer.backward(d_out)
 
-        mock_input = np.random.randn(1, input_size)
-        mock_grad_output = np.random.randn(1, output_size)
+        weights_before = np.copy(linear_layer.W)
+        optimizer.step(linear_layer.get_trainable_params())
+        weights_after = linear_layer.W
 
-        _ = linear_layer.forward(mock_input)
-        _ = linear_layer.backward(mock_grad_output)
+        self.assertFalse(np.array_equal(weights_before, weights_after),
+                         "Optimizer step did not update weights.")
+        logging.info("Adam Optimizer test passed.")
 
-        original_w = np.copy(linear_layer.W)
-        original_b = np.copy(linear_layer.b)
 
-        optimizer.step()
-
-        self.assertFalse(np.array_equal(original_w, linear_layer.W),
-                         "Adam optimizer did not update weights W.")
-        self.assertFalse(np.array_equal(original_b, linear_layer.b),
-                         "Adam optimizer did not update weights b.")
-
-        print("Adam Optimizer test PASSED.")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

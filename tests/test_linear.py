@@ -1,24 +1,23 @@
 """
 Tests for the Linear layer.
 """
-
-import os
-import sys
+import logging
 import unittest
-import numpy as np
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import numpy as np
 
 from nn_components.linear import Linear
 from tests.gradient_check import check_gradient, numerical_gradient
+
 
 class TestLinear(unittest.TestCase):
     """
     Tests for the Linear layer.
     """
+
     def test_linear_backward_gradient_check(self):
-        """Численная проверка градиентов для `backward` метода Linear."""
-        print("\\nRunning Test: Gradient check for Linear layer backward pass...")
+        """Numerically checks the gradients for the `backward` method of Linear."""
+        logging.info("\nRunning Test: Gradient check for Linear layer backward pass...")
 
         batch_size, seq_len, input_dim, output_dim = 2, 5, 10, 20
 
@@ -29,19 +28,20 @@ class TestLinear(unittest.TestCase):
 
         _ = layer.forward(x)
         dx = layer.backward(dout)
-        dW = layer.dW
+        dw = layer.dW
         db = layer.db
 
-        dx_num = numerical_gradient(lambda: layer.forward(x), x, dout)
+        dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")
 
-        dW_num = numerical_gradient(lambda: layer.forward(x), layer.W, dout)
-        check_gradient(self, dW, dW_num, "dW")
+        dw_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.W, dout)
+        check_gradient(self, dw, dw_num, "dW")
 
-        db_num = numerical_gradient(lambda: layer.forward(x), layer.b, dout)
+        db_num = numerical_gradient(lambda b_arg: layer.forward(x), layer.b, dout)
         check_gradient(self, db, db_num, "db")
 
-        print("All Linear gradient checks passed!")
+        logging.info("All Linear gradient checks passed!")
+
 
 if __name__ == "__main__":
     unittest.main()

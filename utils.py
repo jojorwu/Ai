@@ -1,40 +1,44 @@
-import numpy as np
+"""
+Utility functions for checkpointing and data batching.
+"""
 import json
-import os
 import logging
+import os
 
-def save_checkpoint(model, optimizer, epoch, current_step, config, filepath):
-    """Сохраняет состояние модели, оптимизатора и обучения."""
+import numpy as np
+
+
+# pylint: disable=broad-except-in-catch
+def save_checkpoint(model, optimizer, training_state, config, filepath):
+    """Saves the state of the model, optimizer, and training."""
     try:
         model_state = model.get_state()
         optimizer_state = optimizer.get_state()
 
-        training_state = {
-            'epoch': np.array(epoch),
-            'current_step': np.array(current_step)
-        }
+        np_training_state = {key: np.array(value) for key, value in training_state.items()}
 
         checkpoint = {
             **model_state,
             'optimizer_m': optimizer_state['m'],
             'optimizer_v': optimizer_state['v'],
             'optimizer_t': np.array(optimizer_state['t']),
-            **training_state
+            **np_training_state
         }
 
         config_str = json.dumps(config)
         checkpoint['config'] = np.array([config_str], dtype=object)
 
         np.savez(filepath, **checkpoint)
-        logging.info(f"Контрольная точка успешно сохранена в {filepath}")
+        logging.info(f"Checkpoint successfully saved to {filepath}")
 
     except Exception as e:
-        logging.error(f"Ошибка при сохранении контрольной точки в {filepath}: {e}", exc_info=True)
+        logging.error(f"Error saving checkpoint to {filepath}: {e}", exc_info=True)
+
 
 def load_checkpoint(model, optimizer, filepath):
-    """Загружает состояние модели, оптимизатора и обучения."""
+    """Loads the state of the model, optimizer, and training."""
     if not os.path.exists(filepath):
-        logging.warning(f"Файл контрольной точки не найден: {filepath}")
+        logging.warning(f"Checkpoint file not found: {filepath}")
         return None, None
 
     try:
@@ -50,15 +54,30 @@ def load_checkpoint(model, optimizer, filepath):
         optimizer.set_state(optimizer_state)
 
         training_state = {
-            'epoch': data['epoch'].item(),
-            'current_step': data['current_step'].item()
+            'epoch': data['epoch'].item() if 'epoch' in data else 0,
+            'current_step': data['current_step'].item() if 'current_step' in data else 0,
+            'best_val_loss': data['best_val_loss'].item() if 'best_val_loss' in data else float('inf'),
+            'epochs_no_improve': data['epochs_no_improve'].item() if 'epochs_no_improve' in data else 0
         }
 
         config = json.loads(data['config'][0])
 
-        logging.info(f"Контрольная точка успешно загружена из {filepath}")
+        logging.info(f"Checkpoint successfully loaded from {filepath}")
         return training_state, config
 
     except Exception as e:
-        logging.error(f"Ошибка при загрузке контрольной точки из {filepath}: {e}", exc_info=True)
+        logging.error(f"Error loading checkpoint from {filepath}: {e}", exc_info=True)
         return None, None
+
+def get_batches(data, batch_size, seq_len):
+    """
+    Generator function to yield batches of data.
+    """
+    num_sequences = len(data) - seq_len
+    for i in range(0, num_sequences, batch_size):
+        batch_end = i + batch_size
+        x_list, y_list = [], []
+        for j in range(i, min(batch_end, num_sequences)):
+            x_list.append(data[j:j + seq_len])
+            y_list.append(data[j + 1:j + seq_len + 1])
+        yield np.array(x_list), np.array(y_list)

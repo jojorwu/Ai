@@ -1,70 +1,67 @@
 """
-Tests for the data_loader module.
+Tests for the data_loader module, focusing on multimodal data loading.
 """
 import os
-import sys
 import shutil
 import unittest
-from unittest.mock import patch
 
-# Добавляем корневую директорию проекта в sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from PIL import Image
 
-from data_loader import load_text_from_directory
+from backend import np
+from data_loader import load_multimodal_data_from_directory
 
-class TestDataLoader(unittest.TestCase):
+
+class TestMultimodalDataLoader(unittest.TestCase):
     """
-    Tests for the data_loader module.
+    Tests for the data_loader module's multimodal capabilities.
     """
+
     def setUp(self):
-        """Настройка тестового окружения."""
-        self.test_dir = "test_data_loader_dir"
+        """Set up the test environment."""
+        self.test_dir = "test_multimodal_loader_dir"
         os.makedirs(self.test_dir, exist_ok=True)
-        # Создаем фиктивные файлы разных форматов
-        with open(os.path.join(self.test_dir, "doc1.txt"), "w") as f:
-            f.write("text content")
-        with open(os.path.join(self.test_dir, "doc2.pdf"), "w") as f:
-            f.write("pdf dummy") # Содержимое не важно, т.к. чтение будет мокнуто
-        with open(os.path.join(self.test_dir, "doc3.docx"), "w") as f:
-            f.write("docx dummy")
-        with open(os.path.join(self.test_dir, "archive.zip"), "w") as f:
+
+        with open(os.path.join(self.test_dir, "doc_with_image.txt"), "w", encoding='utf-8') as f:
+            f.write("Here is an image <IMAGE>")
+        img1 = Image.new('RGB', (10, 10), color='red')
+        img1.save(os.path.join(self.test_dir, "doc_with_image.png"))
+
+        with open(os.path.join(self.test_dir, "doc_no_image.txt"), "w", encoding='utf-8') as f:
+            f.write("This is just text.")
+
+        with open(os.path.join(self.test_dir, "doc_missing_image.txt"), "w", encoding='utf-8') as f:
+            f.write("This text expects an image <IMAGE> but has none.")
+
+        with open(os.path.join(self.test_dir, "archive.zip"), "w", encoding='utf-8') as f:
             f.write("unsupported")
 
     def tearDown(self):
-        """Очистка после тестов."""
+        """Clean up after tests."""
         shutil.rmtree(self.test_dir)
 
-    @patch('data_loader._read_docx')
-    @patch('data_loader._read_pdf')
-    @patch('data_loader._read_txt')
-    def test_load_text_from_directory_aggregates_content(self, mock_read_txt, mock_read_pdf, mock_read_docx):
+    def test_load_multimodal_data(self):
         """
-        Проверяет, что `load_text_from_directory` правильно агрегирует
-        содержимое из поддерживаемых файлов и игнорирует остальные.
+        Tests that `load_multimodal_data_from_directory` correctly
+        loads text-image pairs.
         """
-        # Настраиваем возвращаемые значения для моков
-        mock_read_txt.return_value = "text content"
-        mock_read_pdf.return_value = "pdf content"
-        mock_read_docx.return_value = "docx content"
+        loaded_data = load_multimodal_data_from_directory(self.test_dir)
+        self.assertEqual(len(loaded_data), 3)
 
-        # Вызываем тестируемую функцию
-        full_text = load_text_from_directory(self.test_dir)
+        results = {text: img for text, img in loaded_data}
 
-        # Проверяем, что моки были вызваны для соответствующих файлов
-        mock_read_txt.assert_called_once_with(os.path.join(self.test_dir, 'doc1.txt'))
-        mock_read_pdf.assert_called_once_with(os.path.join(self.test_dir, 'doc2.pdf'))
-        mock_read_docx.assert_called_once_with(os.path.join(self.test_dir, 'doc3.docx'))
+        text1 = "Here is an image <IMAGE>"
+        self.assertIn(text1, results)
+        self.assertIsNotNone(results[text1])
+        self.assertIsInstance(results[text1], np.ndarray)
+        self.assertEqual(results[text1].shape, (10, 10, 3))
 
-        # Так как порядок чтения не гарантирован (особенно после добавления многопоточности),
-        # проверяем наличие каждого фрагмента в итоговом тексте.
-        self.assertIn("text content", full_text)
-        self.assertIn("pdf content", full_text)
-        self.assertIn("docx content", full_text)
+        text2 = "This is just text."
+        self.assertIn(text2, results)
+        self.assertIsNone(results[text2])
 
-        # Проверяем, что содержимое неподдерживаемого файла отсутствует
-        self.assertNotIn("unsupported", full_text)
-
-        print("Тест test_load_text_from_directory_aggregates_content PASSED")
+        text3 = "This text expects an image <IMAGE> but has none."
+        self.assertIn(text3, results)
+        self.assertIsNone(results[text3])
 
 
 if __name__ == "__main__":
