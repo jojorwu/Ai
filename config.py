@@ -20,18 +20,25 @@ class ModelConfig(BaseModel):
     num_experts: Optional[int] = Field(None, description="Количество 'экспертов' в слое MoE.")
     top_k_experts: Optional[int] = Field(None, description="Количество выбираемых 'экспертов' для каждого токена.")
 
-class TrainingConfig(BaseModel):
-    """Конфигурация процесса обучения."""
-    training_stage: int = Field(1, description="Этап обучения: 1, 2 или 3.")
-    epochs: int = Field(..., description="Количество эпох обучения.")
+class VisionConfig(BaseModel):
+    """Конфигурация для Vision Encoder."""
+    image_size: tuple[int, int] = Field((224, 224), description="Размер входного изображения (высота, ширина).")
+    patch_size: int = Field(16, description="Размер одного 'патча' изображения.")
+    num_channels: int = Field(3, description="Количество каналов в изображении (например, 3 для RGB).")
+
+class EvolutionConfig(BaseModel):
+    """Конфигурация эволюционного процесса обучения."""
+    pretrain_epochs: int = Field(..., description="Количество эпох для начального предобучения базовой модели.")
+    evolution_epochs: int = Field(..., description="Количество циклов (поколений) эволюции агентов.")
+    num_agents: int = Field(..., description="Количество агентов в одной популяции.")
+    num_survivors: int = Field(..., description="Количество лучших агентов, чьи LTM будут объединены.")
+
     batch_size: int = Field(..., description="Размер одного батча.")
     seq_len: int = Field(..., description="Длина последовательности для обучения.")
     gradient_accumulation_steps: int = Field(..., description="Количество шагов для накопления градиентов.")
     validation_split: float = Field(..., description="Доля данных для валидации.")
-    contrastive_margin: float = Field(..., description="Маржа для contrastive loss.")
-    num_candidates: int = Field(..., description="Количество кандидатов для contrastive loss.")
-    data_dir: str = Field(..., description="Директория с данными для pre-training (этап 1 и 3).")
-    sft_data_dir: str = Field(..., description="Директория с данными для supervised fine-tuning (этап 2).")
+
+    data_dir: str = Field(..., description="Директория с обучающими данными.")
     weights_path: str = Field(..., description="Путь для сохранения финальных весов модели.")
     checkpoint_path: Optional[str] = Field(None, description="Путь для сохранения чекпоинтов.")
     early_stopping_patience: int = Field(3, description="Количество эпох без улучшения для ранней остановки.")
@@ -85,7 +92,8 @@ class HardwareConfig(BaseModel):
 class Config(BaseModel):
     """Основная конфигурационная модель."""
     model: ModelConfig
-    training: TrainingConfig
+    vision: VisionConfig
+    evolution: EvolutionConfig
     optimizer: OptimizerConfig
     ltm: LTMConfig
     scheduler: SchedulerConfig

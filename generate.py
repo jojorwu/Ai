@@ -9,7 +9,7 @@ import logging
 import re
 from copy import deepcopy
 
-from config import Config, TrainingConfig
+from config import Config
 from model import Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool

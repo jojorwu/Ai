@@ -1,93 +1,116 @@
 """
-Реализация класса Agent для эволюционного подхода к обучению.
+Implementation of the Agent class for the evolutionary training approach.
 """
-
 import copy
 import uuid
 from backend import np
 from model import Transformer
 from optimizer import Adam
+from nn_components.loss import SoftmaxCrossEntropy
 
 class Agent:
     """
-    Представляет собой одного "мини-агента" с собственной долгосрочной памятью (LTM).
-    Агент инкапсулирует модель Transformer и логику для обучения своей LTM
-    на основе нового опыта (Test-Time Training).
+    Represents a single "agent" with its own long-term memory (LTM).
+    The agent encapsulates a Transformer model and the logic to train its LTM
+    based on new experiences (Test-Time Training).
     """
     def __init__(self, base_model: Transformer, agent_id=None):
         """
-        Инициализирует агента, клонируя базовую модель.
-
+        Initializes an agent by cloning a base model.
         Args:
-            base_model (Transformer): "Родительская" модель, чьи веса будут скопированы.
-            agent_id (str, optional): Уникальный идентификатор агента.
+            base_model (Transformer): The "parent" model whose weights will be copied.
+            agent_id (str, optional): A unique identifier for the agent.
         """
         self.agent_id = agent_id or str(uuid.uuid4())
-
-        # Глубокое копирование, чтобы у каждого агента была своя независимая модель
         self.model = copy.deepcopy(base_model)
 
-        # У каждого агента свой собственный, уникальный LTM и его оптимизатор.
-        # Это ключевая часть его "индивидуальности".
         if self.model.long_term_memory:
-            # Re-initialize LTM weights to start fresh
+            # Re-initialize LTM weights so each agent starts fresh
             self.model.long_term_memory.reinitialize_weights()
+            # Each agent gets its own optimizer for its LTM
+            self.ltm_optimizer = Adam(**self.model.ltm_config.optimizer.model_dump())
+        else:
+            self.ltm_optimizer = None
 
-            # Создаем новый оптимизатор специально для этого LTM
-            self.ltm_optimizer = Adam(**self.model.ltm_config.optimizer.dict())
-            self.model.ltm_optimizer = self.ltm_optimizer # Привязываем к модели для `generate`
-
-        # Метрики для оценки "успешности" агента
+        # Metrics for evaluating the agent's "fitness"
         self.total_surprise = 0.0
         self.experience_count = 0
         self.value_score_sum = 0.0
+        self.loss_fn = SoftmaxCrossEntropy()
+        self._fitness_score = -float('inf')
 
-    def experience(self, data_tokens: np.ndarray, max_len=20):
+    def experience(self, x_batch: np.ndarray, y_batch: np.ndarray):
         """
-        Процесс получения "опыта" агентом.
-        Модель генерирует ответ на данные, и если "удивление" велико,
-        обновляет веса своего LTM.
-
-        Args:
-            data_tokens (np.ndarray): Входные данные в виде токенов.
+        The process of an agent gaining "experience" in a batch training mode.
+        Performs one LTM update step if the "surprise" is large enough.
         """
-        if not self.model.long_term_memory:
+        if not self.model.long_term_memory or self.ltm_optimizer is None:
             return
 
-        # Метод generate уже содержит логику Test-Time Training (обновление LTM)
-        # Мы просто вызываем его и собираем метрики
-        self.model.eval()
+        self.model.train()
+        self.model.zero_grad()
 
-        # Мы не используем сгенерированные токены, только запускаем процесс для обновления LTM
-        _, avg_surprise, avg_value = self.model.generate(
-            start_tokens=data_tokens,
-            max_len=max_len,
-            # Включаем TTT, но отключаем сложную логику генерации для скорости
-            speculative_steps=1,
-            temperature=0.0 # Жадная генерация
-        )
+        # 1. Forward and backward pass to get gradients
+        logits, values, _ = self.model.forward(x_batch)
+        _ = self.loss_fn.forward(logits, y_batch)
+        dlogits = self.loss_fn.backward()
+        dvalues = np.zeros_like(values)
+        self.model.backward(dlogits, dvalues)
 
-        # Обновляем метрики агента
-        self.total_surprise += avg_surprise
-        self.value_score_sum += avg_value
+        # 2. Extract LTM gradients and calculate "surprise"
+        ltm_params = self.model.long_term_memory.get_trainable_params()
+        flat_grads = np.concatenate([
+            p['grad'].ravel() for p in ltm_params.values() if p['grad'] is not None
+        ])
+
+        surprise = np.linalg.norm(flat_grads) if flat_grads.size > 0 else 0.0
+
+        # 3. Update LTM weights if surprise is high
+        if surprise > self.model.ltm_config.surprise_threshold:
+            self.ltm_optimizer.step(ltm_params)
+
+        # 4. Update agent metrics
+        self.total_surprise += surprise
+        self.value_score_sum += np.mean(values)
         self.experience_count += 1
 
+        self.model.zero_grad()
+
     def get_ltm_state(self):
-        """Возвращает состояние (веса) LTM этого агента."""
+        """Returns the state (weights) of this agent's LTM."""
         if self.model.long_term_memory:
             return self.model.long_term_memory.get_state()
         return None
 
     def get_fitness_score(self) -> float:
         """
-        Рассчитывает "приспособленность" агента.
-        Комбинированная метрика: среднее "удивление" + средний "value score".
+        Calculates the agent's fitness.
+        This score is now set externally by the AgentManager after cross-critique.
         """
-        if self.experience_count == 0:
-            return 0.0
+        return self._fitness_score
 
-        avg_surprise = self.total_surprise / self.experience_count
-        avg_value = self.value_score_sum / self.experience_count
+    def update_fitness_score(self, score: float):
+        """Updates the agent's fitness score (used by AgentManager)."""
+        self._fitness_score = score
 
-        # Комбинируем метрики. Можно добавить веса, если одна важнее другой.
-        return avg_surprise + avg_value
+    def generate_response(self, prompt_tokens: np.ndarray, image_data: np.ndarray = None, max_len=50) -> list[int]:
+        """
+        Generates a response based on a prompt (text + image).
+        STUB: This method is intended to be mocked in tests.
+        """
+        raise NotImplementedError("generate_response should be mocked in tests or implemented.")
+
+    def critique_response(self, prompt_tokens: list[int], image_data: np.ndarray, response_tokens: list[int]) -> float:
+        """
+        Evaluates the "usefulness" of a generated response using its Value head.
+        """
+        self.model.eval()
+        full_sequence = prompt_tokens + response_tokens
+        input_tokens = np.array([full_sequence])
+
+        _logits, value, _aux_loss = self.model.forward(
+            input_tokens,
+            images=np.array([image_data]) if image_data is not None else None
+        )
+
+        return value.item() if value is not None else 0.0

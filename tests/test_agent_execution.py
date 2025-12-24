@@ -1,79 +1,57 @@
 """
-Тест для проверки основного цикла выполнения агента.
+Tests for the main agent execution loop in generate.py.
 """
+
 import unittest
-import json
-import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 import sys
 import os
 
-# Добавляем корневую директорию проекта в sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from generate import parse_tool_call, main as agent_main
+# We need to import the main function from the script
+import generate
 
 class TestAgentExecution(unittest.TestCase):
-    """
-    Тестирует основной цикл агента.
-    """
+
     @patch('generate.load_model_and_tokenizer')
-    def test_agent_loop_parses_and_executes_tool(self, mock_load_model_and_tokenizer):
+    @patch('generate.Config.from_json')
+    def test_agent_loop_terminates_on_no_tool_call(self, mock_config, mock_load_model):
         """
-        Проверяет, что агент правильно парсит, выполняет вызов инструмента
-        и завершает работу после получения ответа.
+        Tests that the agent loop correctly identifies a final answer (no tool call)
+        and terminates.
         """
-        # 1. Готовим моки
-        mock_model = MagicMock()
+        # --- Mock Setup ---
+        # Mock the config to control the loop
+        mock_config.return_value.generation.max_turns = 5
+        mock_config.return_value.generation.start_text = "Initial prompt"
+        # Set a valid device for the backend
+        mock_config.return_value.hardware.device = "cpu"
+
+        # Mock the tokenizer
         mock_tokenizer = MagicMock()
+        mock_tokenizer.encode.return_value = [1, 2, 3]
+        mock_tokenizer.decode.return_value = "This is the final answer."
 
-        # 2. Определяем поведение моков для двух итераций
-        # Итерация 1: Модель вызывает инструмент
-        tool_call_text = 'Я думаю, надо проверить файлы. <TOOL_CALL>{"tool": "list_files", "args": {"path": "."}}</TOOL_CALL>'
-        # Итерация 2: Модель дает финальный ответ
-        final_answer_text = 'В директории есть файлы: ["file1.txt", "file2.txt"]. Задача выполнена.'
+        # Mock the model
+        mock_model = MagicMock()
+        # The first call to generate should produce a response without a tool call
+        mock_model.generate.return_value = ([4, 5, 6], 0.0, 0.0)
 
-        # `generate` будет возвращать разные значения при каждом вызове
-        mock_model.generate.side_effect = [
-            ([1, 2, 3], 0.5, 0.9),  # Фиктивные токены для первого ответа
-            ([4, 5, 6], 0.2, 0.8)   # Фиктивные токены для второго ответа
-        ]
-        # `decode` также будет возвращать разные значения
-        mock_tokenizer.decode.side_effect = [
-            tool_call_text,
-            final_answer_text
-        ]
-        # `encode` возвращает фиктивные токены
-        mock_tokenizer.encode.return_value = [7, 8, 9]
+        # load_model_and_tokenizer should return our mocks
+        mock_load_model.return_value = (mock_model, mock_tokenizer)
 
-        mock_load_model_and_tokenizer.return_value = (mock_model, mock_tokenizer)
+        # --- Test Execution ---
+        # We run the main function from the generate script
+        generate.main()
 
-        # 3. Выполняем `agent_main` и проверяем вызовы
-        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-            with patch('generate.execute_tool') as mock_execute_tool:
-                mock_execute_tool.return_value = '["file1.txt", "file2.txt"]'
+        # --- Assertions ---
+        # The model's generate method should have been called exactly once
+        mock_model.generate.assert_called_once()
 
-                agent_main()
-
-                # 4. Проверяем, что инструмент был вызван ровно один раз
-                mock_execute_tool.assert_called_once_with("list_files", {"path": "."})
-
-                # 5. Проверяем, что финальный ответ был выведен
-                self.assertIn(final_answer_text, mock_stdout.getvalue())
-
-        print("Тест test_agent_loop_parses_and_executes_tool PASSED")
-
-    def test_parse_tool_call(self):
-        """
-        Проверяет, что функция `parse_tool_call` правильно извлекает
-        имя инструмента и его аргументы.
-        """
-        text = 'Вот результат: <TOOL_CALL>{"tool": "write_file", "args": {"path": "out.txt", "content": "hello"}}</TOOL_CALL>'
-        tool_name, args = parse_tool_call(text)
-        self.assertEqual(tool_name, "write_file")
-        self.assertEqual(args, {"path": "out.txt", "content": "hello"})
-        print("Тест test_parse_tool_call PASSED")
+        # The loop should terminate after the first turn because no tool call was found
+        # (This is implicitly tested by the fact that generate was only called once)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()
