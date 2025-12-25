@@ -2,14 +2,14 @@
 Tests for multimodal integration.
 """
 import os
-import unittest
 import shutil
+import unittest
 
 import numpy as np
 from PIL import Image
 
 from config import Config
-from model import Transformer, ForwardPassInput
+from model import ForwardPassInput, Transformer
 from tokenizer import Tokenizer
 
 

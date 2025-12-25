@@ -3,6 +3,7 @@ Module containing the attention layer.
 """
 from backend import np
 
+
 class ScaledDotProductAttention:
     """
     Computes Scaled Dot-Product Attention with forward and backward passes.

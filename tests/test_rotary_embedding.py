@@ -6,8 +6,8 @@ import unittest
 
 import numpy as np
 
-from nn_components.rotary_embedding import (precompute_rope_embeddings,
-                                            apply_rotary_pos_emb,
+from nn_components.rotary_embedding import (apply_rotary_pos_emb,
+                                            precompute_rope_embeddings,
                                             rotary_backward)
 from tests.gradient_check import check_gradient, numerical_gradient
 

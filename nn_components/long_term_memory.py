@@ -2,9 +2,11 @@
 Module containing the long_term_memory layer.
 """
 import numpy as np
-from nn_components.linear import Linear
+
 from nn_components.activations import Tanh
+from nn_components.linear import Linear
 from utils import zero_gradients
+
 
 class LongTermMemory:
     """

@@ -8,9 +8,10 @@ import numpy as np
 
 from agent_manager import AgentManager
 from config import Config
+from data_loader import get_batches
 from nn_components.lr_scheduler import cosine_decay_with_warmup
 from optimizer import clip_gradients
-from data_loader import get_batches
+
 
 class Trainer:
     """

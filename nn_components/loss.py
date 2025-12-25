@@ -2,7 +2,9 @@
 Module containing the loss layer.
 """
 import numpy as np
+
 from nn_components.utils import log_softmax
+
 
 class SoftmaxCrossEntropy:
     """

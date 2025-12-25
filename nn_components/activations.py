@@ -3,6 +3,7 @@ This module implements various activation functions used in neural networks.
 """
 from backend import np
 
+
 class SiLU:
     """
     Sigmoid Linear Unit (SiLU) activation function, also known as Swish.
@@ -16,6 +17,7 @@ class SiLU:
         return 1 / (1 + np.exp(-x))
 
     def forward(self, x):
+        """Forward pass for the SiLU activation function."""
         self.x = x
         self.sigmoid_x = self._sigmoid(x)
         return x * self.sigmoid_x

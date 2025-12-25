@@ -24,7 +24,7 @@ class ModelConfig(BaseModel):
                                        description="Number of 'experts' to select for each token.")
 
 
-from typing import Tuple, Any
+from typing import Any, Tuple
 
 
 class MultiHeadAttentionConfig(BaseModel):

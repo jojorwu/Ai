@@ -3,6 +3,7 @@ This module implements the Root Mean Square Normalization layer.
 """
 import numpy as np
 
+
 class RMSNorm:
     """
     Implementation of Root Mean Square Normalization.

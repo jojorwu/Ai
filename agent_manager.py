@@ -5,9 +5,8 @@ import copy
 import logging
 from typing import List
 
-from backend import np
-
 from agent import Agent
+from backend import np
 from model import Transformer
 from tokenizer import Tokenizer
 

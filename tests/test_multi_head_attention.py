@@ -5,7 +5,6 @@ import logging
 import unittest
 
 from backend import np
-
 from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import precompute_rope_embeddings

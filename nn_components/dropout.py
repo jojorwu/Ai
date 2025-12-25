@@ -3,6 +3,7 @@
 """
 from backend import np
 
+
 class Dropout:
     """
     Слой Dropout. Во время обучения случайным образом обнуляет часть

@@ -5,7 +5,6 @@ import logging
 import unittest
 
 from backend import np
-
 from config import OptimizerConfig
 from nn_components.linear import Linear
 from optimizer import Adam

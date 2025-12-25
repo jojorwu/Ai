@@ -5,7 +5,6 @@ import copy
 import uuid
 
 from backend import np
-
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam

@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from config import Config
-from model import Transformer, ForwardPassInput
+from model import ForwardPassInput, Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 

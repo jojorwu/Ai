@@ -2,7 +2,6 @@
 Implementation of the Feed-Forward Network (FFN) layer with SwiGLU activation.
 """
 from backend import np
-
 from nn_components.activations import SiLU
 from nn_components.linear import Linear
 

@@ -3,6 +3,7 @@ This module implements the learning rate scheduler.
 """
 import numpy as np
 
+
 def cosine_decay_with_warmup(current_step, training_steps, warmup_steps, max_lr, min_lr):
     """
     Calculates the learning rate based on cosine decay with a warm-up phase.

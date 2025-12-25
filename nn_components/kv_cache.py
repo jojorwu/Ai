@@ -3,6 +3,7 @@ This module implements the Key-Value Cache for the self-attention layers.
 """
 import numpy as np
 
+
 class KVCache:
     """
     Cache for key-value pairs in self-attention layers, optimized for GQA.

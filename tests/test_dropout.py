@@ -2,8 +2,10 @@
 Тесты для `Dropout` слоя.
 """
 import unittest
+
 from backend import np
 from nn_components.dropout import Dropout
+
 
 class TestDropout(unittest.TestCase):
     """Тестирование слоя Dropout."""

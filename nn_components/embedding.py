@@ -3,6 +3,7 @@ Module containing the embedding layer.
 """
 import numpy as np
 
+
 class Embedding:
     """
     Layer for converting integer indices into dense vectors (embeddings).

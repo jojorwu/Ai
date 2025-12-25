@@ -3,6 +3,7 @@ This module contains utility functions for the neural network components.
 """
 import numpy as np
 
+
 def softmax(logits):
     """Numerically stable Softmax function."""
     exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))

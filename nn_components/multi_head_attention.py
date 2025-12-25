@@ -3,11 +3,11 @@ Implementation of the Multi-Head Attention layer with Grouped-Query Attention (G
 and Rotary Positional Embeddings (RoPE).
 """
 from backend import np
-
 from config import MultiHeadAttentionConfig
 from nn_components.attention import ScaledDotProductAttention
 from nn_components.linear import Linear
-from nn_components.rotary_embedding import apply_rotary_pos_emb, rotary_backward
+from nn_components.rotary_embedding import (apply_rotary_pos_emb,
+                                            rotary_backward)
 
 
 # pylint: disable=too-many-instance-attributes

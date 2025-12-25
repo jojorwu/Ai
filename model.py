@@ -2,12 +2,13 @@
 Main Transformer model implementation.
 """
 import json
+from dataclasses import dataclass
 
 import numpy as np
 
+from config import DecoderBlockConfig
 from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
-from config import DecoderBlockConfig
 from nn_components.embedding import Embedding
 from nn_components.kv_cache import KVCache
 from nn_components.linear import Linear
@@ -15,7 +16,6 @@ from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
 from nn_components.rotary_embedding import precompute_rope_embeddings
 from nn_components.utils import softmax
-from dataclasses import dataclass
 from nn_components.vision_encoder import VisionEncoder
 from optimizer import Adam
 from utils import zero_gradients
@@ -202,62 +202,51 @@ class Transformer:
         print(f"Model weights loaded from {filepath}")
         return model
 
-    # pylint: disable=too-many-arguments
-    def forward(self, inputs: ForwardPassInput):
-        """Performs the forward pass of the model."""
+    def _get_embeddings(self, inputs: ForwardPassInput):
+        """Gets text and image embeddings."""
         text_embeddings = self.embedding.forward(inputs.x) * np.sqrt(self.d_model)
-
-        if inputs.images is not None and self.tokenizer is not None:
-            image_token_id = self.tokenizer.char_to_idx.get('<IMAGE>')
-            if image_token_id is not None:
-                image_token_indices = np.where(inputs.x == image_token_id)
-                if image_token_indices[0].size > 0:
-                    patch_embeddings = self.vision_encoder.forward(inputs.images)
-                    # For simplicity, we handle one image per batch item.
-                    # The image token in each batch item is replaced by the patch embeddings.
-                    # This logic assumes a single <IMAGE> token per sequence for replacement.
-                    final_embeddings = []
-                    for i in range(inputs.x.shape[0]):
-                        img_tok_idx = np.where(inputs.x[i] == image_token_id)[0]
-                        if img_tok_idx.size > 0:
-                            start_idx = img_tok_idx[0]
-                            # Replace the <IMAGE> token embedding with patch embeddings
-                            pre_image_part = text_embeddings[i, :start_idx]
-                            post_image_part = text_embeddings[i, start_idx + 1:]
-                            combined = np.concatenate([pre_image_part, patch_embeddings[i], post_image_part], axis=0)
-                            final_embeddings.append(combined)
-                        else:
-                            final_embeddings.append(text_embeddings[i])
-                    # This logic needs to be more robust for batching with varying sequence lengths.
-                    # For now, we assume all sequences become the same length after replacement.
-                    h = np.array(final_embeddings)
-                else:
-                    h = text_embeddings
+        if inputs.images is None or self.tokenizer is None:
+            return text_embeddings
+        image_token_id = self.tokenizer.char_to_idx.get('<IMAGE>')
+        if image_token_id is None or np.where(inputs.x == image_token_id)[0].size == 0:
+            return text_embeddings
+        patch_embeddings = self.vision_encoder.forward(inputs.images)
+        final_embeddings = []
+        for i in range(inputs.x.shape[0]):
+            img_tok_idx = np.where(inputs.x[i] == image_token_id)[0]
+            if img_tok_idx.size > 0:
+                start_idx = img_tok_idx[0]
+                pre_image_part = text_embeddings[i, :start_idx]
+                post_image_part = text_embeddings[i, start_idx + 1:]
+                combined = np.concatenate([pre_image_part, patch_embeddings[i], post_image_part], axis=0)
+                final_embeddings.append(combined)
             else:
-                h = text_embeddings
-        else:
-            h = text_embeddings
+                final_embeddings.append(text_embeddings[i])
+        return np.array(final_embeddings)
 
+    def _run_decoder_stack(self, h, inputs: ForwardPassInput):
+        """Runs the forward pass through the decoder stack."""
         if self.long_term_memory:
             ltm_input = np.mean(h, axis=1, keepdims=True)
             self.initial_ltm_state = self.long_term_memory.forward(ltm_input)
         else:
             self.initial_ltm_state = 0
-
         current_ltm_state = self.initial_ltm_state
         total_aux_loss = 0
-
         for i, block in enumerate(self.decoder_blocks):
             forward_pass_input = ForwardPassInput(
-                x=h,
-                ltm_state=current_ltm_state,
-                mask=inputs.mask,
-                kv_cache=inputs.kv_cache,
-                layer_idx=i,
-                seq_offset=inputs.seq_offset
+                x=h, ltm_state=current_ltm_state, mask=inputs.mask,
+                kv_cache=inputs.kv_cache, layer_idx=i, seq_offset=inputs.seq_offset
             )
             h, aux_loss = block.forward(forward_pass_input)
             total_aux_loss += aux_loss
+        return h, total_aux_loss
+
+    # pylint: disable=too-many-arguments
+    def forward(self, inputs: ForwardPassInput):
+        """Performs the forward pass of the model."""
+        h = self._get_embeddings(inputs)
+        h, total_aux_loss = self._run_decoder_stack(h, inputs)
 
         h = self.final_norm.forward(h)
         self.final_norm_output = h

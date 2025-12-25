@@ -3,6 +3,7 @@ Module containing the linear layer.
 """
 import numpy as np
 
+
 class Linear:
     """
     A fully connected (linear) layer with an optional bias.

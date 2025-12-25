@@ -18,8 +18,8 @@ def _read_txt(file_path: str) -> str:
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return f.read()
-    except Exception as e:
-        logging.error(f"Error reading TXT file {file_path}: {e}")
+    except (IOError, OSError) as e:
+        logging.error("Error reading TXT file %s: %s", file_path, e)
         return ""
 
 
@@ -33,8 +33,8 @@ def _read_pdf(file_path: str) -> str:
             if page_text:
                 text.append(page_text)
         return "\n".join(text)
-    except Exception as e:
-        logging.error(f"Error reading PDF file {file_path}: {e}")
+    except (IOError, OSError, PyPDF2.errors.PyPdfError) as e:
+        logging.error("Error reading PDF file %s: %s", file_path, e)
         return ""
 
 
@@ -46,8 +46,8 @@ def _read_docx(file_path: str) -> str:
         for para in doc.paragraphs:
             text.append(para.text)
         return "\n".join(text)
-    except Exception as e:
-        logging.error(f"Error reading DOCX file {file_path}: {e}")
+    except (IOError, OSError, docx.opc.exceptions.PackageNotFoundError) as e:
+        logging.error("Error reading DOCX file %s: %s", file_path, e)
         return ""
 
 
@@ -57,8 +57,49 @@ def _read_image(file_path: str) -> Optional[np.ndarray]:
         with Image.open(file_path) as img:
             img_rgb = img.convert('RGB')
             return np.array(img_rgb)
-    except Exception as e:
-        logging.error(f"Error reading image {file_path}: {e}")
+    except (IOError, OSError) as e:
+        logging.error("Error reading image %s: %s", file_path, e)
+        return None
+
+
+def _find_text_files(directory_path: str, text_handlers: dict) -> List[str]:
+    """Finds all text files in a directory."""
+    text_files = []
+    for filename in os.listdir(directory_path):
+        _, extension = os.path.splitext(filename)
+        if extension.lower() in text_handlers:
+            text_files.append(os.path.join(directory_path, filename))
+    return text_files
+
+
+def _process_text_file(text_path: str, text_handlers: dict, image_extensions: set) -> Optional[Tuple[str, Optional[np.ndarray]]]:
+    """Processes a single text file, finds its corresponding image, and returns the pair."""
+    try:
+        base_name, _ = os.path.splitext(text_path)
+        handler = text_handlers.get(os.path.splitext(text_path)[1].lower())
+        if not handler:
+            return None
+        text_content = handler(text_path)
+        if not text_content:
+            return None
+
+        image_data = None
+        if '<IMAGE>' in text_content:
+            found_image = False
+            for img_ext in image_extensions:
+                image_path = base_name + img_ext
+                if os.path.exists(image_path):
+                    logging.info("Found pair: %s and %s", os.path.basename(text_path), os.path.basename(image_path))
+                    image_data = _read_image(image_path)
+                    if image_data is not None:
+                        found_image = True
+                        break
+            if not found_image:
+                logging.warning(
+                    "Text %s contains <IMAGE>, but no image was found.", os.path.basename(text_path))
+        return text_content, image_data
+    except (IOError, OSError) as e:
+        logging.error("Error processing file %s: %s", text_path, e)
         return None
 
 
@@ -66,50 +107,15 @@ def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, 
     """
     Scans a directory, finds text-image pairs, and loads them.
     """
-    multimodal_data = []
-    logging.info(f"Scanning directory '{directory_path}' for multimodal data...")
-
+    logging.info("Scanning directory '%s' for multimodal data...", directory_path)
     text_handlers = {'.txt': _read_txt, '.pdf': _read_pdf, '.docx': _read_docx}
     image_extensions = {'.jpg', '.jpeg', '.png'}
-
-    text_files = []
-    for filename in os.listdir(directory_path):
-        _, extension = os.path.splitext(filename)
-        if extension.lower() in text_handlers:
-            text_files.append(os.path.join(directory_path, filename))
-
+    text_files = _find_text_files(directory_path, text_handlers)
+    multimodal_data = []
     for text_path in text_files:
-        try:
-            base_name, _ = os.path.splitext(text_path)
-            text_content = ""
-
-            handler = text_handlers.get(os.path.splitext(text_path)[1].lower())
-            if handler:
-                text_content = handler(text_path)
-
-            if not text_content:
-                continue
-
-            image_data = None
-            if '<IMAGE>' in text_content:
-                found_image = False
-                for img_ext in image_extensions:
-                    image_path = base_name + img_ext
-                    if os.path.exists(image_path):
-                        logging.info(f"Found pair: {os.path.basename(text_path)} and {os.path.basename(image_path)}")
-                        image_data = _read_image(image_path)
-                        if image_data is not None:
-                            found_image = True
-                            break
-                if not found_image:
-                    logging.warning(
-                        f"Text {os.path.basename(text_path)} contains <IMAGE>, but no image was found.")
-
-            multimodal_data.append((text_content, image_data))
-
-        except Exception as e:
-            logging.error(f"Error processing file {text_path}: {e}")
-
+        pair = _process_text_file(text_path, text_handlers, image_extensions)
+        if pair:
+            multimodal_data.append(pair)
     return multimodal_data
 
 
