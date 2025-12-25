@@ -48,7 +48,8 @@ class Agent:
         self.loss_fn = SoftmaxCrossEntropy()
         self.metrics = AgentMetrics()
 
-    def experience(self, x_batch: np.ndarray, y_batch: np.ndarray):
+    def experience(self, x_batch: np.ndarray, y_batch: np.ndarray,
+                   image_batch: np.ndarray = None):
         """
         The process of an agent gaining "experience" in a batch training mode.
         Performs one LTM update step if the "surprise" is large enough.
@@ -60,7 +61,7 @@ class Agent:
         self.model.zero_grad()
 
         # 1. Forward and backward pass to get gradients
-        logits, values, _ = self.model.forward(x_batch)
+        logits, values, _ = self.model.forward(x_batch, images=image_batch)
         _ = self.loss_fn.forward(logits, y_batch)
         dlogits = self.loss_fn.backward()
         dvalues = np.zeros_like(values)

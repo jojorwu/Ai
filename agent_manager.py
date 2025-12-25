@@ -10,32 +10,7 @@ from backend import np
 from agent import Agent
 from model import Transformer
 from tokenizer import Tokenizer
-
-
-def get_agent_batches(data, batch_size, seq_len):
-    """
-    Simplified batch generator for agent specialization.
-    Unlike the main one, it doesn't shuffle and works with a single data chunk.
-    """
-    num_total_tokens = len(data)
-    if num_total_tokens < seq_len:
-        return
-
-    num_sequences = (num_total_tokens - 1) // seq_len
-    if num_sequences < batch_size:
-        return
-
-    num_batches = num_sequences // batch_size
-    if num_batches == 0:
-        return
-
-    end_idx = num_batches * batch_size * seq_len
-    x = np.array([item[0] for item in data[:end_idx]], dtype=np.int64).reshape(batch_size, -1)
-    y = np.array([item[0] for item in data[1:end_idx + 1]], dtype=np.int64).reshape(batch_size, -1)
-    images = np.array([item[1] for item in data[:end_idx]], dtype=object).reshape(batch_size, -1)
-
-    for i in range(0, x.shape[1], seq_len):
-        yield x[:, i:i + seq_len], y[:, i:i + seq_len], images[:, i:i + seq_len]
+from utils import get_batches
 
 
 class AgentManager:
@@ -70,7 +45,7 @@ class AgentManager:
 
         logging.info("Specializing agents on different data subsets...")
         for i, agent in enumerate(self.agents):
-            agent_data = data_chunks[i]
+            agent_data = data_chunks[i].tolist()
             if len(agent_data) == 0:
                 logging.info("  - Skipping %s, no data assigned.", agent.agent_id)
                 continue
@@ -78,14 +53,22 @@ class AgentManager:
             logging.info("  - Specializing %s on %d items...",
                          agent.agent_id, len(agent_data))
 
-            batch_generator = get_agent_batches(agent_data, evo_config.batch_size,
-                                                evo_config.seq_len)
+            batch_generator = get_batches(agent_data, evo_config.batch_size,
+                                          evo_config.seq_len)
 
             steps_done = 0
-            for x_batch, y_batch, image_batch in batch_generator:
+            for batch in batch_generator:
                 if steps_done >= steps_per_agent:
                     break
-                agent.experience(x_batch, y_batch, image_batch)
+
+                # Unpack batch, handling both multimodal and text-only cases
+                if len(batch) == 3:
+                    x_batch, y_batch, image_batch = batch
+                    agent.experience(x_batch, y_batch, image_batch)
+                else:
+                    x_batch, y_batch = batch
+                    agent.experience(x_batch, y_batch)
+
                 steps_done += 1
 
             if steps_done < steps_per_agent:

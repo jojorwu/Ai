@@ -69,15 +69,39 @@ def load_checkpoint(model, optimizer, filepath):
         logging.error(f"Error loading checkpoint from {filepath}: {e}", exc_info=True)
         return None, None
 
-def get_batches(data, batch_size, seq_len):
+def get_batches(data, batch_size, seq_len, shuffle=False):
     """
-    Generator function to yield batches of data.
+    Generator function to yield batches of data. Handles both text-only and multimodal data.
     """
+    if not data:
+        return
+
+    if shuffle:
+        np.random.shuffle(data)
+
+    # Check if data is multimodal (list of tuples) or text-only (flat list)
+    is_multimodal = isinstance(data[0], (list, tuple))
+
     num_sequences = len(data) - seq_len
     for i in range(0, num_sequences, batch_size):
         batch_end = i + batch_size
-        x_list, y_list = [], []
+        x_list, y_list, img_list = [], [], []
+
         for j in range(i, min(batch_end, num_sequences)):
-            x_list.append(data[j:j + seq_len])
-            y_list.append(data[j + 1:j + seq_len + 1])
-        yield np.array(x_list), np.array(y_list)
+            if is_multimodal:
+                # Unpack tuples for multimodal data
+                x_seq = [item[0] for item in data[j:j + seq_len]]
+                y_seq = [item[0] for item in data[j + 1:j + seq_len + 1]]
+                img_seq = [item[1] for item in data[j:j + seq_len]]
+                x_list.append(x_seq)
+                y_list.append(y_seq)
+                img_list.append(img_seq)
+            else:
+                # Handle text-only data
+                x_list.append(data[j:j + seq_len])
+                y_list.append(data[j + 1:j + seq_len + 1])
+
+        if is_multimodal:
+            yield np.array(x_list), np.array(y_list), np.array(img_list)
+        else:
+            yield np.array(x_list), np.array(y_list)
