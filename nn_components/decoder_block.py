@@ -1,13 +1,18 @@
 """
 Implementation of a single Transformer Decoder Block.
 """
-from backend import np
+from typing import TYPE_CHECKING
 
+from backend import np
+from config import MultiHeadAttentionConfig
 from nn_components.dropout import Dropout
 from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rms_norm import RMSNorm
+
+if TYPE_CHECKING:
+    from config import ForwardPassInput
 
 
 # pylint: disable=too-many-instance-attributes
@@ -16,25 +21,29 @@ class DecoderBlock:
     Implements a single Transformer Decoder block with Dropout, optional LTM, and optional MoE.
     """
 
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout_rate: float,
-                 num_kv_heads: int, rotary_emb=None, num_layers: int = 1,
-                 long_term_memory=None, num_experts: int = None, top_k_experts: int = None):
-
-        self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb,
-                                      bias=False, num_layers=num_layers)
+    def __init__(self, config, rotary_emb=None, long_term_memory=None):
+        mha_config = MultiHeadAttentionConfig(
+            d_model=config.d_model,
+            num_heads=config.num_heads,
+            num_kv_heads=config.num_kv_heads,
+            num_layers=config.num_layers
+        )
+        self.mha = MultiHeadAttention(mha_config, rotary_emb=rotary_emb, bias=False)
         self.ltm = long_term_memory
 
-        self.use_moe = num_experts is not None and top_k_experts is not None
+        self.use_moe = config.num_experts is not None and config.top_k_experts is not None
         if self.use_moe:
-            self.moe_layer = MixtureOfExperts(d_model, d_ff, num_experts, top_k_experts,
+            self.moe_layer = MixtureOfExperts(config.d_model, config.d_ff,
+                                              config.num_experts, config.top_k_experts,
                                               bias=False)
         else:
-            self.ffn = FeedForward(d_model, d_ff, bias=False, num_layers=num_layers)
+            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False,
+                                   num_layers=config.num_layers)
 
-        self.norm1 = RMSNorm(d_model)
-        self.norm2 = RMSNorm(d_model)
-        self.dropout1 = Dropout(dropout_rate)
-        self.dropout2 = Dropout(dropout_rate)
+        self.norm1 = RMSNorm(config.d_model)
+        self.norm2 = RMSNorm(config.d_model)
+        self.dropout1 = Dropout(config.dropout_rate)
+        self.dropout2 = Dropout(config.dropout_rate)
 
     def get_children(self):
         """Returns a dictionary of child layers for parameter traversal."""
@@ -56,18 +65,18 @@ class DecoderBlock:
         self.dropout1.is_training = False
         self.dropout2.is_training = False
 
-    def forward(self, x, ltm_state, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
+    def forward(self, inputs: 'ForwardPassInput'):
         """Performs the forward pass of the Decoder Block."""
         aux_loss = 0
         # Additive memory injection before the first sub-layer
-        x_with_mem = x + ltm_state if self.ltm else x
+        x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
         x_norm1 = self.norm1.forward(x_with_mem)
 
-        attn_output = self.mha.forward(x_norm1, mask=mask, kv_cache=kv_cache,
-                                       layer_idx=layer_idx, seq_offset=seq_offset)
+        attn_output = self.mha.forward(x_norm1, mask=inputs.mask, kv_cache=inputs.kv_cache,
+                                       layer_idx=inputs.layer_idx, seq_offset=inputs.seq_offset)
 
         # First residual connection
-        x = x + self.dropout1.forward(attn_output)
+        x = inputs.x + self.dropout1.forward(attn_output)
 
         x_norm2 = self.norm2.forward(x)
 

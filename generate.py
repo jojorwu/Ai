@@ -29,16 +29,18 @@ def select_model_interactively() -> str | None:
     """
     models_dir = 'models'
     if not os.path.isdir(models_dir) or not os.listdir(models_dir):
-        logging.error(f"No models found in the '{models_dir}' directory.")
+        logging.error("No models found in the '%s' directory.", models_dir)
         return None
 
-    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+    available_models = [d for d in os.listdir(models_dir)
+                      if os.path.isdir(os.path.join(models_dir, d))]
 
     if not available_models:
-        logging.error(f"No valid model directories found in '{models_dir}'.")
+        logging.error("No valid model directories found in '%s'.", models_dir)
         return None
     if len(available_models) == 1:
-        logging.info(f"Automatically selecting the only available model: {available_models[0]}")
+        logging.info("Automatically selecting the only available model: %s",
+                     available_models[0])
         return available_models[0]
 
     print("Available models:")
@@ -60,7 +62,7 @@ def select_model_interactively() -> str | None:
 
 def load_model_and_tokenizer(model_name: str, config: Config):
     """Loads the model and tokenizer for a specific model."""
-    logging.info(f"Loading model '{model_name}' and tokenizer...")
+    logging.info("Loading model '%s' and tokenizer...", model_name)
     model_dir = os.path.join('models', model_name)
 
     # Prioritize best_model.npz, fall back to model.npz
@@ -72,7 +74,8 @@ def load_model_and_tokenizer(model_name: str, config: Config):
                                     f"found in {model_dir}")
 
     tokenizer = Tokenizer(config.evolution.data_dir)
-    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config)
+    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config,
+                                   tokenizer=tokenizer)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
@@ -101,6 +104,61 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
         return None, None
 
 
+def initialize_environment(args):
+    """Sets up the model, tokenizer, and configuration."""
+    model_name = args.model_name or select_model_interactively()
+    if not model_name:
+        return None, None, None
+
+    model_dir = os.path.join('models', model_name)
+    config_path = os.path.join(model_dir, 'config.json')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+
+    config = Config.from_json(config_path)
+    set_backend(config.hardware.device)
+    model, tokenizer = load_model_and_tokenizer(model_name, config)
+    return model, tokenizer, config
+
+
+def run_agent_loop(model, tokenizer, config):
+    """The main loop for the agent's thought-tool-observation cycle."""
+    start_text = config.generation.start_text
+    logging.info("Initial task: %s", start_text)
+    conversation_history = [f"<THINK>{start_text}"]
+
+    for turn in range(config.generation.max_turns):
+        logging.info("\n--- Iteration %d ---", turn + 1)
+
+        full_prompt = "".join(conversation_history)
+        tokens_to_process = tokenizer.encode(full_prompt)
+
+        context_window = config.generation.context_window_size
+        if len(tokens_to_process) > context_window:
+            logging.info("Trimming context from %d to %d tokens.",
+                         len(tokens_to_process), context_window)
+            tokens_to_process = tokens_to_process[-context_window:]
+
+        gen_config = deepcopy(config.generation)
+        generated_tokens = list(model.generate(tokens_to_process, **gen_config.model_dump()))
+        generated_text = tokenizer.decode(generated_tokens)
+        logging.info("Model generated:\n%s", generated_text)
+        conversation_history.append(generated_text)
+
+        tool_name, tool_args = parse_tool_call(generated_text)
+        if tool_name and tool_args is not None:
+            tool_output = execute_tool(tool_name, tool_args)
+            logging.info("Output of tool '%s':\n%s", tool_name, tool_output)
+            tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
+            conversation_history.append(tool_output_formatted)
+        else:
+            logging.info("\n--- Final Answer ---")
+            final_answer = generated_text.rsplit("</TOOL_CALL>", maxsplit=1)[-1].strip()
+            print(final_answer)
+            return
+    logging.warning("Maximum number of iterations reached. Terminating.")
+
+
 def main():
     """Main agent loop."""
     setup_logging()
@@ -109,70 +167,15 @@ def main():
     args = parser.parse_args()
 
     try:
-        model_name = args.model_name
-        if not model_name:
-            model_name = select_model_interactively()
-            if not model_name:
-                return  # Exit if no model was selected
-
-        model_dir = os.path.join('models', model_name)
-        config_path = os.path.join(model_dir, 'config.json')
-
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
-
-        config = Config.from_json(config_path)
-        set_backend(config.hardware.device)
-
-        model, tokenizer = load_model_and_tokenizer(model_name, config)
-
-        start_text = config.generation.start_text
-        logging.info(f"Initial task: {start_text}")
-
-        conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
-
-        for turn in range(config.generation.max_turns):
-            logging.info(f"\n--- Iteration {turn + 1} ---")
-
-            # Trim conversation history to the context window size
-            context_window = config.generation.context_window_size
-            if len(conversation_history_tokens) > context_window:
-                logging.info(f"Trimming context from {len(conversation_history_tokens)} "
-                             f"to {context_window} tokens.")
-                conversation_history_tokens = conversation_history_tokens[-context_window:]
-
-            gen_config = deepcopy(config.generation)
-
-            generated_tokens_stream = model.generate(
-                conversation_history_tokens,
-                **gen_config.model_dump()
-            )
-            # We yield from the generator to handle the token stream
-            generated_tokens = list(generated_tokens_stream)
-            generated_text = tokenizer.decode(generated_tokens)
-            logging.info(f"Model generated:\n{generated_text}")
-
-            conversation_history_tokens.extend(tokenizer.encode(generated_text))
-
-            tool_name, args = parse_tool_call(generated_text)
-            if tool_name and args is not None:
-                tool_output = execute_tool(tool_name, args)
-                logging.info(f"Output of tool '{tool_name}':\n{tool_output}")
-                tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
-                tool_output_tokens = tokenizer.encode(tool_output_formatted)
-                conversation_history_tokens.extend(tool_output_tokens)
-            else:
-                logging.info("\n--- Final Answer ---")
-                final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
-                print(final_answer)
-                break
-        else:
-            logging.warning("Maximum number of iterations reached. Terminating.")
-
+        model, tokenizer, config = initialize_environment(args)
+        if model and tokenizer and config:
+            run_agent_loop(model, tokenizer, config)
     except FileNotFoundError as e:
-        logging.error(f"Error: {e}. Ensure the model name is correct and the model files exist.")
+        logging.error("Error: %s. Ensure the model name is correct.", e)
+    except (json.JSONDecodeError, IOError) as e:
+        logging.error("Failed to read or parse config file: %s", e)
     except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        logging.error("An unexpected error occurred: %s", e, exc_info=True)
 
 
 if __name__ == "__main__":

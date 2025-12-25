@@ -11,6 +11,15 @@ from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 
 
+class AgentMetrics:
+    """A container for agent-specific metrics."""
+    def __init__(self):
+        self.total_surprise = 0.0
+        self.experience_count = 0
+        self.value_score_sum = 0.0
+        self.fitness_score = -float('inf')
+
+
 class Agent:
     """
     Represents a single "agent" with its own long-term memory (LTM).
@@ -36,12 +45,8 @@ class Agent:
         else:
             self.ltm_optimizer = None
 
-        # Metrics for evaluating the agent's "fitness"
-        self.total_surprise = 0.0
-        self.experience_count = 0
-        self.value_score_sum = 0.0
         self.loss_fn = SoftmaxCrossEntropy()
-        self._fitness_score = -float('inf')
+        self.metrics = AgentMetrics()
 
     def experience(self, x_batch: np.ndarray, y_batch: np.ndarray):
         """
@@ -74,9 +79,9 @@ class Agent:
             self.ltm_optimizer.step(ltm_params)
 
         # 4. Update agent metrics
-        self.total_surprise += surprise
-        self.value_score_sum += np.mean(values)
-        self.experience_count += 1
+        self.metrics.total_surprise += surprise
+        self.metrics.value_score_sum += np.mean(values)
+        self.metrics.experience_count += 1
 
         self.model.zero_grad()
 
@@ -91,11 +96,11 @@ class Agent:
         Calculates the agent's fitness.
         This score is now set externally by the AgentManager after cross-critique.
         """
-        return self._fitness_score
+        return self.metrics.fitness_score
 
     def update_fitness_score(self, score: float):
         """Updates the agent's fitness score (used by AgentManager)."""
-        self._fitness_score = score
+        self.metrics.fitness_score = score
 
     def generate_response(self, prompt_tokens: np.ndarray,
                           image_data: np.ndarray = None, max_new_tokens=50) -> list[int]:

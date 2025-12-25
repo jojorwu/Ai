@@ -2,9 +2,13 @@
 Pydantic models for strong typing and validation of the project configuration.
 """
 import json
+from dataclasses import dataclass
 from typing import Literal, Optional
 
+import numpy as np
 from pydantic import BaseModel, Field
+
+from nn_components.kv_cache import KVCache
 
 
 class ModelConfig(BaseModel):
@@ -22,6 +26,24 @@ class ModelConfig(BaseModel):
     num_experts: Optional[int] = Field(None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(None,
                                        description="Number of 'experts' to select for each token.")
+
+
+class DecoderBlockConfig(BaseModel):
+    d_model: int
+    num_heads: int
+    d_ff: int
+    dropout_rate: float
+    num_kv_heads: int
+    num_layers: int
+    num_experts: Optional[int]
+    top_k_experts: Optional[int]
+
+
+class MultiHeadAttentionConfig(BaseModel):
+    d_model: int
+    num_heads: int
+    num_kv_heads: int
+    num_layers: int
 
 
 class VisionConfig(BaseModel):
@@ -107,6 +129,16 @@ class HardwareConfig(BaseModel):
     """Hardware configuration."""
     device: Literal["cpu", "gpu", "mps"] = Field("cpu",
                                                   description="Device for computations (cpu, gpu, mps).")
+
+
+@dataclass
+class ForwardPassInput:
+    x: np.ndarray
+    ltm_state: np.ndarray
+    mask: Optional[np.ndarray]
+    kv_cache: Optional[KVCache]
+    layer_idx: int
+    seq_offset: int
 
 
 class Config(BaseModel):

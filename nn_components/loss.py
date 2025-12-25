@@ -1,11 +1,17 @@
+"""
+This module contains the implementation of loss functions used in the model.
+"""
 import numpy as np
+
 from nn_components.utils import log_softmax
+
 
 class SoftmaxCrossEntropy:
     """
-    Комбинированный слой Softmax + Cross-Entropy Loss, использующий
-    численно стабильный log_softmax для вычислений.
+    Combined Softmax + Cross-Entropy Loss layer that uses a numerically
+    stable log_softmax for computation.
     """
+
     def __init__(self):
         self.probs = None
         self.targets = None
@@ -13,11 +19,11 @@ class SoftmaxCrossEntropy:
 
     def forward(self, logits, targets, reduction='mean'):
         """
-        Прямой проход для вычисления потерь.
-        Поддерживает 'mean' (среднее) и 'none' (без агрегации).
+        Forward pass for computing the loss.
+        Supports 'mean' and 'none' for reduction.
         """
         self.reduction = reduction
-        batch_size, seq_len, vocab_size = logits.shape
+        batch_size, seq_len, _ = logits.shape
 
         log_probs = log_softmax(logits)
         self.probs = np.exp(log_probs)
@@ -25,7 +31,8 @@ class SoftmaxCrossEntropy:
 
         batch_indices = np.arange(batch_size)[:, np.newaxis]
         seq_indices = np.arange(seq_len)
-        correct_class_log_probs = log_probs[batch_indices, seq_indices, targets]
+        correct_class_log_probs = log_probs[
+            batch_indices, seq_indices, targets]
 
         # Negative Log Likelihood Loss
         loss = -correct_class_log_probs
@@ -33,46 +40,28 @@ class SoftmaxCrossEntropy:
         if reduction == 'mean':
             return np.mean(loss)
         if reduction == 'none':
-            # Возвращаем средние потери для каждой последовательности в батче
+            # Return the mean loss for each sequence in the batch
             return np.mean(loss, axis=1)
 
-        raise ValueError("Неподдерживаемый тип reduction. Используйте 'mean' или 'none'.")
-
+        raise ValueError(
+            "Unsupported reduction type. Use 'mean' or 'none'.")
 
     def backward(self):
         """
-        Обратный проход для вычисления градиента по отношению к логитам.
+        Backward pass for computing the gradient with respect to the logits.
         """
-        batch_size, seq_len, vocab_size = self.probs.shape
+        batch_size, seq_len, _ = self.probs.shape
 
         dx = self.probs.copy()
         batch_indices = np.arange(batch_size)[:, np.newaxis]
         seq_indices = np.arange(seq_len)
         dx[batch_indices, seq_indices, self.targets] -= 1
 
-        # Нормализуем градиент в соответствии с reduction
+        # Normalize the gradient according to the reduction type
         if self.reduction == 'mean':
             dx /= (batch_size * seq_len)
         elif self.reduction == 'none':
-            # Если потерь не было, градиент должен быть усреднен по batch_size
+            # If reduction was 'none', the gradient is averaged per sequence
             dx /= seq_len
 
         return dx
-
-class MarginRankingLoss:
-    """Margin Ranking Loss."""
-    def __init__(self, margin=1.0):
-        self.margin = margin
-
-    def forward(self, y_good, y_bad):
-        self.y_good = y_good
-        self.y_bad = y_bad
-        self.loss = np.maximum(0, self.margin - (y_good - y_bad))
-        return np.mean(self.loss)
-
-    def backward(self):
-        # Gradient is -1 for the "good" input and +1 for the "bad" input if the margin is not met
-        mask = (self.loss > 0).astype(int)
-        d_y_good = -mask / self.y_good.size
-        d_y_bad = mask / self.y_bad.size
-        return d_y_good, d_y_bad

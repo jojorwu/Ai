@@ -51,14 +51,13 @@ class AgentManager:
 
     def fork_agents(self):
         """Creates (clones) a population of agents from the base model."""
-        logging.info(f"Cloning {self.num_agents} agents from the base model...")
+        logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
             agent = Agent(self.base_model, agent_id=f"agent_{i}")
             self.agents.append(agent)
         logging.info("Agents cloned successfully.")
 
-    def specialize_agents_on_dataset(self, full_data: list, tokenizer: Tokenizer,
-                                     seq_len: int, batch_size: int, steps_per_agent: int):
+    def specialize_agents_on_dataset(self, full_data: list, evo_config, steps_per_agent: int):
         """
         Conducts a "specialization" phase where each agent is trained
         on a unique subset of the data.
@@ -73,12 +72,14 @@ class AgentManager:
         for i, agent in enumerate(self.agents):
             agent_data = data_chunks[i]
             if len(agent_data) == 0:
-                logging.info(f"  - Skipping {agent.agent_id}, no data assigned.")
+                logging.info("  - Skipping %s, no data assigned.", agent.agent_id)
                 continue
 
-            logging.info(f"  - Specializing {agent.agent_id} on {len(agent_data)} items...")
+            logging.info("  - Specializing %s on %d items...",
+                         agent.agent_id, len(agent_data))
 
-            batch_generator = get_agent_batches(agent_data, batch_size, seq_len)
+            batch_generator = get_agent_batches(agent_data, evo_config.batch_size,
+                                                evo_config.seq_len)
 
             steps_done = 0
             for x_batch, y_batch, image_batch in batch_generator:
@@ -88,8 +89,9 @@ class AgentManager:
                 steps_done += 1
 
             if steps_done < steps_per_agent:
-                logging.warning(f"    - Only {steps_done}/{steps_per_agent} steps were "
-                                f"performed for {agent.agent_id} due to insufficient data.")
+                logging.warning("    - Only %d/%d steps were performed for %s due to "
+                                "insufficient data.",
+                                steps_done, steps_per_agent, agent.agent_id)
 
         logging.info("Agent specialization complete.")
 
@@ -101,9 +103,10 @@ class AgentManager:
             logging.warning("No best agents to merge.")
             return
 
-        logging.info(f"Merging LTM weights from {len(best_agents)} best agents...")
+        logging.info("Merging LTM weights from %d best agents...", len(best_agents))
 
-        ltm_states = [agent.get_ltm_state() for agent in best_agents if agent.get_ltm_state() is not None]
+        ltm_states = [agent.get_ltm_state() for agent in best_agents
+                      if agent.get_ltm_state() is not None]
         if not ltm_states:
             logging.warning("None of the best agents had a valid LTM state.")
             return
@@ -145,13 +148,15 @@ class AgentManager:
         ask_help_token_id = tokenizer.char_to_idx.get('<ASK_FOR_HELP>')
         i_dont_know_token_id = tokenizer.char_to_idx.get('<I_DONT_KNOW>')
 
-        eval_prompts = evaluation_data[:min(len(evaluation_data), self.num_agents * 2)]
+        eval_prompts = evaluation_data[:min(len(evaluation_data),
+                                            self.num_agents * 2)]
 
         for prompt_data in eval_prompts:
             prompt_tokens, prompt_image = prompt_data
             for i, proposer in enumerate(self.agents):
                 critics = [a for a in self.agents if a.agent_id != proposer.agent_id]
-                proposer_response = proposer.generate_response(np.array(prompt_tokens), prompt_image)
+                proposer_response = proposer.generate_response(
+                    np.array(prompt_tokens), prompt_image)
 
                 if ask_help_token_id in proposer_response:
                     agent_scores[proposer.agent_id] += reward_asking_for_help
@@ -167,8 +172,9 @@ class AgentManager:
                     if not critics_for_helper:
                         critics_for_helper = [proposer]
 
-                    critique_scores = [c.critique_response(context, prompt_image, helper_response)
-                                       for c in critics_for_helper]
+                    critique_scores = [
+                        c.critique_response(context, prompt_image, helper_response)
+                        for c in critics_for_helper]
                     avg_critique_score = np.mean(critique_scores) if critique_scores else 0
 
                     if avg_critique_score > success_threshold:
@@ -181,20 +187,23 @@ class AgentManager:
                     agent_scores[proposer.agent_id] += reward_admit_ignorance
 
                 else:
-                    critique_scores = [c.critique_response(prompt_tokens, prompt_image,
-                                                           proposer_response) for c in critics]
+                    critique_scores = [
+                        c.critique_response(prompt_tokens, prompt_image, proposer_response)
+                        for c in critics]
                     avg_critique_score = np.mean(critique_scores) if critique_scores else 0
 
                     if avg_critique_score > success_threshold:
-                        agent_scores[proposer.agent_id] += reward_independent_success * avg_critique_score
+                        score_change = reward_independent_success * avg_critique_score
                     else:
-                        agent_scores[proposer.agent_id] += penalty_independent_failure * (1 - avg_critique_score)
+                        score_change = penalty_independent_failure * (1 - avg_critique_score)
+                    agent_scores[proposer.agent_id] += score_change
 
         for agent in self.agents:
             agent.update_fitness_score(agent_scores[agent.agent_id])
 
-        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
+        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(),
+                               reverse=True)
         logging.info("  - Collaborative Evaluation Fitness scores:")
         for agent in sorted_agents:
-            logging.info(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
+            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
         return sorted_agents[:top_k]
