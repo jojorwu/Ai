@@ -1,34 +1,37 @@
+"""
+This module implements Rotary Positional Embeddings (RoPE).
+"""
 import numpy as np
 
 class RotaryPositionalEmbedding:
     """
-    Класс для создания и кеширования Rotary Positional Embeddings (RoPE).
+    Class for creating and caching Rotary Positional Embeddings (RoPE).
     """
     def __init__(self, dim, max_seq_len, theta=10000.0):
-        # Вычисляем частоты для каждой пары измерений
+        # Calculate frequencies for each pair of dimensions
         inv_freq = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32) / dim))
 
-        # Создаем матрицу позиций и частот
+        # Create a matrix of positions and frequencies
         t = np.arange(max_seq_len, dtype=np.float32)
         freqs = np.einsum('i,j->ij', t, inv_freq)
 
-        # Создаем комплексные числа вида R * e^(i * m * theta_j)
+        # Create complex numbers of the form R * e^(i * m * theta_j)
         emb = np.concatenate((freqs, freqs), axis=-1)
 
-        # Кешируем cos и sin значения
+        # Cache cos and sin values
         self.cos_cached = np.cos(emb)[None, None, :, :]
         self.sin_cached = np.sin(emb)[None, None, :, :]
 
 def apply_rotary_pos_emb(x, cos, sin):
     """
-    Применяет RoPE к входному тензору x.
+    Applies RoPE to the input tensor x.
     x: (batch, n_heads, seq_len, dim)
     """
-    # Разделяем x на две половины
+    # Split x into two halves
     x1 = x[..., 0::2]
     x2 = x[..., 1::2]
 
-    # Применяем вращение
+    # Apply rotation
     # [x1, x2] -> [-x2, x1]
     rotated_x = np.stack((-x2, x1), axis=-1).reshape(x.shape)
 
@@ -39,20 +42,20 @@ def apply_rotary_pos_emb(x, cos, sin):
 
 def rotary_backward(dout, x, cos, sin):
     """
-    Вычисляет градиенты для RoPE.
+    Calculates the gradients for RoPE.
     """
-    # Разделяем x на две половины
+    # Split x into two halves
     x1 = x[..., 0::2]
     x2 = x[..., 1::2]
 
-    # Прямое преобразование:
+    # Forward transformation:
     # y1 = x1 * cos1 + (-x2 * sin1)
     # y2 = x2 * cos2 + ( x1 * sin2)
 
-    # Градиенты:
+    # Gradients:
     # dL/dx1 = dL/dy1 * dy1/dx1 + dL/dy2 * dy2/dx1
     # dy1/dx1 = cos1
-    # dy2/dx1 = sin2 (для одинаковых cos/sin)
+    # dy2/dx1 = sin2 (for identical cos/sin)
     # dL/dx1 = dout1 * cos1 + dout2 * sin2
 
     # dL/dx2 = dL/dy1 * dy1/dx2 + dL/dy2 * dy2/dx2
@@ -63,7 +66,7 @@ def rotary_backward(dout, x, cos, sin):
     dout1 = dout[..., 0::2]
     dout2 = dout[..., 1::2]
 
-    # Градиенты должны использовать те же cos/sin, что и forward pass
+    # Gradients should use the same cos/sin as the forward pass
     cos1 = cos[..., 0::2]
     cos2 = cos[..., 1::2]
     sin1 = sin[..., 0::2]

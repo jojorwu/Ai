@@ -1,8 +1,11 @@
+"""
+This module implements the Root Mean Square Normalization layer.
+"""
 import numpy as np
 
 class RMSNorm:
     """
-    Реализация Root Mean Square Normalization.
+    Implementation of Root Mean Square Normalization.
     """
     def __init__(self, d_model, epsilon=1e-5):
         self.d_model = d_model
@@ -14,12 +17,12 @@ class RMSNorm:
         self.dgamma = None
 
     def get_trainable_params(self):
-        """Возвращает словарь с обучаемыми параметрами и их градиентами."""
+        """Returns a dictionary with trainable parameters and their gradients."""
         return {'gamma': (self.gamma, self.dgamma)}
 
     def forward(self, x):
         """
-        Прямой проход для RMSNorm.
+        Forward pass for RMSNorm.
         y = (x / sqrt(mean(x^2) + eps)) * gamma
         """
         self.x = x
@@ -30,7 +33,7 @@ class RMSNorm:
 
     def backward(self, dout):
         """
-        Обратный проход для RMSNorm.
+        Backward pass for RMSNorm.
         """
         normalized_x = self.x / self.rms
         dgamma = np.sum(dout * normalized_x, axis=tuple(range(dout.ndim - 1)))

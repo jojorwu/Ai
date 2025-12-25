@@ -2,7 +2,7 @@
 Implementation of a single Transformer Decoder Block.
 """
 from backend import np
-
+from config import MoEConfig
 from nn_components.dropout import Dropout
 from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
@@ -26,8 +26,9 @@ class DecoderBlock:
 
         self.use_moe = num_experts is not None and top_k_experts is not None
         if self.use_moe:
-            self.moe_layer = MixtureOfExperts(d_model, d_ff, num_experts, top_k_experts,
-                                              bias=False)
+            self.moe_layer = MixtureOfExperts(MoEConfig(d_model=d_model, d_ff=d_ff,
+                                                       num_experts=num_experts,
+                                                       top_k=top_k_experts))
         else:
             self.ffn = FeedForward(d_model, d_ff, bias=False, num_layers=num_layers)
 

@@ -1,3 +1,6 @@
+"""
+This module implements various activation functions used in neural networks.
+"""
 from backend import np
 
 class SiLU:

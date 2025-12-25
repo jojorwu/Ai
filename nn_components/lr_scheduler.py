@@ -1,28 +1,31 @@
+"""
+This module implements the learning rate scheduler.
+"""
 import numpy as np
 
 def cosine_decay_with_warmup(current_step, training_steps, warmup_steps, max_lr, min_lr):
     """
-    Вычисляет learning rate на основе косинусного спада с предварительным прогревом.
+    Calculates the learning rate based on cosine decay with a warm-up phase.
 
     Args:
-        current_step (int): Текущий шаг обучения.
-        training_steps (int): Общее количество шагов обучения.
-        warmup_steps (int): Количество шагов для "прогрева".
-        max_lr (float): Максимальный (базовый) learning rate.
-        min_lr (float): Минимальный learning rate в конце спада.
+        current_step (int): The current training step.
+        training_steps (int): The total number of training steps.
+        warmup_steps (int): The number of steps for the "warm-up" phase.
+        max_lr (float): The maximum (base) learning rate.
+        min_lr (float): The minimum learning rate at the end of the decay.
 
     Returns:
-        float: Вычисленный learning rate для текущего шага.
+        float: The calculated learning rate for the current step.
     """
     if current_step < warmup_steps:
-        # Линейный прогрев
+        # Linear warm-up
         return max_lr * (current_step + 1) / warmup_steps
 
     if current_step > training_steps:
-        # Если обучение продолжается дольше запланированного, используем min_lr
+        # If training continues longer than planned, use min_lr
         return min_lr
 
-    # Косинусный спад
+    # Cosine decay
     decay_ratio = (current_step - warmup_steps) / (training_steps - warmup_steps)
     assert 0 <= decay_ratio <= 1
 

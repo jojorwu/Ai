@@ -24,6 +24,15 @@ class ModelConfig(BaseModel):
                                        description="Number of 'experts' to select for each token.")
 
 
+class MoEConfig(BaseModel):
+    """Configuration for the Mixture of Experts layer."""
+    d_model: int
+    d_ff: int
+    num_experts: int
+    top_k: int
+    bias: bool = False
+
+
 class VisionConfig(BaseModel):
     """Configuration for the Vision Encoder."""
     image_size: tuple[int, int] = Field((224, 224), description="Input image size (height, width).")

@@ -17,7 +17,7 @@ class TestAgentExecution(unittest.TestCase):
     @patch('os.path.exists', return_value=True)
     @patch('argparse.ArgumentParser.parse_args')
     def test_agent_loop_terminates_on_no_tool_call(
-            self, mock_parse_args, mock_os_exists, mock_load_model, mock_config):
+            self, mock_parse_args, _, mock_load_model, mock_config):
         """
         Tests that the agent loop correctly identifies a final answer
         (no tool call) and terminates.
