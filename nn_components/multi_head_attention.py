@@ -67,87 +67,79 @@ class MultiHeadAttention:
             return x
         return np.repeat(x, n_rep, axis=1)
 
-    def _project_qkv(self, x):
-        """Projects input x to Q, K, V and splits heads."""
-        qkv = self.qkv_proj.forward(x)
-        q_proj, k_proj, v_proj = np.split(qkv, [self.q_dim, self.q_dim + self.kv_dim], axis=-1)
-        q_proj = self._split_heads(q_proj, self.num_heads)
-        k_proj = self._split_heads(k_proj, self.num_kv_heads)
-        v_proj = self._split_heads(v_proj, self.num_kv_heads)
-        return q_proj, k_proj, v_proj
-
-    def _apply_rotary_embeddings(self, q_proj, k_proj, seq_len, seq_offset):
-        """Applies rotary embeddings to Q and K projections."""
-        if self.rotary_emb is not None:
-            cos = self.rotary_emb.cos_cached[:, :, seq_offset:seq_offset + seq_len, :]
-            sin = self.rotary_emb.sin_cached[:, :, seq_offset:seq_offset + seq_len, :]
-            q_proj_rotary = apply_rotary_pos_emb(q_proj, cos, sin)
-            k_proj_rotary = apply_rotary_pos_emb(k_proj, cos, sin)
-            return q_proj_rotary, k_proj_rotary
-        return q_proj, k_proj
-
-    def _handle_kv_cache(self, k_proj_rotary, v_proj, kv_cache, layer_idx, seq_offset, seq_len):
-        """Updates and retrieves from KV cache."""
-        if kv_cache is not None:
-            kv_cache.update(k_proj_rotary, v_proj, layer_idx, seq_offset)
-            k_cached, v_cached = kv_cache.get(layer_idx, seq_offset + seq_len)
-            return k_cached, v_cached
-        return k_proj_rotary, v_proj
-
+    # pylint: disable=too-many-arguments
     def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
         """Performs the forward pass of the GQA layer."""
         self.x_input = x
         _, seq_len, _ = x.shape
 
-        q_proj, k_proj, v_proj = self._project_qkv(x)
+        # --- 1. Combined QKV Projection ---
+        qkv = self.qkv_proj.forward(x)
+        q_proj, k_proj, v_proj = np.split(qkv, [self.q_dim, self.q_dim + self.kv_dim], axis=-1)
 
-        self.q_proj_rotary, self.k_proj_rotary = self._apply_rotary_embeddings(
-            q_proj, k_proj, seq_len, seq_offset)
+        q_proj = self._split_heads(q_proj, self.num_heads)
+        k_proj = self._split_heads(k_proj, self.num_kv_heads)
+        v_proj = self._split_heads(v_proj, self.num_kv_heads)
 
-        k_cached, v_cached = self._handle_kv_cache(
-            self.k_proj_rotary, v_proj, kv_cache, layer_idx, seq_offset, seq_len)
+        # --- 2. Apply Rotary Embeddings ---
+        if self.rotary_emb is not None:
+            cos = self.rotary_emb.cos_cached[:, :, seq_offset:seq_offset + seq_len, :]
+            sin = self.rotary_emb.sin_cached[:, :, seq_offset:seq_offset + seq_len, :]
+            self.q_proj_rotary = apply_rotary_pos_emb(q_proj, cos, sin)
+            self.k_proj_rotary = apply_rotary_pos_emb(k_proj, cos, sin)
+        else:
+            self.q_proj_rotary = q_proj
+            self.k_proj_rotary = k_proj
 
+        # --- 3. KV Caching ---
+        if kv_cache is not None:
+            kv_cache.update(self.k_proj_rotary, v_proj, layer_idx, seq_offset)
+            k_cached, v_cached = kv_cache.get(layer_idx, seq_offset + seq_len)
+        else:
+            k_cached, v_cached = self.k_proj_rotary, v_proj
+
+        # --- 4. Grouped-Query Attention ---
         k_repeated = self._repeat_kv(k_cached, self.num_q_per_kv)
         v_repeated = self._repeat_kv(v_cached, self.num_q_per_kv)
 
-        attention_output = self.attention.forward(
-            self.q_proj_rotary, k_repeated, v_repeated, mask)
+        attention_output = self.attention.forward(self.q_proj_rotary, k_repeated, v_repeated, mask)
         combined_output = self._combine_heads(attention_output)
 
+        # --- 5. Final Output Projection ---
         return self.wo.forward(combined_output)
 
-    def _handle_repeated_kv_gradients(self, dk_repeated, dv_repeated):
-        """Sums gradients for the repeated KV heads."""
+    def backward(self, dout):
+        """Performs the backward pass of the GQA layer."""
+        # --- 1. Output Projection Backward ---
+        d_combined_output = self.wo.backward(dout)
+        d_attention_output = self._combine_heads_backward(d_combined_output)
+
+        # --- 2. Attention Backward ---
+        dq_rotary, dk_repeated, dv_repeated = self.attention.backward(d_attention_output)
+
+        # --- 3. Handle Repeated KV Gradients ---
         if self.num_q_per_kv > 1:
             batch_size, _, seq_len, d_k = dk_repeated.shape
             dk_cached = dk_repeated.reshape(
                 batch_size, self.num_kv_heads, self.num_q_per_kv, seq_len, d_k).sum(axis=2)
             dv_cached = dv_repeated.reshape(
                 batch_size, self.num_kv_heads, self.num_q_per_kv, seq_len, d_k).sum(axis=2)
-            return dk_cached, dv_cached
-        return dk_repeated, dv_repeated
+        else:
+            dk_cached = dk_repeated
+            dv_cached = dv_repeated
 
-    def _rotary_backward(self, dq_rotary, dk_cached):
-        """Performs backward pass for rotary embeddings."""
+        # --- 4. Rotary Embeddings Backward ---
         if self.rotary_emb is not None:
             seq_len = self.q_proj_rotary.shape[2]
             cos = self.rotary_emb.cos_cached[:, :, :seq_len, :]
             sin = self.rotary_emb.sin_cached[:, :, :seq_len, :]
             dq_proj = rotary_backward(dq_rotary, self.q_proj_rotary, cos, sin)
             dk_proj = rotary_backward(dk_cached, self.k_proj_rotary, cos, sin)
-            return dq_proj, dk_proj
-        return dq_rotary, dk_cached
+        else:
+            dq_proj = dq_rotary
+            dk_proj = dk_cached
 
-    def backward(self, dout):
-        """Performs the backward pass of the GQA layer."""
-        d_combined_output = self.wo.backward(dout)
-        d_attention_output = self._combine_heads_backward(d_combined_output)
-
-        dq_rotary, dk_repeated, dv_repeated = self.attention.backward(d_attention_output)
-
-        dk_cached, dv_cached = self._handle_repeated_kv_gradients(dk_repeated, dv_repeated)
-        dq_proj, dk_proj = self._rotary_backward(dq_rotary, dk_cached)
-
+        # --- 5. Combine Gradients for QKV Projection ---
         dq_proj = self._split_heads_backward(dq_proj, self.num_heads)
         dk_proj = self._split_heads_backward(dk_proj, self.num_kv_heads)
         dv_proj = self._split_heads_backward(dv_cached, self.num_kv_heads)

@@ -87,6 +87,6 @@ class LongTermMemory:
         for layer in self.layers:
             if isinstance(layer, Linear):
                 # Используем ту же инициализацию, что и в GPT-2
-                layer.weights = np.random.normal(0, 0.02, layer.weights.shape)
+                layer.W = np.random.normal(0, 0.02, layer.W.shape)
                 if layer.use_bias:
                     layer.b = np.zeros(layer.b.shape)

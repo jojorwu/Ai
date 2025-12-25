@@ -5,43 +5,16 @@ import argparse
 import logging
 import os
 import shutil
-from dataclasses import dataclass
-from typing import Tuple, Optional
 
 from backend import set_backend
 from config import Config
-from data_loader import load_multimodal_data_from_directory
+from data_loader import load_text_from_directory
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 from tokenizer import Tokenizer
 from trainer import Trainer
-from utils import load_checkpoint
-
-
-@dataclass
-class TrainingState:
-    """Encapsulates the state of a training run."""
-    epoch: int = 0
-    current_step: int = 0
-    best_val_loss: float = float('inf')
-    epochs_no_improve: int = 0
-
-
-@dataclass
-class TrainingData:
-    """Encapsulates all data required for training."""
-    tokenizer: Tokenizer
-    train_data: list
-    val_data: list
-
-
-@dataclass
-class TrainingComponents:
-    """Encapsulates the core components for training."""
-    model: Transformer
-    optimizer: Adam
-    loss_fn: SoftmaxCrossEntropy
+from utils import load_checkpoint, save_checkpoint
 
 
 def setup_logging(log_path: str):
@@ -60,127 +33,161 @@ def setup_logging(log_path: str):
     logging.getLogger().setLevel(logging.INFO)
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parses command-line arguments."""
+def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
+    """Initializes the tokenizer and loads the training data."""
+    logging.info("Initializing tokenizer and loading data...")
+    tokenizer = Tokenizer(tokenizer_path)
+    all_text = load_text_from_directory(data_dir)
+    if not all_text:
+        raise ValueError(f"Failed to load text from directory: {data_dir}")
+    data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
+    split_idx = int(len(data_tokens) * (1 - validation_split))
+    train_data, val_data = data_tokens[:split_idx], data_tokens[split_idx:]
+    logging.info(f"Data loaded successfully. Vocab size: {tokenizer.vocab_size}, "
+                 f"Train tokens: {len(train_data)}, Validation tokens: {len(val_data)}.")
+    return tokenizer, train_data, val_data
+
+
+def initialize_components(config: Config, vocab_size: int, tokenizer):
+    """Initializes the model, loss function, and optimizer."""
+    logging.info("Initializing model, loss, and optimizer...")
+    model = Transformer(vocab_size=vocab_size, model_config=config.model,
+                        vision_config=config.vision, ltm_config=config.ltm, tokenizer=tokenizer)
+    policy_loss_fn = SoftmaxCrossEntropy()
+    optim_config = config.optimizer.model_dump()
+    optim_config.pop('max_norm')
+    optimizer = Adam(**optim_config)
+    logging.info("Model and optimizer initialized.")
+    return model, policy_loss_fn, optimizer
+
+
+def main():
+    """Orchestrates the agent-centric training process."""
     parser = argparse.ArgumentParser(description="Agent-centric Transformer Training")
     parser.add_argument('--model-name', type=str, required=True,
                         help="Name for the new model. A directory will be created under 'models/'.")
     parser.add_argument('--resume-from', type=str,
                         help="Name of an existing model to resume training from.")
-    return parser.parse_args()
+    args = parser.parse_args()
 
-
-def setup_training_environment(args: argparse.Namespace) -> Tuple[str, Optional[str], Config]:
-    """Sets up directories, logging, and loads the configuration."""
     model_dir = os.path.join('models', args.model_name)
     resume_dir = os.path.join('models', args.resume_from) if args.resume_from else None
 
+    # --- Configuration and Setup ---
     if resume_dir:
         if not os.path.isdir(resume_dir):
             raise FileNotFoundError(f"Resume directory not found: {resume_dir}")
         config_path = os.path.join(resume_dir, 'config.json')
+        log_file_path = os.path.join(model_dir, 'training.log')
         os.makedirs(model_dir, exist_ok=True)
-        setup_logging(os.path.join(model_dir, 'training.log'))
-        logging.info("Resuming training from '%s'. New logs saved to '%s'.",
-                     args.resume_from, args.model_name)
-        logging.info("Loading config from %s", config_path)
+        setup_logging(log_file_path)
+        logging.info(f"Resuming training from '{args.resume_from}'. "
+                     f"New checkpoints and logs will be saved to '{args.model_name}'.")
+        logging.info(f"Loading config from {config_path}")
     else:
         if os.path.exists(model_dir):
             raise FileExistsError(f"Model directory '{model_dir}' already exists. "
                                   "Choose a different name or use --resume-from.")
-        os.makedirs(model_dir)
+        os.makedirs(model_dir, exist_ok=True)
         config_path = 'config.json'
-        setup_logging(os.path.join(model_dir, 'training.log'))
+        log_file_path = os.path.join(model_dir, 'training.log')
+        setup_logging(log_file_path)
         shutil.copy(config_path, os.path.join(model_dir, 'config.json'))
-        logging.info("Starting new training run: '%s'.", args.model_name)
+        logging.info(f"Starting new training run: '{args.model_name}'.")
 
-    logging.info("--------------------------------------------------")
-    logging.info("Model: %s", args.model_name)
-    logging.info("--------------------------------------------------")
+    logging.info(f"--------------------------------------------------")
+    logging.info(f"Model: {args.model_name}")
+    logging.info(f"Log file: {log_file_path}")
+    logging.info(f"--------------------------------------------------")
 
     config = Config.from_json(config_path)
     set_backend(config.hardware.device)
-    return model_dir, resume_dir, config
 
+    # --- Initialization ---
+    tokenizer, train_data, val_data = load_and_prepare_data(
+        config.evolution.data_dir, config.evolution.data_dir, config.evolution.validation_split)
+    model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
 
-def load_and_prepare_data(config: Config) -> TrainingData:
-    """Initializes the tokenizer and loads the training data."""
-    logging.info("Initializing tokenizer and loading data...")
-    tokenizer = Tokenizer(config.evolution.data_dir)
-    text_data, _ = load_multimodal_data_from_directory(config.evolution.data_dir)
+    total_params = model.count_parameters()
+    logging.info(f"Model initialized with {total_params:,} trainable parameters.")
 
-    if not text_data:
-        raise ValueError(f"Failed to load text from directory: {config.evolution.data_dir}")
+    trainer = Trainer(config, model, optimizer, loss_fn, tokenizer, train_data, val_data)
 
-    data_tokens = tokenizer.encode(text_data, add_special_tokens=True)
-    split_idx = int(len(data_tokens) * (1 - config.evolution.validation_split))
-
-    train_tokens, val_tokens = data_tokens[:split_idx], data_tokens[split_idx:]
-
-    logging.info("Data loaded. Vocab size: %d, Train tokens: %d, Val tokens: %d",
-                 tokenizer.vocab_size, len(train_tokens), len(val_tokens))
-    return TrainingData(tokenizer=tokenizer, train_data=train_tokens, val_data=val_tokens)
-
-
-def initialize_components(config: Config, vocab_size: int, tokenizer: Tokenizer) -> TrainingComponents:
-    """Initializes the model, loss function, and optimizer."""
-    logging.info("Initializing model, loss, and optimizer...")
-    model = Transformer(vocab_size=vocab_size, model_config=config.model,
-                        vision_config=config.vision, ltm_config=config.ltm, tokenizer=tokenizer)
-    loss_fn = SoftmaxCrossEntropy()
-    optimizer = Adam(config.optimizer)
-    logging.info("Model and optimizer initialized.")
-    return TrainingComponents(model=model, optimizer=optimizer, loss_fn=loss_fn)
-
-
-def load_training_state(resume_dir: Optional[str], model_dir: str, model: Transformer,
-                        optimizer: Adam) -> TrainingState:
-    """Loads model weights and optimizer state from a checkpoint if available."""
-    state = TrainingState()
+    # --- State Loading ---
+    start_epoch, current_step, best_val_loss, epochs_no_improve = 0, 0, float('inf'), 0
     checkpoint_path = os.path.join(model_dir, 'checkpoint.npz')
 
     if resume_dir:
-        resume_weights_path = os.path.join(resume_dir, 'best_model.npz')
+        resume_weights_path = os.path.join(resume_dir, 'best_model.npz') # Prioritize best
         if not os.path.exists(resume_weights_path):
             resume_weights_path = os.path.join(resume_dir, 'model.npz')
+
         if os.path.exists(resume_weights_path):
             model.load_weights(resume_weights_path)
-            logging.info("Loaded model weights from %s", resume_weights_path)
+            logging.info(f"Loaded model weights from {resume_weights_path}")
 
     if os.path.exists(checkpoint_path):
-        loaded_state, _ = load_checkpoint(model, optimizer, checkpoint_path)
-        if loaded_state:
-            state = TrainingState(**loaded_state)
-            logging.info("Resuming from checkpoint. Start Epoch: %d, Step: %d.",
-                         state.epoch, state.current_step)
-    return state
+        state, _ = load_checkpoint(model, optimizer, checkpoint_path)
+        if state:
+            start_epoch, current_step = state.get('epoch', 0), state.get('current_step', 0)
+            best_val_loss, epochs_no_improve = state.get('best_val_loss', float('inf')), state.get('epochs_no_improve', 0)
+            logging.info(f"Resuming from checkpoint. Start Epoch: {start_epoch}, Step: {current_step}.")
+
+    # --- Training Loop ---
+    pretrain_epochs, evolution_epochs = config.evolution.pretrain_epochs, config.evolution.evolution_epochs
+    total_epochs = pretrain_epochs + evolution_epochs
+    logging.info(f"Starting training loop for {total_epochs} total epochs.")
+
+    for epoch in range(start_epoch, total_epochs):
+        is_pretrain = epoch < pretrain_epochs
+        phase = "Pre-training" if is_pretrain else "Evolution"
+        phase_epoch = epoch if is_pretrain else epoch - pretrain_epochs
+        phase_total_epochs = pretrain_epochs if is_pretrain else evolution_epochs
+
+        logging.info(f"\n--- {phase} Epoch {phase_epoch + 1}/{phase_total_epochs} ---")
+
+        if is_pretrain:
+            avg_loss, epoch_time, current_step = trainer.train_pretrain_epoch(current_step)
+        else:
+            epoch_time = trainer.run_evolution_cycle()
+            avg_loss = None  # N/A for evolution phase
+
+        val_loss = trainer.run_validation()
+        log_msg = (f"    - Validation Loss: {val_loss:.4f}\n"
+                   f"    - Epoch Time: {epoch_time:.2f}s")
+        if avg_loss is not not None:
+            log_msg = f"    - Average Loss: {avg_loss:.4f}\n" + log_msg
+        if is_pretrain:
+            log_msg += f"\n    - Learning Rate: {optimizer.lr:.6f}"
+        logging.info(log_msg)
 
 
-def main():
-    """Orchestrates the agent-centric training process."""
-    args = parse_arguments()
-    model_dir, resume_dir, config = setup_training_environment(args)
+        # --- Checkpointing & Early Stopping ---
+        if val_loss < best_val_loss:
+            best_val_loss, epochs_no_improve = val_loss, 0
+            best_model_path = os.path.join(model_dir, 'best_model.npz')
+            model.save_weights(best_model_path, config.model_dump())
+            logging.info(f"    - New best model saved (Val Loss: {best_val_loss:.4f})")
+        else:
+            epochs_no_improve += 1
+            logging.info(f"    - No improvement in validation loss for {epochs_no_improve} epochs.")
 
-    training_data = load_and_prepare_data(config)
-    components = initialize_components(config, training_data.tokenizer.vocab_size,
-                                       training_data.tokenizer)
+        state = {'epoch': epoch + 1, 'current_step': current_step,
+                 'best_val_loss': best_val_loss, 'epochs_no_improve': epochs_no_improve}
+        save_checkpoint(model, optimizer, state, config.model_dump(), checkpoint_path)
 
-    total_params = components.model.count_parameters()
-    logging.info("Model initialized with %s trainable parameters.", f'{total_params:,}')
+        if epochs_no_improve >= config.evolution.early_stopping_patience:
+            logging.warning("Early stopping triggered. Ending training.")
+            break
 
-    state = load_training_state(resume_dir, model_dir, components.model, components.optimizer)
-
-    trainer = Trainer(config, components, training_data)
-    trainer.run_training(model_dir, state)
-
+    # --- Final Save ---
     final_weights_path = os.path.join(model_dir, 'model.npz')
-    components.model.save_weights(final_weights_path, config.model_dump())
-    logging.info("\n--------------------------------------------------")
-    logging.info("Training complete!")
-    logging.info("    - Total Parameters: %s", f'{total_params:,}')
-    logging.info("    - Final model saved to: %s", final_weights_path)
-    logging.info("--------------------------------------------------")
-
+    model.save_weights(final_weights_path, config.model_dump())
+    logging.info(f"\n--------------------------------------------------")
+    logging.info(f"Training complete!")
+    logging.info(f"    - Total Parameters: {total_params:,}")
+    logging.info(f"    - Final model saved to: {final_weights_path}")
+    logging.info(f"--------------------------------------------------")
 
 if __name__ == "__main__":
     main()

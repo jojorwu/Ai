@@ -14,8 +14,7 @@ class VisionEncoder:
         self.d_model = d_model
         self.patch_size = patch_size
         self.num_channels = num_channels
-        projection_in_features = patch_size * patch_size * num_channels
-        self.projection = Linear(projection_in_features, d_model)
+        self.projection = Linear(patch_size * patch_size * num_channels, d_model)
 
     def forward(self, images: np.ndarray) -> np.ndarray:
         """
@@ -23,8 +22,7 @@ class VisionEncoder:
         Args:
             images (np.ndarray): A batch of images with shape (B, H, W, C).
         Returns:
-            np.ndarray: A sequence of embeddings for each image,
-                        shape (B, num_patches, d_model).
+            np.ndarray: A sequence of embeddings for each image with shape (B, num_patches, d_model).
         """
         batch_size, height, width, _ = images.shape
         p = self.patch_size

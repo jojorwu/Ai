@@ -36,31 +36,19 @@ class TestMoE(unittest.TestCase):
         """Perform a numerical gradient check for the backward pass."""
         logging.info("\nRunning Test: MoE Backward Pass Gradient Check...")
 
-        # Define a simple loss function for the gradient check
-        def model_forward_with_loss(input_data):
-            output, aux_loss = self.moe.forward(input_data)
-            # Simple main loss: sum of squares of the output
-            main_loss = np.sum(output**2)
-            # Total loss includes the auxiliary loss for router balancing
-            return main_loss + aux_loss
-
-        # Initial forward and backward pass to compute analytical gradients
         output, _ = self.moe.forward(self.input_data)
-        # The gradient of the main loss w.r.t. the output is 2 * output
-        d_main_loss_out = 2 * output
-        self.moe.backward(d_main_loss_out)
+        dout = np.ones_like(output)
+        self.moe.backward(dout)
 
-        # --- Check Gate Gradients ---
         gate_params = self.moe.gate.get_trainable_params()
         for param_name, (param, analytical_grad) in gate_params.items():
             if analytical_grad is None:
                 continue
             numerical_grad_val = numerical_gradient(
-                lambda p_arg: model_forward_with_loss(self.input_data), param, 1.0
+                lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
             )
             check_gradient(self, analytical_grad, numerical_grad_val, f"gate.{param_name}")
 
-        # --- Check Expert Gradients ---
         for i in range(self.num_experts):
             expert = self.moe.experts[i]
             for layer_name, layer_obj in expert.get_children().items():
@@ -69,7 +57,7 @@ class TestMoE(unittest.TestCase):
                     if analytical_grad is None:
                         continue
                     numerical_grad_val = numerical_gradient(
-                        lambda p_arg: model_forward_with_loss(self.input_data), param, 1.0
+                        lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
                     )
                     check_gradient(self, analytical_grad, numerical_grad_val,
                                  f"expert_{i}.{layer_name}.{param_name}")

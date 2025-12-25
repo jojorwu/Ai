@@ -29,9 +29,6 @@ class SiLU:
 
 class Tanh:
     """Hyperbolic tangent activation function."""
-    def __init__(self):
-        self.output = None
-
     def forward(self, x):
         self.output = np.tanh(x)
         return self.output

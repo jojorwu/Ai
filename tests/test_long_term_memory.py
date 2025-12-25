@@ -33,6 +33,9 @@ class TestLongTermMemory(unittest.TestCase):
         """Perform a numerical gradient check for the backward pass."""
         logging.info("\nRunning Test: LTM Backward Pass Gradient Check...")
 
+        def forward_pass_for_grad_check(p_arg):
+            return self.ltm.forward(self.input_data)
+
         output = self.ltm.forward(self.input_data)
         dout = np.random.randn(*output.shape)
         self.ltm.backward(dout)
@@ -43,7 +46,7 @@ class TestLongTermMemory(unittest.TestCase):
                 continue
 
             numerical_grad_val = numerical_gradient(
-                lambda p: self.ltm.forward(self.input_data),
+                forward_pass_for_grad_check,
                 param,
                 dout
             )

@@ -49,17 +49,21 @@ class TestMultiHeadAttention(unittest.TestCase):
         dx_analytic = mha.backward(dout)
 
         # --- Numerical Gradient Check ---
+        # Define a lambda for the forward pass for the numerical gradient checker
+        model_forward = lambda t: mha.forward(t)
+
         # Check gradients with respect to the input tensor 'x'
         logging.info("Checking gradients for input: dx...")
-        dx_numerical = numerical_gradient(mha.forward, x_input, dout)
+        dx_numerical = numerical_gradient(model_forward, x_input, dout)
         check_gradient(self, dx_analytic, dx_numerical, "dx")
 
         # Check gradients for all trainable parameters (qkv_proj.W and wo.W)
         all_params = mha.get_trainable_params()
         for param_name, (param_val, param_grad) in all_params.items():
-            logging.info("Checking gradients for parameter: %s...", param_name)
+            logging.info(f"Checking gradients for parameter: {param_name}...")
             # Use a lambda that captures the current parameter being tested
-            grad_numerical = numerical_gradient(lambda p: mha.forward(x_input), param_val, dout)
+            param_forward = lambda p: mha.forward(x_input)
+            grad_numerical = numerical_gradient(param_forward, param_val, dout)
             check_gradient(self, param_grad, grad_numerical, f"d{param_name}")
 
         logging.info("Optimized MultiHeadAttention gradient checks passed!")

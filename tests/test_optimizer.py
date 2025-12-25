@@ -5,10 +5,9 @@ import logging
 import unittest
 
 from backend import np
-from config import OptimizerConfig
+
 from nn_components.linear import Linear
 from optimizer import Adam
-import json
 
 
 class TestOptimizer(unittest.TestCase):
@@ -20,14 +19,10 @@ class TestOptimizer(unittest.TestCase):
 
         input_size = 10
         output_size = 2
-
-        with open('config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
-
-        optimizer_config = OptimizerConfig(**config['optimizer'])
+        learning_rate = 0.01
 
         linear_layer = Linear(input_size, output_size)
-        optimizer = Adam(optimizer_config)
+        optimizer = Adam(learning_rate=learning_rate)
 
         x = np.random.randn(1, input_size)
         d_out = np.random.randn(1, output_size)
@@ -35,9 +30,9 @@ class TestOptimizer(unittest.TestCase):
         _ = linear_layer.forward(x)
         _ = linear_layer.backward(d_out)
 
-        weights_before = np.copy(linear_layer.weights)
+        weights_before = np.copy(linear_layer.W)
         optimizer.step(linear_layer.get_trainable_params())
-        weights_after = linear_layer.weights
+        weights_after = linear_layer.W
 
         self.assertFalse(np.array_equal(weights_before, weights_after),
                          "Optimizer step did not update weights.")

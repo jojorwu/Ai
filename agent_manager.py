@@ -10,7 +10,32 @@ from backend import np
 from agent import Agent
 from model import Transformer
 from tokenizer import Tokenizer
-from utils import get_batches
+
+
+def get_agent_batches(data, batch_size, seq_len):
+    """
+    Simplified batch generator for agent specialization.
+    Unlike the main one, it doesn't shuffle and works with a single data chunk.
+    """
+    num_total_tokens = len(data)
+    if num_total_tokens < seq_len:
+        return
+
+    num_sequences = (num_total_tokens - 1) // seq_len
+    if num_sequences < batch_size:
+        return
+
+    num_batches = num_sequences // batch_size
+    if num_batches == 0:
+        return
+
+    end_idx = num_batches * batch_size * seq_len
+    x = np.array([item[0] for item in data[:end_idx]], dtype=np.int64).reshape(batch_size, -1)
+    y = np.array([item[0] for item in data[1:end_idx + 1]], dtype=np.int64).reshape(batch_size, -1)
+    images = np.array([item[1] for item in data[:end_idx]], dtype=object).reshape(batch_size, -1)
+
+    for i in range(0, x.shape[1], seq_len):
+        yield x[:, i:i + seq_len], y[:, i:i + seq_len], images[:, i:i + seq_len]
 
 
 class AgentManager:
@@ -45,7 +70,7 @@ class AgentManager:
 
         logging.info("Specializing agents on different data subsets...")
         for i, agent in enumerate(self.agents):
-            agent_data = data_chunks[i].tolist()
+            agent_data = data_chunks[i]
             if len(agent_data) == 0:
                 logging.info("  - Skipping %s, no data assigned.", agent.agent_id)
                 continue
@@ -53,22 +78,14 @@ class AgentManager:
             logging.info("  - Specializing %s on %d items...",
                          agent.agent_id, len(agent_data))
 
-            batch_generator = get_batches(agent_data, evo_config.batch_size,
-                                          evo_config.seq_len)
+            batch_generator = get_agent_batches(agent_data, evo_config.batch_size,
+                                                evo_config.seq_len)
 
             steps_done = 0
-            for batch in batch_generator:
+            for x_batch, y_batch, image_batch in batch_generator:
                 if steps_done >= steps_per_agent:
                     break
-
-                # Unpack batch, handling both multimodal and text-only cases
-                if len(batch) == 3:
-                    x_batch, y_batch, image_batch = batch
-                    agent.experience(x_batch, y_batch, image_batch)
-                else:
-                    x_batch, y_batch = batch
-                    agent.experience(x_batch, y_batch)
-
+                agent.experience(x_batch, y_batch, image_batch)
                 steps_done += 1
 
             if steps_done < steps_per_agent:
@@ -97,10 +114,10 @@ class AgentManager:
         avg_ltm_state = copy.deepcopy(ltm_states[0])
 
         for layer_name in avg_ltm_state:
-            sum_w = sum(state[layer_name]['weights'] for state in ltm_states)
+            sum_w = sum(state[layer_name]['W'] for state in ltm_states)
             sum_b = sum(state[layer_name].get('b', 0) for state in ltm_states)
 
-            avg_ltm_state[layer_name]['weights'] = sum_w / len(ltm_states)
+            avg_ltm_state[layer_name]['W'] = sum_w / len(ltm_states)
             if 'b' in avg_ltm_state[layer_name]:
                 avg_ltm_state[layer_name]['b'] = sum_b / len(ltm_states)
 

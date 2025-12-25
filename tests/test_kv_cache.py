@@ -28,8 +28,8 @@ class TestKVCache(unittest.TestCase):
     def test_snapshot_and_restore(self):
         """Test the snapshot and restore functionality of the KVCache."""
         initial_snapshot = self.cache.snapshot()
-        self.assertTrue(np.all(initial_snapshot[0] == 0))
-        self.assertTrue(np.all(initial_snapshot[1] == 0))
+        self.assertTrue(np.all(initial_snapshot['k_cache'] == 0))
+        self.assertTrue(np.all(initial_snapshot['v_cache'] == 0))
 
         k_data = np.random.randn(self.batch_size, self.num_kv_heads, 5, self.d_k)
         v_data = np.random.randn(self.batch_size, self.num_kv_heads, 5, self.d_k)
@@ -43,12 +43,12 @@ class TestKVCache(unittest.TestCase):
 
         self.cache.restore(updated_snapshot)
 
-        np.testing.assert_array_equal(self.cache.cache_k, updated_snapshot[0])
-        np.testing.assert_array_equal(self.cache.cache_v, updated_snapshot[1])
+        np.testing.assert_array_equal(self.cache.k_cache, updated_snapshot['k_cache'])
+        np.testing.assert_array_equal(self.cache.v_cache, updated_snapshot['v_cache'])
 
         self.cache.restore(initial_snapshot)
-        np.testing.assert_array_equal(self.cache.cache_k, initial_snapshot[0])
-        np.testing.assert_array_equal(self.cache.cache_v, initial_snapshot[1])
+        np.testing.assert_array_equal(self.cache.k_cache, initial_snapshot['k_cache'])
+        np.testing.assert_array_equal(self.cache.v_cache, initial_snapshot['v_cache'])
 
         logging.info("KVCache snapshot and restore PASSED.")
 

@@ -1,79 +1,79 @@
-"""
-Implementation of a standard Linear (fully-connected) layer.
-"""
-from backend import np
-
+import numpy as np
 
 class Linear:
     """
-    Implements a standard Linear (fully-connected) layer with GPT-2 style weight initialization.
+    Полностью связанный (линейный) слой с возможностью отключения смещения (bias).
     """
-
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, input_dim, output_dim, bias=True):
+        """
+        Инициализация слоя.
+        Args:
+            input_dim (int): Размерность входа.
+            output_dim (int): Размерность выхода.
+            bias (bool): Использовать ли вектор смещения.
+        """
         self.use_bias = bias
+        self.W = np.random.randn(input_dim, output_dim) * 0.02
+        self.b = np.zeros(output_dim) if self.use_bias else None
 
-        # GPT-2 style initialization
-        self.weights = np.random.normal(0, 0.02, (in_features, out_features))
-        self.b = np.zeros(out_features) if bias else None
+        self.x = None
+        self.dW = None
+        self.db = None if self.use_bias else -1 # Используем -1 как флаг "не использовать"
 
-        # Gradients
-        self.dweights = np.zeros_like(self.weights)
-        self.db = np.zeros_like(self.b) if bias else None
+    def special_residual_init(self, num_layers):
+        """Специальная инициализация для остаточных связей, как в GPT-2."""
+        self.W = np.random.randn(*self.W.shape) * 0.02 / np.sqrt(2 * num_layers)
 
-        # Input tensor cache for backward pass
-        self.x_input = None
+    def get_trainable_params(self):
+        """Возвращает словарь с обучаемыми параметрами и их градиентами."""
+        params = {'W': (self.W, self.dW)}
+        if self.use_bias:
+            params['b'] = (self.b, self.db)
+        return params
+
+    def get_named_params(self, prefix=''):
+        """Возвращает словарь с именем и самим слоем."""
+        return {prefix: self}
 
     def forward(self, x):
-        """Performs the forward pass of the linear layer."""
-        self.x_input = x
-        output = x @ self.weights
+        """Прямой проход."""
+        self.x = x
+        output = self.x @ self.W
         if self.use_bias:
             output += self.b
         return output
 
     def backward(self, dout):
-        """Performs the backward pass of the linear layer."""
-        in_features = self.weights.shape[0]
-        out_features = self.weights.shape[1]
-        # Gradient with respect to the input
-        dx = dout @ self.weights.T
+        """Обратный проход. Вычисляет градиенты dW, db, dx."""
+        original_shape = self.x.shape
+        x_reshaped = self.x.reshape(-1, original_shape[-1])
+        dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
-        # Gradients with respect to weights and bias
-        # Reshape input and dout for batch processing
-        x_reshaped = self.x_input.reshape(-1, in_features)
-        dout_reshaped = dout.reshape(-1, out_features)
+        dW = x_reshaped.T @ dout_reshaped
+        if self.dW is None:
+            self.dW = dW
+        else:
+            self.dW += dW
 
-        dweights = x_reshaped.T @ dout_reshaped
-        self.dweights += dweights
         if self.use_bias:
-            self.db += np.sum(dout_reshaped, axis=0)
+            db = np.sum(dout_reshaped, axis=0)
+            if self.db is None:
+                self.db = db
+            else:
+                self.db += db
 
-        return dx
-
-    def get_trainable_params(self):
-        """Returns trainable parameters and their gradients."""
-        params = {'weights': (self.weights, self.dweights)}
-        if self.use_bias:
-            params['b'] = (self.b, self.db)
-        return params
+        dx = dout_reshaped @ self.W.T
+        return dx.reshape(original_shape)
 
     def get_state(self):
-        """Returns the current state (weights and bias) of the layer."""
-        state = {'weights': self.weights}
+        """Возвращает состояние слоя (веса)."""
+        state = {'W': self.W}
         if self.use_bias:
             state['b'] = self.b
         return state
 
     def set_state(self, state):
-        """Sets the state (weights and bias) of the layer."""
-        self.weights = state['weights']
+        """Загружает состояние слоя (веса)."""
+        self.W = state['W']
         if self.use_bias and 'b' in state:
             self.b = state['b']
-
-    def special_residual_init(self, num_layers):
-        """
-        Applies a special initialization for residual connections, as proposed in GPT-2.
-        Scales the weights of layers in residual paths by 1/sqrt(N), where N is the
-        number of residual layers.
-        """
-        self.weights *= (1 / np.sqrt(2 * num_layers))

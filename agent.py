@@ -41,15 +41,14 @@ class Agent:
             # Re-initialize LTM weights so each agent starts fresh
             self.model.long_term_memory.reinitialize_weights()
             # Each agent gets its own optimizer for its LTM
-            self.ltm_optimizer = Adam(self.model.ltm_config.optimizer)
+            self.ltm_optimizer = Adam(**self.model.ltm_config.optimizer.model_dump())
         else:
             self.ltm_optimizer = None
 
         self.loss_fn = SoftmaxCrossEntropy()
         self.metrics = AgentMetrics()
 
-    def experience(self, x_batch: np.ndarray, y_batch: np.ndarray,
-                   image_batch: np.ndarray = None):
+    def experience(self, x_batch: np.ndarray, y_batch: np.ndarray):
         """
         The process of an agent gaining "experience" in a batch training mode.
         Performs one LTM update step if the "surprise" is large enough.
@@ -61,7 +60,7 @@ class Agent:
         self.model.zero_grad()
 
         # 1. Forward and backward pass to get gradients
-        logits, values, _ = self.model.forward(x_batch, images=image_batch)
+        logits, values, _ = self.model.forward(x_batch)
         _ = self.loss_fn.forward(logits, y_batch)
         dlogits = self.loss_fn.backward()
         dvalues = np.zeros_like(values)
