@@ -8,7 +8,6 @@ import os
 import numpy as np
 
 
-# pylint: disable=broad-except-in-catch
 def save_checkpoint(model, optimizer, training_state, config, filepath):
     """Saves the state of the model, optimizer, and training."""
     try:
@@ -31,8 +30,10 @@ def save_checkpoint(model, optimizer, training_state, config, filepath):
         np.savez(filepath, **checkpoint)
         logging.info("Checkpoint successfully saved to %s", filepath)
 
+    except (IOError, OSError) as e:
+        logging.error("I/O error saving checkpoint to %s: %s", filepath, e, exc_info=True)
     except Exception as e:
-        logging.error("Error saving checkpoint to %s: %s", filepath, e, exc_info=True)
+        logging.error("Unexpected error saving checkpoint to %s: %s", filepath, e, exc_info=True)
 
 
 def load_checkpoint(model, optimizer, filepath):
@@ -65,9 +66,19 @@ def load_checkpoint(model, optimizer, filepath):
         logging.info("Checkpoint successfully loaded from %s", filepath)
         return training_state, config
 
-    except Exception as e:
-        logging.error("Error loading checkpoint from %s: %s", filepath, e, exc_info=True)
+    except FileNotFoundError:
+        logging.error("Checkpoint file not found during load: %s", filepath)
         return None, None
+    except (IOError, OSError) as e:
+        logging.error("I/O error loading checkpoint from %s: %s", filepath, e, exc_info=True)
+        return None, None
+    except KeyError as e:
+        logging.error("Key error loading checkpoint from %s: missing key %s", filepath, e)
+        return None, None
+    except Exception as e:
+        logging.error("Unexpected error loading checkpoint from %s: %s", filepath, e, exc_info=True)
+        return None, None
+
 
 def get_batches(data, batch_size, seq_len, shuffle=False):
     """
@@ -79,17 +90,15 @@ def get_batches(data, batch_size, seq_len, shuffle=False):
     if shuffle:
         np.random.shuffle(data)
 
-    # Check if data is multimodal (list of tuples) or text-only (flat list)
     is_multimodal = isinstance(data[0], (list, tuple))
-
     num_sequences = len(data) - seq_len
+
     for i in range(0, num_sequences, batch_size):
         batch_end = i + batch_size
         x_list, y_list, img_list = [], [], []
 
         for j in range(i, min(batch_end, num_sequences)):
             if is_multimodal:
-                # Unpack tuples for multimodal data
                 x_seq = [item[0] for item in data[j:j + seq_len]]
                 y_seq = [item[0] for item in data[j + 1:j + seq_len + 1]]
                 img_seq = [item[1] for item in data[j:j + seq_len]]
@@ -97,7 +106,6 @@ def get_batches(data, batch_size, seq_len, shuffle=False):
                 y_list.append(y_seq)
                 img_list.append(img_seq)
             else:
-                # Handle text-only data
                 x_list.append(data[j:j + seq_len])
                 y_list.append(data[j + 1:j + seq_len + 1])
 
@@ -105,6 +113,7 @@ def get_batches(data, batch_size, seq_len, shuffle=False):
             yield np.array(x_list), np.array(y_list), np.array(img_list)
         else:
             yield np.array(x_list), np.array(y_list)
+
 
 def zero_gradients(model):
     """Resets gradients in all trainable layers of a model to zero."""

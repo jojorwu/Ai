@@ -27,7 +27,8 @@ class TestTrainingIntegration(unittest.TestCase):
         batch_size = 2
         seq_len = 4
 
-        model_config = Config.from_json('config.json').model
+        config = Config.from_json('config.json')
+        model_config = config.model
         model_config.d_model = 8
         model_config.num_layers = 1
         model_config.num_heads = 2
@@ -35,7 +36,6 @@ class TestTrainingIntegration(unittest.TestCase):
         model_config.d_ff = 16
         model_config.max_seq_len = 5
 
-        config = Config.from_json('config.json')
         model = Transformer(
             vocab_size=vocab_size, model_config=model_config,
             vision_config=config.vision, ltm_config=config.ltm
@@ -45,7 +45,7 @@ class TestTrainingIntegration(unittest.TestCase):
         mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
 
         policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer = Adam(learning_rate=0.001)
+        optimizer = Adam(config.optimizer)
 
         initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
 

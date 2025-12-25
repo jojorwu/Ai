@@ -83,7 +83,7 @@ class Transformer:
             self.long_term_memory = LongTermMemory(self.d_model,
                                                    model_config.ltm_d_hidden,
                                                    model_config.ltm_num_layers)
-            self.ltm_optimizer = Adam(**ltm_config.optimizer.model_dump())
+            self.ltm_optimizer = Adam(ltm_config.optimizer)
             self.ltm_surprise_threshold = ltm_config.surprise_threshold
         else:
             self.long_term_memory = None

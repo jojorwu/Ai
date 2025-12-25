@@ -2,41 +2,37 @@
 This module contains the Trainer class, which encapsulates the core training logic.
 """
 import logging
+import os
 import time
 
 import numpy as np
 
 from agent_manager import AgentManager
 from config import Config
-from model import Transformer
-from nn_components.loss import SoftmaxCrossEntropy
 from nn_components.lr_scheduler import cosine_decay_with_warmup
-from optimizer import Adam, clip_gradients
-from tokenizer import Tokenizer
-from utils import get_batches
+from optimizer import clip_gradients
+from train import TrainingData, TrainingComponents
+from utils import get_batches, save_checkpoint
+
 
 class Trainer:
     """
     Encapsulates the training and validation logic.
     """
-    # pylint: disable=too-many-arguments
-    def __init__(self, config: Config, model: Transformer, optimizer: Adam,
-                 loss_fn: SoftmaxCrossEntropy, tokenizer: Tokenizer,
-                 train_data: list, val_data: list):
+
+    def __init__(self, config: Config, components: TrainingComponents, data: TrainingData):
         self.config = config
-        self.model = model
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.tokenizer = tokenizer
-        self.train_data = train_data
-        self.val_data = val_data
+        self.model = components.model
+        self.optimizer = components.optimizer
+        self.loss_fn = components.loss_fn
+        self.data = data
         self.max_norm = config.optimizer.max_norm
 
     def run_validation(self):
         """Runs validation on the model."""
         self.model.eval()
         total_loss, num_batches = 0, 0
-        batch_iterator = get_batches(self.val_data, self.config.evolution.batch_size,
+        batch_iterator = get_batches(self.data.val_data, self.config.evolution.batch_size,
                                      self.config.evolution.seq_len)
         for x, y in batch_iterator:
             mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
@@ -53,10 +49,10 @@ class Trainer:
         start_time = time.time()
         total_policy_loss = 0
 
-        batch_iterator = get_batches(self.train_data, evo_config.batch_size,
+        batch_iterator = get_batches(self.data.train_data, evo_config.batch_size,
                                      evo_config.seq_len)
-        num_batches = len(self.train_data) // (evo_config.batch_size *
-                                             evo_config.seq_len)
+        num_batches = len(self.data.train_data) // (evo_config.batch_size *
+                                                  evo_config.seq_len)
         training_steps = ((num_batches // evo_config.gradient_accumulation_steps) *
                           evo_config.pretrain_epochs)
 
@@ -107,15 +103,15 @@ class Trainer:
 
         logging.info("Specializing %d agents...", evo_config.num_agents)
         agent_manager.specialize_agents_on_dataset(
-            full_data=self.train_data,
+            full_data=self.data.train_data,
             evo_config=evo_config,
             steps_per_agent=10
         )
 
         logging.info("Evaluating and selecting best agents...")
         best_agents = agent_manager.collaborative_evaluation(
-            evaluation_data=self.val_data[:50],
-            tokenizer=self.tokenizer,
+            evaluation_data=self.data.val_data[:50],
+            tokenizer=self.data.tokenizer,
             top_k=evo_config.num_survivors
         )
         if not best_agents:
@@ -129,3 +125,52 @@ class Trainer:
         epoch_time = time.time() - start_time
         logging.info("--- Evolution cycle finished in %.2fs ---", epoch_time)
         return epoch_time
+
+    def run_training(self, model_dir, state):
+        """Executes the main training loop, including pre-training and evolution phases."""
+        pretrain_epochs = self.config.evolution.pretrain_epochs
+        total_epochs = pretrain_epochs + self.config.evolution.evolution_epochs
+        logging.info("Starting training loop for %d total epochs.", total_epochs)
+
+        for epoch in range(state.epoch, total_epochs):
+            is_pretrain = epoch < pretrain_epochs
+            phase = "Pre-training" if is_pretrain else "Evolution"
+            phase_epoch = epoch if is_pretrain else epoch - pretrain_epochs
+            phase_total_epochs = (
+                pretrain_epochs if is_pretrain else self.config.evolution.evolution_epochs)
+
+            logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, phase_total_epochs)
+
+            avg_loss, epoch_time = None, 0.0
+            if is_pretrain:
+                avg_loss, epoch_time, state.current_step = self.train_pretrain_epoch(
+                    state.current_step)
+            else:
+                epoch_time = self.run_evolution_cycle()
+
+            val_loss = self.run_validation()
+            log_parts = [f"    - Validation Loss: {val_loss:.4f}",
+                         f"    - Epoch Time: {epoch_time:.2f}s"]
+            if avg_loss is not None:
+                log_parts.insert(0, f"    - Average Loss: {avg_loss:.4f}")
+            if is_pretrain:
+                log_parts.append(f"    - Learning Rate: {self.optimizer.lr:.6f}")
+            logging.info("\n".join(log_parts))
+
+            if val_loss < state.best_val_loss:
+                state.best_val_loss, state.epochs_no_improve = val_loss, 0
+                self.model.save_weights(os.path.join(model_dir, 'best_model.npz'),
+                                        self.config.model_dump())
+                logging.info("    - New best model saved (Val Loss: %.4f)", state.best_val_loss)
+            else:
+                state.epochs_no_improve += 1
+                logging.info("    - No improvement for %d epochs.", state.epochs_no_improve)
+
+            state.epoch = epoch + 1
+            save_checkpoint(self.model, self.optimizer, state.__dict__,
+                            self.config.model_dump(),
+                            os.path.join(model_dir, 'checkpoint.npz'))
+
+            if state.epochs_no_improve >= self.config.evolution.early_stopping_patience:
+                logging.warning("Early stopping triggered. Ending training.")
+                break

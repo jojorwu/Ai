@@ -5,9 +5,10 @@ import logging
 import unittest
 
 from backend import np
-
+from config import OptimizerConfig
 from nn_components.linear import Linear
 from optimizer import Adam
+import json
 
 
 class TestOptimizer(unittest.TestCase):
@@ -19,10 +20,14 @@ class TestOptimizer(unittest.TestCase):
 
         input_size = 10
         output_size = 2
-        learning_rate = 0.01
+
+        with open('config.json', 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+        optimizer_config = OptimizerConfig(**config['optimizer'])
 
         linear_layer = Linear(input_size, output_size)
-        optimizer = Adam(learning_rate=learning_rate)
+        optimizer = Adam(optimizer_config)
 
         x = np.random.randn(1, input_size)
         d_out = np.random.randn(1, output_size)
