@@ -111,3 +111,17 @@ def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, 
             logging.error(f"Error processing file {text_path}: {e}")
 
     return multimodal_data
+
+
+def get_batches(data, batch_size, seq_len):
+    """
+    Generator function to yield batches of data.
+    """
+    num_sequences = len(data) - seq_len
+    for i in range(0, num_sequences, batch_size):
+        batch_end = i + batch_size
+        x_list, y_list = [], []
+        for j in range(i, min(batch_end, num_sequences)):
+            x_list.append(data[j:j + seq_len])
+            y_list.append(data[j + 1:j + seq_len + 1])
+        yield np.array(x_list), np.array(y_list)

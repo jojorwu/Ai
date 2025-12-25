@@ -34,8 +34,8 @@ def list_files(path: str = ".") -> str:
         return json.dumps(files)
     except FileNotFoundError:
         return f"Error: Directory not found at path '{path}'."
-    except Exception as e:
-        return f"Error: An error occurred while listing files: {e}"
+    except (PermissionError, OSError) as e:
+        return f"Error: An OS error occurred while listing files: {e}"
 
 
 def read_file(path: str) -> str:
@@ -52,8 +52,8 @@ def read_file(path: str) -> str:
             return f.read()
     except FileNotFoundError:
         return f"Error: File not found at path '{path}'."
-    except Exception as e:
-        return f"Error: An error occurred while reading the file: {e}"
+    except (PermissionError, IOError) as e:
+        return f"Error: An I/O error occurred while reading the file: {e}"
 
 
 def write_file(path: str, content: str) -> str:
@@ -71,8 +71,8 @@ def write_file(path: str, content: str) -> str:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
         return f"Success: File successfully written to '{path}'."
-    except Exception as e:
-        return f"Error: An error occurred while writing the file: {e}"
+    except (PermissionError, IOError) as e:
+        return f"Error: An I/O error occurred while writing the file: {e}"
 
 
 # --- Image Generation Tool ---
@@ -103,8 +103,8 @@ def create_image(prompt: str, path: str) -> str:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         img.save(file_path)
         return f"Success: Image created and saved to '{path}'."
-    except Exception as e:
-        return f"Error: An error occurred while creating the image: {e}"
+    except (IOError, OSError) as e:
+        return f"Error: An I/O error occurred while creating the image: {e}"
 
 
 # --- Tool Registry ---
@@ -117,12 +117,11 @@ AVAILABLE_TOOLS = {
 }
 
 
-# pylint: disable=broad-except-in-catch
 def execute_tool(tool_name: str, args: dict) -> str:
     """
     Executes the specified tool with the provided arguments.
     """
-    logging.info(f"Executing tool: {tool_name} with args: {args}")
+    logging.info("Executing tool: %s with args: %s", tool_name, args)
     if tool_name not in AVAILABLE_TOOLS:
         return f"Error: Tool '{tool_name}' not found."
 

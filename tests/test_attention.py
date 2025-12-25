@@ -10,6 +10,15 @@ from nn_components.attention import ScaledDotProductAttention
 from tests.gradient_check import check_gradient, numerical_gradient
 
 
+def _create_test_data(batch_size, num_heads, seq_len, d_k, d_v):
+    """Creates test data for the attention layer."""
+    q = np.random.randn(batch_size, num_heads, seq_len, d_k)
+    k = np.random.randn(batch_size, num_heads, seq_len, d_k)
+    v = np.random.randn(batch_size, num_heads, seq_len, d_v)
+    dout = np.random.randn(batch_size, num_heads, seq_len, d_v)
+    return q, k, v, dout
+
+
 class TestAttention(unittest.TestCase):
     """
     Tests for the ScaledDotProductAttention layer.
@@ -20,12 +29,7 @@ class TestAttention(unittest.TestCase):
         logging.info("\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
 
         np.random.seed(42)
-        batch_size, num_heads, seq_len, d_k, d_v = 2, 8, 3, 4, 5
-
-        q = np.random.randn(batch_size, num_heads, seq_len, d_k)
-        k = np.random.randn(batch_size, num_heads, seq_len, d_k)
-        v = np.random.randn(batch_size, num_heads, seq_len, d_v)
-        dout = np.random.randn(batch_size, num_heads, seq_len, d_v)
+        q, k, v, dout = _create_test_data(2, 8, 3, 4, 5)
 
         attention = ScaledDotProductAttention()
 

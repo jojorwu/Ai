@@ -6,6 +6,7 @@ import unittest
 
 from backend import np
 
+from config import OptimizerConfig
 from nn_components.linear import Linear
 from optimizer import Adam
 
@@ -19,10 +20,11 @@ class TestOptimizer(unittest.TestCase):
 
         input_size = 10
         output_size = 2
-        learning_rate = 0.01
 
+        config = OptimizerConfig(learning_rate=0.01, beta1=0.9, beta2=0.999,
+                                 epsilon=1e-8, weight_decay=0.01, max_norm=1.0)
         linear_layer = Linear(input_size, output_size)
-        optimizer = Adam(learning_rate=learning_rate)
+        optimizer = Adam(config)
 
         x = np.random.randn(1, input_size)
         d_out = np.random.randn(1, output_size)

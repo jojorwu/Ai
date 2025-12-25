@@ -71,7 +71,7 @@ def load_model_and_tokenizer(model_name: str, config: Config):
             raise FileNotFoundError(f"No weights file ('best_model.npz' or 'model.npz') "
                                     f"found in {model_dir}")
 
-    tokenizer = Tokenizer(config.evolution.data_dir)
+    tokenizer = Tokenizer(model_dir)
     model = Transformer.load_model(weights_path, tokenizer.vocab_size, config)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")

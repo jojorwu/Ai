@@ -1,25 +1,26 @@
 import numpy as np
 from nn_components.linear import Linear
 from nn_components.activations import Tanh
+from utils import zero_gradients
 
 class LongTermMemory:
     """
-    Модуль долгосрочной памяти, реализованный как многослойный перцептрон (MLP).
+    The long-term memory module, implemented as a multilayer perceptron (MLP).
     """
     def __init__(self, d_model, d_hidden, num_layers):
         self.layers = []
-        # Входной слой
+        # Input layer
         self.layers.append(Linear(d_model, d_hidden))
         self.layers.append(Tanh())
-        # Скрытые слои
+        # Hidden layers
         for _ in range(num_layers - 2):
             self.layers.append(Linear(d_hidden, d_hidden))
             self.layers.append(Tanh())
-        # Выходной слой
+        # Output layer
         self.layers.append(Linear(d_hidden, d_model))
 
     def get_children(self):
-        """Возвращает словарь дочерних слоев."""
+        """Returns a dictionary of child layers."""
         children = {}
         for i, layer in enumerate(self.layers):
             if isinstance(layer, Linear):
@@ -27,19 +28,19 @@ class LongTermMemory:
         return children
 
     def forward(self, x):
-        """Прямой проход через MLP."""
+        """Forward pass through the MLP."""
         for layer in self.layers:
             x = layer.forward(x)
         return x
 
     def backward(self, dout):
-        """Обратный проход через MLP."""
+        """Backward pass through the MLP."""
         for layer in reversed(self.layers):
             dout = layer.backward(dout)
         return dout
 
     def get_named_params(self, prefix=''):
-        """Рекурсивно собирает все обучаемые слои и их параметры с именами."""
+        """Recursively collects all trainable layers and their parameters with names."""
         named_params = {}
         if hasattr(self, 'get_trainable_params'):
             named_params[prefix] = self
@@ -51,7 +52,7 @@ class LongTermMemory:
         return named_params
 
     def get_trainable_params(self):
-        """Собирает все обучаемые параметры из линейных слоев."""
+        """Collects all trainable parameters from the linear layers."""
         params = {}
         for i, layer in enumerate(self.layers):
             if isinstance(layer, Linear):
@@ -59,34 +60,27 @@ class LongTermMemory:
         return params
 
     def zero_grad(self):
-        """Обнуляет градиенты во всех обучаемых слоях."""
-        for layer_obj in self.get_named_params().values():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
-                    grad_attr_name = f"d{param_name}"
-                    if hasattr(layer_obj, grad_attr_name):
-                        grad_val = getattr(layer_obj, grad_attr_name)
-                        if grad_val is not None:
-                            setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
+        """Zeros out the gradients in all trainable layers."""
+        zero_gradients(self)
 
     def get_state(self):
-        """Собирает состояние (веса) всех обучаемых слоев."""
+        """Collects the state (weights) of all trainable layers."""
         state = {}
         for name, layer in self.get_children().items():
             state[name] = layer.get_state()
         return state
 
     def set_state(self, state):
-        """Загружает состояние (веса) для всех обучаемых слоев."""
+        """Loads the state (weights) for all trainable layers."""
         for name, layer in self.get_children().items():
             if name in state:
                 layer.set_state(state[name])
 
     def reinitialize_weights(self):
-        """Переинициализирует веса всех линейных слоев."""
+        """Reinitializes the weights of all linear layers."""
         for layer in self.layers:
             if isinstance(layer, Linear):
-                # Используем ту же инициализацию, что и в GPT-2
+                # We use the same initialization as in GPT-2
                 layer.W = np.random.normal(0, 0.02, layer.W.shape)
                 if layer.use_bias:
                     layer.b = np.zeros(layer.b.shape)

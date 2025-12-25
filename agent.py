@@ -32,7 +32,7 @@ class Agent:
             # Re-initialize LTM weights so each agent starts fresh
             self.model.long_term_memory.reinitialize_weights()
             # Each agent gets its own optimizer for its LTM
-            self.ltm_optimizer = Adam(**self.model.ltm_config.optimizer.model_dump())
+            self.ltm_optimizer = Adam(self.model.ltm_config.optimizer)
         else:
             self.ltm_optimizer = None
 
