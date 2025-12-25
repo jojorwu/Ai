@@ -1,3 +1,6 @@
+"""
+Module containing the long_term_memory layer.
+"""
 import numpy as np
 from nn_components.linear import Linear
 from nn_components.activations import Tanh
@@ -81,6 +84,6 @@ class LongTermMemory:
         for layer in self.layers:
             if isinstance(layer, Linear):
                 # We use the same initialization as in GPT-2
-                layer.W = np.random.normal(0, 0.02, layer.W.shape)
+                layer.weights = np.random.normal(0, 0.02, layer.weights.shape)
                 if layer.use_bias:
-                    layer.b = np.zeros(layer.b.shape)
+                    layer.bias = np.zeros(layer.bias.shape)

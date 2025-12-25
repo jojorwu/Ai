@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from nn_components.rotary_embedding import (RotaryPositionalEmbedding,
+from nn_components.rotary_embedding import (precompute_rope_embeddings,
                                             apply_rotary_pos_emb,
                                             rotary_backward)
 from tests.gradient_check import check_gradient, numerical_gradient
@@ -25,9 +25,7 @@ class TestRotaryEmbedding(unittest.TestCase):
 
         np.random.seed(42)
 
-        rope = RotaryPositionalEmbedding(dim, max_seq_len=seq_len)
-        cos = rope.cos_cached[:, :, :seq_len, :]
-        sin = rope.sin_cached[:, :, :seq_len, :]
+        cos, sin = precompute_rope_embeddings(dim, max_seq_len=seq_len)
 
         x = np.random.randn(batch_size, n_heads, seq_len, dim)
         dout = np.random.randn(batch_size, n_heads, seq_len, dim)

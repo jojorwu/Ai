@@ -16,28 +16,27 @@ class DecoderBlock:
     Implements a single Transformer Decoder block with Dropout, optional LTM, and optional MoE.
     """
 
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout_rate: float,
-                 num_kv_heads: int, rotary_emb=None, num_layers: int = 1,
-                 long_term_memory=None, num_experts: int = None, top_k_experts: int = None):
+    def __init__(self, config: 'DecoderBlockConfig'):
+        self.config = config
 
-        mha_config = MultiHeadAttentionConfig(d_model=d_model, num_heads=num_heads,
-                                              num_kv_heads=num_kv_heads, rotary_emb=rotary_emb,
-                                              num_layers=num_layers)
+        mha_config = MultiHeadAttentionConfig(d_model=config.d_model, num_heads=config.num_heads,
+                                              num_kv_heads=config.num_kv_heads, rotary_emb=config.rotary_emb,
+                                              num_layers=config.num_layers)
         self.mha = MultiHeadAttention(mha_config)
-        self.ltm = long_term_memory
+        self.ltm = config.long_term_memory
 
-        self.use_moe = num_experts is not None and top_k_experts is not None
+        self.use_moe = config.num_experts is not None and config.top_k_experts is not None
         if self.use_moe:
-            self.moe_layer = MixtureOfExperts(MoEConfig(d_model=d_model, d_ff=d_ff,
-                                                       num_experts=num_experts,
-                                                       top_k=top_k_experts))
+            self.moe_layer = MixtureOfExperts(MoEConfig(d_model=config.d_model, d_ff=config.d_ff,
+                                                       num_experts=config.num_experts,
+                                                       top_k=config.top_k_experts))
         else:
-            self.ffn = FeedForward(d_model, d_ff, bias=False, num_layers=num_layers)
+            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False, num_layers=config.num_layers)
 
-        self.norm1 = RMSNorm(d_model)
-        self.norm2 = RMSNorm(d_model)
-        self.dropout1 = Dropout(dropout_rate)
-        self.dropout2 = Dropout(dropout_rate)
+        self.norm1 = RMSNorm(config.d_model)
+        self.norm2 = RMSNorm(config.d_model)
+        self.dropout1 = Dropout(config.dropout_rate)
+        self.dropout2 = Dropout(config.dropout_rate)
 
     def get_children(self):
         """Returns a dictionary of child layers for parameter traversal."""

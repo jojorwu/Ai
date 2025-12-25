@@ -80,9 +80,10 @@ class MultiHeadAttention:
     def _apply_rotary_embeddings(self, q_proj, k_proj, seq_offset):
         """Applies rotary embeddings to Q and K projections."""
         if self.rotary_emb is not None:
+            cos, sin = self.rotary_emb
             seq_len = q_proj.shape[2]
-            cos = self.rotary_emb.cos_cached[:, :, seq_offset:seq_offset + seq_len, :]
-            sin = self.rotary_emb.sin_cached[:, :, seq_offset:seq_offset + seq_len, :]
+            cos = cos[:, :, seq_offset:seq_offset + seq_len, :]
+            sin = sin[:, :, seq_offset:seq_offset + seq_len, :]
             q_rotary = apply_rotary_pos_emb(q_proj, cos, sin)
             k_rotary = apply_rotary_pos_emb(k_proj, cos, sin)
             return q_rotary, k_rotary
@@ -125,9 +126,10 @@ class MultiHeadAttention:
     def _rotary_embeddings_backward(self, dq_rotary, dk_cached):
         """Performs the backward pass for rotary embeddings."""
         if self.rotary_emb is not None:
+            cos, sin = self.rotary_emb
             seq_len = self.q_proj_rotary.shape[2]
-            cos = self.rotary_emb.cos_cached[:, :, :seq_len, :]
-            sin = self.rotary_emb.sin_cached[:, :, :seq_len, :]
+            cos = cos[:, :, :seq_len, :]
+            sin = sin[:, :, :seq_len, :]
             dq_proj = rotary_backward(dq_rotary, self.q_proj_rotary, cos, sin)
             dk_proj = rotary_backward(dk_cached, self.k_proj_rotary, cos, sin)
             return dq_proj, dk_proj

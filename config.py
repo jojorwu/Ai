@@ -24,12 +24,15 @@ class ModelConfig(BaseModel):
                                        description="Number of 'experts' to select for each token.")
 
 
+from typing import Tuple, Any
+
+
 class MultiHeadAttentionConfig(BaseModel):
     """Configuration for the Multi-Head Attention layer."""
     d_model: int
     num_heads: int
     num_kv_heads: int
-    rotary_emb: Optional[object] = None
+    rotary_emb: Optional[Tuple[Any, Any]] = None
     bias: bool = False
     num_layers: int = 1
 
@@ -41,6 +44,24 @@ class MoEConfig(BaseModel):
     num_experts: int
     top_k: int
     bias: bool = False
+
+
+class DecoderBlockConfig(BaseModel):
+    """Configuration for a single DecoderBlock."""
+    d_model: int
+    num_heads: int
+    d_ff: int
+    dropout_rate: float
+    num_kv_heads: int
+    num_layers: int
+    num_experts: Optional[int] = None
+    top_k_experts: Optional[int] = None
+    rotary_emb: Optional[Tuple[Any, Any]] = None
+    long_term_memory: Optional[Any] = None
+
+    class Config:
+        """Pydantic config."""
+        arbitrary_types_allowed = True
 
 
 class VisionConfig(BaseModel):

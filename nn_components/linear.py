@@ -1,79 +1,82 @@
+"""
+Module containing the linear layer.
+"""
 import numpy as np
 
 class Linear:
     """
-    Полностью связанный (линейный) слой с возможностью отключения смещения (bias).
+    A fully connected (linear) layer with an optional bias.
     """
     def __init__(self, input_dim, output_dim, bias=True):
         """
-        Инициализация слоя.
+        Initializes the layer.
         Args:
-            input_dim (int): Размерность входа.
-            output_dim (int): Размерность выхода.
-            bias (bool): Использовать ли вектор смещения.
+            input_dim (int): Input dimension.
+            output_dim (int): Output dimension.
+            bias (bool): Whether to use a bias vector.
         """
         self.use_bias = bias
-        self.W = np.random.randn(input_dim, output_dim) * 0.02
-        self.b = np.zeros(output_dim) if self.use_bias else None
+        self.weights = np.random.randn(input_dim, output_dim) * 0.02
+        self.bias = np.zeros(output_dim) if self.use_bias else None
 
         self.x = None
-        self.dW = None
-        self.db = None if self.use_bias else -1 # Используем -1 как флаг "не использовать"
+        self.dweights = None
+        self.dbias = None
 
     def special_residual_init(self, num_layers):
-        """Специальная инициализация для остаточных связей, как в GPT-2."""
-        self.W = np.random.randn(*self.W.shape) * 0.02 / np.sqrt(2 * num_layers)
+        """Special initialization for residual connections, as in GPT-2."""
+        self.weights = np.random.randn(*self.weights.shape) * 0.02 / np.sqrt(2 * num_layers)
 
     def get_trainable_params(self):
-        """Возвращает словарь с обучаемыми параметрами и их градиентами."""
-        params = {'W': (self.W, self.dW)}
+        """Returns a dictionary of trainable parameters and their gradients."""
+        params = {'weights': (self.weights, self.dweights)}
         if self.use_bias:
-            params['b'] = (self.b, self.db)
+            params['bias'] = (self.bias, self.dbias)
         return params
 
     def get_named_params(self, prefix=''):
-        """Возвращает словарь с именем и самим слоем."""
+        """Returns a dictionary with the layer's name and the layer itself."""
         return {prefix: self}
 
     def forward(self, x):
-        """Прямой проход."""
+        """Forward pass."""
         self.x = x
-        output = self.x @ self.W
+        output = self.x @ self.weights
         if self.use_bias:
-            output += self.b
+            output += self.bias
         return output
 
     def backward(self, dout):
-        """Обратный проход. Вычисляет градиенты dW, db, dx."""
+        """Backward pass. Computes gradients dW, db, dx."""
         original_shape = self.x.shape
         x_reshaped = self.x.reshape(-1, original_shape[-1])
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
-        dW = x_reshaped.T @ dout_reshaped
-        if self.dW is None:
-            self.dW = dW
+        dweights = x_reshaped.T @ dout_reshaped
+        if self.dweights is None:
+            self.dweights = dweights
         else:
-            self.dW += dW
+            self.dweights += dweights
 
         if self.use_bias:
-            db = np.sum(dout_reshaped, axis=0)
-            if self.db is None:
-                self.db = db
+            dbias = np.sum(dout_reshaped, axis=0)
+            if self.dbias is None:
+                self.dbias = dbias
             else:
-                self.db += db
+                self.dbias += dbias
 
-        dx = dout_reshaped @ self.W.T
+        dx = dout_reshaped @ self.weights.T
         return dx.reshape(original_shape)
 
     def get_state(self):
-        """Возвращает состояние слоя (веса)."""
-        state = {'W': self.W}
+        """Returns the layer's state (weights)."""
+        state = {'weights': self.weights}
         if self.use_bias:
-            state['b'] = self.b
+            state['bias'] = self.bias
         return state
 
     def set_state(self, state):
-        """Загружает состояние слоя (веса)."""
-        self.W = state['W']
-        if self.use_bias and 'b' in state:
-            self.b = state['b']
+        """Loads the layer's state (weights)."""
+        self.weights = state['weights']
+        if self.use_bias and 'bias' in state:
+            self.bias = state['bias']

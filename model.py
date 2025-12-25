@@ -7,12 +7,13 @@ import numpy as np
 
 from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock
+from config import DecoderBlockConfig
 from nn_components.embedding import Embedding
 from nn_components.kv_cache import KVCache
 from nn_components.linear import Linear
 from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
-from nn_components.rotary_embedding import RotaryPositionalEmbedding
+from nn_components.rotary_embedding import precompute_rope_embeddings
 from nn_components.utils import softmax
 from nn_components.vision_encoder import VisionEncoder
 from optimizer import Adam
@@ -63,7 +64,7 @@ class Transformer:
         self.tokenizer = tokenizer
 
         d_k = self.d_model // self.num_heads
-        self.rotary_emb = RotaryPositionalEmbedding(d_k, self.max_seq_len)
+        self.rotary_emb = precompute_rope_embeddings(d_k, self.max_seq_len)
         self.embedding = Embedding(vocab_size, self.d_model)
         self.vision_encoder = VisionEncoder(d_model=self.d_model,
                                             patch_size=vision_config.patch_size,
@@ -78,15 +79,19 @@ class Transformer:
         else:
             self.long_term_memory = None
 
-        self.decoder_blocks = [
-            DecoderBlock(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff,
-                         dropout_rate=self.dropout_rate, num_kv_heads=self.num_kv_heads,
-                         rotary_emb=self.rotary_emb, num_layers=self.num_layers,
-                         long_term_memory=self.long_term_memory,
-                         num_experts=model_config.num_experts,
-                         top_k_experts=model_config.top_k_experts)
-            for _ in range(self.num_layers)
-        ]
+        block_config = DecoderBlockConfig(
+            d_model=self.d_model,
+            num_heads=self.num_heads,
+            d_ff=self.d_ff,
+            dropout_rate=self.dropout_rate,
+            num_kv_heads=self.num_kv_heads,
+            rotary_emb=self.rotary_emb,
+            num_layers=self.num_layers,
+            long_term_memory=self.long_term_memory,
+            num_experts=model_config.num_experts,
+            top_k_experts=model_config.top_k_experts
+        )
+        self.decoder_blocks = [DecoderBlock(block_config) for _ in range(self.num_layers)]
         self.final_norm = RMSNorm(self.d_model)
         self.value_head_linear = Linear(self.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
@@ -249,7 +254,7 @@ class Transformer:
         h = self.final_norm.forward(h)
         self.final_norm_output = h
 
-        logits = self.final_norm_output @ self.embedding.W.T
+        logits = self.final_norm_output @ self.embedding.weights.T
         last_token_hidden_state = h[:, -1, :]
         value_hidden = self.value_head_linear.forward(last_token_hidden_state)
         value = self.value_head_activation.forward(value_hidden)
@@ -267,7 +272,7 @@ class Transformer:
 
         d_h_value = np.zeros_like(self.final_norm_output)
         d_h_value[:, -1, :] = d_last_token_hidden_state
-        d_h_policy = dlogits @ self.embedding.W
+        d_h_policy = dlogits @ self.embedding.weights
         dx = d_h_policy + d_h_value
 
         dx = self.final_norm.backward(dx)
@@ -283,7 +288,7 @@ class Transformer:
             dx += d_ltm_input / seq_len
 
         self.embedding.backward(dx * np.sqrt(self.d_model))
-        self.embedding.dW += d_embedding_w_from_output
+        self.embedding.dweights += d_embedding_w_from_output
         return dx
 
     def _update_ltm_if_surprised(self, token_arr, kv_cache, seq_offset):

@@ -3,24 +3,26 @@ This module implements Rotary Positional Embeddings (RoPE).
 """
 import numpy as np
 
-class RotaryPositionalEmbedding:
+
+def precompute_rope_embeddings(dim, max_seq_len, theta=10000.0):
     """
-    Class for creating and caching Rotary Positional Embeddings (RoPE).
+    Precomputes the Rotary Positional Embeddings (RoPE) for a given dimension and sequence length.
     """
-    def __init__(self, dim, max_seq_len, theta=10000.0):
-        # Calculate frequencies for each pair of dimensions
-        inv_freq = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32) / dim))
+    # Calculate frequencies for each pair of dimensions
+    inv_freq = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32) / dim))
 
-        # Create a matrix of positions and frequencies
-        t = np.arange(max_seq_len, dtype=np.float32)
-        freqs = np.einsum('i,j->ij', t, inv_freq)
+    # Create a matrix of positions and frequencies
+    t = np.arange(max_seq_len, dtype=np.float32)
+    freqs = np.einsum('i,j->ij', t, inv_freq)
 
-        # Create complex numbers of the form R * e^(i * m * theta_j)
-        emb = np.concatenate((freqs, freqs), axis=-1)
+    # Create complex numbers of the form R * e^(i * m * theta_j)
+    emb = np.concatenate((freqs, freqs), axis=-1)
 
-        # Cache cos and sin values
-        self.cos_cached = np.cos(emb)[None, None, :, :]
-        self.sin_cached = np.sin(emb)[None, None, :, :]
+    # Cache cos and sin values
+    cos_cached = np.cos(emb)[None, None, :, :]
+    sin_cached = np.sin(emb)[None, None, :, :]
+    return cos_cached, sin_cached
+
 
 def apply_rotary_pos_emb(x, cos, sin):
     """

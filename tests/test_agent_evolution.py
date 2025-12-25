@@ -121,20 +121,20 @@ class TestAgentEvolution(unittest.TestCase):
         base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
                                  vision_config=config.vision, ltm_config=config.ltm)
         initial_ltm_state = base_model.long_term_memory.get_state()
-        initial_ltm_weights = initial_ltm_state['linear_0']['W']
+        initial_ltm_weights = initial_ltm_state['linear_0']['weights']
 
         agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
         best_agent = agent_manager.agents[0]
         winning_agent_ltm = best_agent.model.long_term_memory
-        changed_weights = np.copy(winning_agent_ltm.layers[0].W)
+        changed_weights = np.copy(winning_agent_ltm.layers[0].weights)
         changed_weights += 0.5
-        winning_agent_ltm.layers[0].W = changed_weights
+        winning_agent_ltm.layers[0].weights = changed_weights
 
         agent_manager.merge_agents([best_agent])
 
         updated_ltm_state = base_model.long_term_memory.get_state()
-        updated_ltm_weights = updated_ltm_state['linear_0']['W']
+        updated_ltm_weights = updated_ltm_state['linear_0']['weights']
 
         self.assertFalse(np.allclose(initial_ltm_weights, updated_ltm_weights),
                          "Base model's LTM weights did not change after merge.")

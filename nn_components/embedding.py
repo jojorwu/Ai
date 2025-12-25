@@ -1,31 +1,34 @@
+"""
+Module containing the embedding layer.
+"""
 import numpy as np
 
 class Embedding:
     """
-    Слой для преобразования целочисленных индексов в плотные векторы (эмбеддинги).
+    Layer for converting integer indices into dense vectors (embeddings).
     """
     def __init__(self, vocab_size, d_model):
         self.vocab_size = vocab_size
         self.d_model = d_model
-        self.W = np.random.randn(vocab_size, d_model) * 0.01
+        self.weights = np.random.randn(vocab_size, d_model) * 0.01
         self.x_indices = None
-        self.dW = None
+        self.dweights = None
 
     def get_trainable_params(self):
-        return {'W': (self.W, self.dW)}
+        """Returns the trainable parameters of the layer."""
+        return {'weights': (self.weights, self.dweights)}
 
     def forward(self, x):
         """
-        Прямой проход. Извлекает эмбеддинги для входных индексов.
+        Forward pass. Retrieves embeddings for the input indices.
         """
         self.x_indices = x
-        return self.W[x]
+        return self.weights[x]
 
     def backward(self, dout):
         """
-        Обратный проход. Накапливает градиент для матрицы эмбеддингов.
+        Backward pass. Accumulates the gradient for the embedding matrix.
         """
-        if self.dW is None:
-            self.dW = np.zeros_like(self.W)
-        np.add.at(self.dW, self.x_indices, dout)
-        return None
+        if self.dweights is None:
+            self.dweights = np.zeros_like(self.weights)
+        np.add.at(self.dweights, self.x_indices, dout)

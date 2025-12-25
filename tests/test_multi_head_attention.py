@@ -8,7 +8,7 @@ from backend import np
 
 from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention
-from nn_components.rotary_embedding import RotaryPositionalEmbedding
+from nn_components.rotary_embedding import precompute_rope_embeddings
 from tests.gradient_check import check_gradient, numerical_gradient
 
 
@@ -30,7 +30,7 @@ class TestMultiHeadAttention(unittest.TestCase):
         np.random.seed(1337)
 
         # Use a real RoPE instance for a more thorough test
-        rope = RotaryPositionalEmbedding(d_k, max_seq_len=seq_len)
+        rope = precompute_rope_embeddings(d_k, max_seq_len=seq_len)
         config = MultiHeadAttentionConfig(d_model=d_model,
                                           num_heads=num_heads,
                                           num_kv_heads=num_kv_heads,

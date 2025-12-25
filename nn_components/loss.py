@@ -1,10 +1,13 @@
+"""
+Module containing the loss layer.
+"""
 import numpy as np
 from nn_components.utils import log_softmax
 
 class SoftmaxCrossEntropy:
     """
-    Комбинированный слой Softmax + Cross-Entropy Loss, использующий
-    численно стабильный log_softmax для вычислений.
+    A combined Softmax + Cross-Entropy Loss layer that uses a numerically stable
+    log_softmax for calculations.
     """
     def __init__(self):
         self.probs = None
@@ -13,11 +16,11 @@ class SoftmaxCrossEntropy:
 
     def forward(self, logits, targets, reduction='mean'):
         """
-        Прямой проход для вычисления потерь.
-        Поддерживает 'mean' (среднее) и 'none' (без агрегации).
+        Forward pass for loss calculation.
+        Supports 'mean' and 'none' for reduction.
         """
         self.reduction = reduction
-        batch_size, seq_len, vocab_size = logits.shape
+        batch_size, seq_len, _ = logits.shape
 
         log_probs = log_softmax(logits)
         self.probs = np.exp(log_probs)
@@ -41,9 +44,9 @@ class SoftmaxCrossEntropy:
 
     def backward(self):
         """
-        Обратный проход для вычисления градиента по отношению к логитам.
+        Backward pass to compute the gradient with respect to the logits.
         """
-        batch_size, seq_len, vocab_size = self.probs.shape
+        batch_size, seq_len, _ = self.probs.shape
 
         dx = self.probs.copy()
         batch_indices = np.arange(batch_size)[:, np.newaxis]
@@ -60,17 +63,27 @@ class SoftmaxCrossEntropy:
         return dx
 
 class MarginRankingLoss:
-    """Margin Ranking Loss."""
+    """Implements the Margin Ranking Loss."""
     def __init__(self, margin=1.0):
+        """
+        Initializes the MarginRankingLoss.
+        Args:
+            margin (float): The margin for the loss.
+        """
         self.margin = margin
+        self.y_good = None
+        self.y_bad = None
+        self.loss = None
 
     def forward(self, y_good, y_bad):
+        """Forward pass for the Margin Ranking Loss."""
         self.y_good = y_good
         self.y_bad = y_bad
         self.loss = np.maximum(0, self.margin - (y_good - y_bad))
         return np.mean(self.loss)
 
     def backward(self):
+        """Backward pass for the Margin Ranking Loss."""
         # Gradient is -1 for the "good" input and +1 for the "bad" input if the margin is not met
         mask = (self.loss > 0).astype(int)
         d_y_good = -mask / self.y_good.size

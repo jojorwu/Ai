@@ -8,7 +8,7 @@ import shutil
 
 from backend import set_backend
 from config import Config
-from data_loader import load_text_from_directory
+from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
@@ -37,9 +37,11 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     """Initializes the tokenizer and loads the training data."""
     logging.info("Initializing tokenizer and loading data...")
     tokenizer = Tokenizer(tokenizer_path)
-    all_text = load_text_from_directory(data_dir)
-    if not all_text:
-        raise ValueError(f"Failed to load text from directory: {data_dir}")
+    # Load multimodal data and concatenate text for pre-training
+    multimodal_data = load_multimodal_data_from_directory(data_dir)
+    if not multimodal_data:
+        raise ValueError(f"Failed to load any data from directory: {data_dir}")
+    all_text = " ".join([text for text, _ in multimodal_data])
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
     split_idx = int(len(data_tokens) * (1 - validation_split))
     train_data, val_data = data_tokens[:split_idx], data_tokens[split_idx:]
