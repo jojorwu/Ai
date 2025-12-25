@@ -54,9 +54,7 @@ def initialize_components(config: Config, vocab_size: int, tokenizer):
     model = Transformer(vocab_size=vocab_size, model_config=config.model,
                         vision_config=config.vision, ltm_config=config.ltm, tokenizer=tokenizer)
     policy_loss_fn = SoftmaxCrossEntropy()
-    optim_config = config.optimizer.model_dump()
-    optim_config.pop('max_norm')
-    optimizer = Adam(**optim_config)
+    optimizer = Adam(config.optimizer)
     logging.info("Model and optimizer initialized.")
     return model, policy_loss_fn, optimizer
 
@@ -115,9 +113,13 @@ def main():
     model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
 
     total_params = model.count_parameters()
-    logging.info(f"Model initialized with {total_params:,} trainable parameters.")
+    logging.info("Model initialized with %d trainable parameters.", total_params)
 
-    trainer = Trainer(config, model, optimizer, loss_fn, tokenizer, train_data, val_data)
+    training_components = {'model': model, 'optimizer': optimizer,
+                           'loss_fn': loss_fn, 'tokenizer': tokenizer}
+    training_data = {'train': train_data, 'validation': val_data}
+
+    trainer = Trainer(training_components, training_data, config)
 
     # --- State Loading ---
     start_epoch, current_step, best_val_loss, epochs_no_improve = 0, 0, float('inf'), 0
@@ -142,7 +144,7 @@ def main():
     # --- Training Loop ---
     pretrain_epochs, evolution_epochs = config.evolution.pretrain_epochs, config.evolution.evolution_epochs
     total_epochs = pretrain_epochs + evolution_epochs
-    logging.info(f"Starting training loop for {total_epochs} total epochs.")
+    logging.info("Starting training loop for %d total epochs.", total_epochs)
 
     for epoch in range(start_epoch, total_epochs):
         is_pretrain = epoch < pretrain_epochs
@@ -150,7 +152,7 @@ def main():
         phase_epoch = epoch if is_pretrain else epoch - pretrain_epochs
         phase_total_epochs = pretrain_epochs if is_pretrain else evolution_epochs
 
-        logging.info(f"\n--- {phase} Epoch {phase_epoch + 1}/{phase_total_epochs} ---")
+        logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, phase_total_epochs)
 
         if is_pretrain:
             avg_loss, epoch_time, current_step = trainer.train_pretrain_epoch(current_step)
@@ -159,24 +161,25 @@ def main():
             avg_loss = None  # N/A for evolution phase
 
         val_loss = trainer.run_validation()
-        log_msg = (f"    - Validation Loss: {val_loss:.4f}\n"
-                   f"    - Epoch Time: {epoch_time:.2f}s")
-        if avg_loss is not not None:
-            log_msg = f"    - Average Loss: {avg_loss:.4f}\n" + log_msg
+        log_msg_parts = [
+            f"    - Validation Loss: {val_loss:.4f}",
+            f"    - Epoch Time: {epoch_time:.2f}s"
+        ]
+        if avg_loss is not None:
+            log_msg_parts.insert(0, f"    - Average Loss: {avg_loss:.4f}")
         if is_pretrain:
-            log_msg += f"\n    - Learning Rate: {optimizer.lr:.6f}"
-        logging.info(log_msg)
-
+            log_msg_parts.append(f"    - Learning Rate: {optimizer.lr:.6f}")
+        logging.info("\n".join(log_msg_parts))
 
         # --- Checkpointing & Early Stopping ---
         if val_loss < best_val_loss:
             best_val_loss, epochs_no_improve = val_loss, 0
             best_model_path = os.path.join(model_dir, 'best_model.npz')
             model.save_weights(best_model_path, config.model_dump())
-            logging.info(f"    - New best model saved (Val Loss: {best_val_loss:.4f})")
+            logging.info("    - New best model saved (Val Loss: %.4f)", best_val_loss)
         else:
             epochs_no_improve += 1
-            logging.info(f"    - No improvement in validation loss for {epochs_no_improve} epochs.")
+            logging.info("    - No improvement in validation loss for %d epochs.", epochs_no_improve)
 
         state = {'epoch': epoch + 1, 'current_step': current_step,
                  'best_val_loss': best_val_loss, 'epochs_no_improve': epochs_no_improve}

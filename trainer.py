@@ -13,30 +13,28 @@ from nn_components.loss import SoftmaxCrossEntropy
 from nn_components.lr_scheduler import cosine_decay_with_warmup
 from optimizer import Adam, clip_gradients
 from tokenizer import Tokenizer
-from utils import get_batches
+from data_loader import get_batches
 
 class Trainer:
     """
     Encapsulates the training and validation logic.
     """
-    # pylint: disable=too-many-arguments
-    def __init__(self, config: Config, model: Transformer, optimizer: Adam,
-                 loss_fn: SoftmaxCrossEntropy, tokenizer: Tokenizer,
-                 train_data: list, val_data: list):
+    def __init__(self, training_components, training_data, config: Config):
+        self.model = training_components['model']
+        self.optimizer = training_components['optimizer']
+        self.loss_fn = training_components['loss_fn']
+        self.tokenizer = training_components['tokenizer']
+        self.train_data = training_data['train']
+        self.val_data = training_data['validation']
         self.config = config
-        self.model = model
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.tokenizer = tokenizer
-        self.train_data = train_data
-        self.val_data = val_data
         self.max_norm = config.optimizer.max_norm
 
     def run_validation(self):
         """Runs validation on the model."""
         self.model.eval()
         total_loss, num_batches = 0, 0
-        batch_iterator = get_batches(self.val_data, self.config.evolution.batch_size, self.config.evolution.seq_len)
+        batch_iterator = get_batches(self.val_data, self.config.evolution.batch_size,
+                                     self.config.evolution.seq_len)
         for x, y in batch_iterator:
             mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
             logits, _, _ = self.model.forward(x, mask)
@@ -96,7 +94,7 @@ class Trainer:
 
         agent_manager = AgentManager(base_model=self.model, num_agents=evo_config.num_agents)
 
-        logging.info(f"Specializing {evo_config.num_agents} agents...")
+        logging.info("Specializing %d agents...", evo_config.num_agents)
         agent_manager.specialize_agents_on_dataset(
             full_data=self.train_data,
             tokenizer=self.tokenizer,
@@ -115,9 +113,9 @@ class Trainer:
             logging.warning("No suitable agents found for merging. Skipping merge.")
             return time.time() - start_time
 
-        logging.info(f"Merging LTM from {len(best_agents)} best agents into base model...")
+        logging.info("Merging LTM from %d best agents into base model...", len(best_agents))
         agent_manager.merge_agents(best_agents)
 
         epoch_time = time.time() - start_time
-        logging.info(f"--- Evolution cycle finished in {epoch_time:.2f}s ---")
+        logging.info("--- Evolution cycle finished in %.2fs ---", epoch_time)
         return epoch_time

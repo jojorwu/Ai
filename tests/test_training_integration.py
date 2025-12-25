@@ -47,7 +47,8 @@ class TestTrainingIntegration(unittest.TestCase):
         mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
 
         policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer = Adam(learning_rate=0.001)
+        optimizer_config = Config.from_json('config.json').optimizer
+        optimizer = Adam(optimizer_config)
 
         initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
 

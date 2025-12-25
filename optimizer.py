@@ -2,20 +2,20 @@
 Implementation of the AdamW optimizer.
 """
 from backend import np
+from config import OptimizerConfig
 
 
 class Adam:
     """
     Adam optimizer with Decoupled Weight Decay (AdamW).
     """
-    def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999,
-                 epsilon=1e-8, weight_decay=0.01):
-        self.initial_lr = learning_rate
-        self.lr = learning_rate
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.epsilon = epsilon
-        self.weight_decay = weight_decay
+    def __init__(self, config: OptimizerConfig):
+        self.initial_lr = config.learning_rate
+        self.lr = config.learning_rate
+        self.beta1 = config.beta1
+        self.beta2 = config.beta2
+        self.epsilon = config.epsilon
+        self.weight_decay = config.weight_decay
         self.t = 0
         self.m = {}
         self.v = {}

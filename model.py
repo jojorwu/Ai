@@ -16,6 +16,7 @@ from nn_components.rotary_embedding import RotaryPositionalEmbedding
 from nn_components.utils import softmax
 from nn_components.vision_encoder import VisionEncoder
 from optimizer import Adam
+from utils import zero_gradients
 
 
 def _sample_from_logits(logits, temperature, top_k, top_p):
@@ -72,7 +73,7 @@ class Transformer:
         if model_config.ltm_d_hidden and model_config.ltm_num_layers and ltm_config:
             self.long_term_memory = LongTermMemory(self.d_model, model_config.ltm_d_hidden,
                                                    model_config.ltm_num_layers)
-            self.ltm_optimizer = Adam(**ltm_config.optimizer.model_dump())
+            self.ltm_optimizer = Adam(ltm_config.optimizer)
             self.ltm_surprise_threshold = ltm_config.surprise_threshold
         else:
             self.long_term_memory = None
@@ -143,14 +144,7 @@ class Transformer:
 
     def zero_grad(self):
         """Resets gradients in all trainable layers to zero."""
-        for layer_obj in self.get_named_params().values():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (_, grad) in layer_obj.get_trainable_params().items():
-                    grad_attr_name = f"d{param_name}"
-                    if hasattr(layer_obj, grad_attr_name):
-                        grad_val = getattr(layer_obj, grad_attr_name)
-                        if grad_val is not None:
-                            setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
+        zero_gradients(self)
 
     def train(self):
         """Switches all layers to training mode."""

@@ -8,7 +8,6 @@ import os
 import numpy as np
 
 
-# pylint: disable=broad-except-in-catch
 def save_checkpoint(model, optimizer, training_state, config, filepath):
     """Saves the state of the model, optimizer, and training."""
     try:
@@ -29,16 +28,16 @@ def save_checkpoint(model, optimizer, training_state, config, filepath):
         checkpoint['config'] = np.array([config_str], dtype=object)
 
         np.savez(filepath, **checkpoint)
-        logging.info(f"Checkpoint successfully saved to {filepath}")
+        logging.info("Checkpoint successfully saved to %s", filepath)
 
-    except Exception as e:
-        logging.error(f"Error saving checkpoint to {filepath}: {e}", exc_info=True)
+    except (IOError, OSError, KeyError) as e:
+        logging.error("Error saving checkpoint to %s: %s", filepath, e, exc_info=True)
 
 
 def load_checkpoint(model, optimizer, filepath):
     """Loads the state of the model, optimizer, and training."""
     if not os.path.exists(filepath):
-        logging.warning(f"Checkpoint file not found: {filepath}")
+        logging.warning("Checkpoint file not found: %s", filepath)
         return None, None
 
     try:
@@ -54,30 +53,29 @@ def load_checkpoint(model, optimizer, filepath):
         optimizer.set_state(optimizer_state)
 
         training_state = {
-            'epoch': data['epoch'].item() if 'epoch' in data else 0,
-            'current_step': data['current_step'].item() if 'current_step' in data else 0,
-            'best_val_loss': data['best_val_loss'].item() if 'best_val_loss' in data else float('inf'),
-            'epochs_no_improve': data['epochs_no_improve'].item() if 'epochs_no_improve' in data else 0
+            'epoch': data.get('epoch', 0).item(),
+            'current_step': data.get('current_step', 0).item(),
+            'best_val_loss': data.get('best_val_loss', float('inf')).item(),
+            'epochs_no_improve': data.get('epochs_no_improve', 0).item()
         }
 
         config = json.loads(data['config'][0])
 
-        logging.info(f"Checkpoint successfully loaded from {filepath}")
+        logging.info("Checkpoint successfully loaded from %s", filepath)
         return training_state, config
 
-    except Exception as e:
-        logging.error(f"Error loading checkpoint from {filepath}: {e}", exc_info=True)
+    except (IOError, OSError, KeyError, json.JSONDecodeError) as e:
+        logging.error("Error loading checkpoint from %s: %s", filepath, e, exc_info=True)
         return None, None
 
-def get_batches(data, batch_size, seq_len):
-    """
-    Generator function to yield batches of data.
-    """
-    num_sequences = len(data) - seq_len
-    for i in range(0, num_sequences, batch_size):
-        batch_end = i + batch_size
-        x_list, y_list = [], []
-        for j in range(i, min(batch_end, num_sequences)):
-            x_list.append(data[j:j + seq_len])
-            y_list.append(data[j + 1:j + seq_len + 1])
-        yield np.array(x_list), np.array(y_list)
+
+def zero_gradients(model):
+    """Recursively zeros out gradients for all trainable parameters in a model."""
+    for layer_obj in model.get_named_params().values():
+        if hasattr(layer_obj, 'get_trainable_params'):
+            for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+                grad_attr_name = f"d{param_name}"
+                if hasattr(layer_obj, grad_attr_name):
+                    grad_val = getattr(layer_obj, grad_attr_name)
+                    if grad_val is not None:
+                        setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
