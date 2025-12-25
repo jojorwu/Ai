@@ -12,6 +12,20 @@ from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 
 
+def _create_test_config():
+    """Creates a minimal configuration for integration testing."""
+    config = Config.from_json('config.json')
+    config.model.d_model = 8
+    config.model.num_layers = 1
+    config.model.num_heads = 2
+    config.model.num_kv_heads = 2
+    config.model.d_ff = 16
+    config.model.max_seq_len = 5
+    config.evolution.batch_size = 2
+    config.evolution.seq_len = 4
+    return config
+
+
 class TestTrainingIntegration(unittest.TestCase):
     """
     Tests that a single training step updates the model's weights.
@@ -24,31 +38,18 @@ class TestTrainingIntegration(unittest.TestCase):
         """
         logging.info("\nRunning Test: Training Integration (single step)...")
         vocab_size = 10
-        d_model = 8
-        num_layers = 1
-        num_heads = 2
-        d_ff = 16
-        max_seq_len = 5
-        batch_size = 2
-        seq_len = 4
+        config = _create_test_config()
 
-        model_config = Config.from_json('config.json').model
-        model_config.d_model = d_model
-        model_config.num_layers = num_layers
-        model_config.num_heads = num_heads
-        model_config.num_kv_heads = num_heads
-        model_config.d_ff = d_ff
-        model_config.max_seq_len = max_seq_len
-
-        config = Config.from_json('config.json')
-        model = Transformer(vocab_size=vocab_size, model_config=model_config, vision_config=config.vision, ltm_config=config.ltm)
-        x = np.random.randint(0, vocab_size, (batch_size, seq_len))
-        y = np.random.randint(0, vocab_size, (batch_size, seq_len))
-        mask = np.triu(np.ones((seq_len, seq_len)), k=1).astype(bool)
+        model = Transformer(vocab_size=vocab_size,
+                            model_config=config.model,
+                            vision_config=config.vision,
+                            ltm_config=config.ltm)
+        x = np.random.randint(0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
+        y = np.random.randint(0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
+        mask = np.triu(np.ones((config.evolution.seq_len, config.evolution.seq_len)), k=1).astype(bool)
 
         policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer_config = Config.from_json('config.json').optimizer
-        optimizer = Adam(optimizer_config)
+        optimizer = Adam(config.optimizer)
 
         initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
 

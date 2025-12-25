@@ -79,9 +79,9 @@ def main():
         log_file_path = os.path.join(model_dir, 'training.log')
         os.makedirs(model_dir, exist_ok=True)
         setup_logging(log_file_path)
-        logging.info(f"Resuming training from '{args.resume_from}'. "
-                     f"New checkpoints and logs will be saved to '{args.model_name}'.")
-        logging.info(f"Loading config from {config_path}")
+        logging.info("Resuming training from '%s'. New checkpoints and logs will be saved to '%s'.",
+                     args.resume_from, args.model_name)
+        logging.info("Loading config from %s", config_path)
     else:
         if os.path.exists(model_dir):
             raise FileExistsError(f"Model directory '{model_dir}' already exists. "
@@ -91,12 +91,12 @@ def main():
         log_file_path = os.path.join(model_dir, 'training.log')
         setup_logging(log_file_path)
         shutil.copy(config_path, os.path.join(model_dir, 'config.json'))
-        logging.info(f"Starting new training run: '{args.model_name}'.")
+        logging.info("Starting new training run: '%s'.", args.model_name)
 
-    logging.info(f"--------------------------------------------------")
-    logging.info(f"Model: {args.model_name}")
-    logging.info(f"Log file: {log_file_path}")
-    logging.info(f"--------------------------------------------------")
+    logging.info("--------------------------------------------------")
+    logging.info("Model: %s", args.model_name)
+    logging.info("Log file: %s", log_file_path)
+    logging.info("--------------------------------------------------")
 
     config = Config.from_json(config_path)
     set_backend(config.hardware.device)
@@ -108,7 +108,7 @@ def main():
 
     if not resume_dir:
         shutil.copy(tokenizer_vocab_path, os.path.join(model_dir, 'tokenizer_vocab.json'))
-        logging.info(f"Copied tokenizer vocabulary to {model_dir}")
+        logging.info("Copied tokenizer vocabulary to %s", model_dir)
 
     model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
 
@@ -132,14 +132,14 @@ def main():
 
         if os.path.exists(resume_weights_path):
             model.load_weights(resume_weights_path)
-            logging.info(f"Loaded model weights from {resume_weights_path}")
+            logging.info("Loaded model weights from %s", resume_weights_path)
 
     if os.path.exists(checkpoint_path):
         state, _ = load_checkpoint(model, optimizer, checkpoint_path)
         if state:
             start_epoch, current_step = state.get('epoch', 0), state.get('current_step', 0)
             best_val_loss, epochs_no_improve = state.get('best_val_loss', float('inf')), state.get('epochs_no_improve', 0)
-            logging.info(f"Resuming from checkpoint. Start Epoch: {start_epoch}, Step: {current_step}.")
+            logging.info("Resuming from checkpoint. Start Epoch: %d, Step: %d.", start_epoch, current_step)
 
     # --- Training Loop ---
     pretrain_epochs, evolution_epochs = config.evolution.pretrain_epochs, config.evolution.evolution_epochs
@@ -192,11 +192,11 @@ def main():
     # --- Final Save ---
     final_weights_path = os.path.join(model_dir, 'model.npz')
     model.save_weights(final_weights_path, config.model_dump())
-    logging.info(f"\n--------------------------------------------------")
-    logging.info(f"Training complete!")
-    logging.info(f"    - Total Parameters: {total_params:,}")
-    logging.info(f"    - Final model saved to: {final_weights_path}")
-    logging.info(f"--------------------------------------------------")
+    logging.info("\n--------------------------------------------------")
+    logging.info("Training complete!")
+    logging.info("    - Total Parameters: %d", total_params)
+    logging.info("    - Final model saved to: %s", final_weights_path)
+    logging.info("--------------------------------------------------")
 
 if __name__ == "__main__":
     main()

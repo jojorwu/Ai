@@ -73,7 +73,7 @@ def zero_gradients(model):
     """Recursively zeros out gradients for all trainable parameters in a model."""
     for layer_obj in model.get_named_params().values():
         if hasattr(layer_obj, 'get_trainable_params'):
-            for param_name, (_, grad) in layer_obj.get_trainable_params().items():
+            for param_name, _ in layer_obj.get_trainable_params().items():
                 grad_attr_name = f"d{param_name}"
                 if hasattr(layer_obj, grad_attr_name):
                     grad_val = getattr(layer_obj, grad_attr_name)
