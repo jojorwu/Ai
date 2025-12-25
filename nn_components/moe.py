@@ -14,12 +14,14 @@ class MixtureOfExperts:
         self.d_model = d_model
         self.num_experts = num_experts
         self.top_k = top_k
-
-        # Gating network: простой линейный слой, который предсказывает "предпочтения" для каждого эксперта
         self.gate = Linear(d_model, num_experts, bias=bias)
-
-        # Пул экспертов (каждый - это стандартный FFN)
         self.experts = [FeedForward(d_model, d_ff, bias=bias) for _ in range(num_experts)]
+        self.x_reshaped = None
+        self.router_weights = None
+        self.top_k_indices = None
+        self.top_k_mask = None
+        self.top_k_weights = None
+        self.P_i = None
 
     def get_children(self):
         """Возвращает дочерние слои для обхода параметров/градиентов."""
