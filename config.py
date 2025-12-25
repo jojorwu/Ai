@@ -24,6 +24,16 @@ class ModelConfig(BaseModel):
                                        description="Number of 'experts' to select for each token.")
 
 
+class MultiHeadAttentionConfig(BaseModel):
+    """Configuration for the Multi-Head Attention layer."""
+    d_model: int
+    num_heads: int
+    num_kv_heads: int
+    rotary_emb: Optional[object] = None
+    bias: bool = False
+    num_layers: int = 1
+
+
 class MoEConfig(BaseModel):
     """Configuration for the Mixture of Experts layer."""
     d_model: int

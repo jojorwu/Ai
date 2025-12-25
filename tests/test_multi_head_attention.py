@@ -6,6 +6,7 @@ import unittest
 
 from backend import np
 
+from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import RotaryPositionalEmbedding
 from tests.gradient_check import check_gradient, numerical_gradient
@@ -30,12 +31,11 @@ class TestMultiHeadAttention(unittest.TestCase):
 
         # Use a real RoPE instance for a more thorough test
         rope = RotaryPositionalEmbedding(d_k, max_seq_len=seq_len)
-        mha = MultiHeadAttention(d_model=d_model,
-                                 num_heads=num_heads,
-                                 num_kv_heads=num_kv_heads,
-                                 rotary_emb=rope,
-                                 bias=False,
-                                 num_layers=1)
+        config = MultiHeadAttentionConfig(d_model=d_model,
+                                          num_heads=num_heads,
+                                          num_kv_heads=num_kv_heads,
+                                          rotary_emb=rope)
+        mha = MultiHeadAttention(config)
 
         # Single input tensor 'x' instead of separate Q, K, V
         x_input = np.random.randn(batch_size, seq_len, d_model)

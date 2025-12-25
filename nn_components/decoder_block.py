@@ -2,7 +2,7 @@
 Implementation of a single Transformer Decoder Block.
 """
 from backend import np
-from config import MoEConfig
+from config import MoEConfig, MultiHeadAttentionConfig
 from nn_components.dropout import Dropout
 from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
@@ -20,8 +20,10 @@ class DecoderBlock:
                  num_kv_heads: int, rotary_emb=None, num_layers: int = 1,
                  long_term_memory=None, num_experts: int = None, top_k_experts: int = None):
 
-        self.mha = MultiHeadAttention(d_model, num_heads, num_kv_heads, rotary_emb,
-                                      bias=False, num_layers=num_layers)
+        mha_config = MultiHeadAttentionConfig(d_model=d_model, num_heads=num_heads,
+                                              num_kv_heads=num_kv_heads, rotary_emb=rotary_emb,
+                                              num_layers=num_layers)
+        self.mha = MultiHeadAttention(mha_config)
         self.ltm = long_term_memory
 
         self.use_moe = num_experts is not None and top_k_experts is not None
