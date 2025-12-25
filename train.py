@@ -104,8 +104,14 @@ def main():
     set_backend(config.hardware.device)
 
     # --- Initialization ---
+    tokenizer_vocab_path = os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json')
     tokenizer, train_data, val_data = load_and_prepare_data(
         config.evolution.data_dir, config.evolution.data_dir, config.evolution.validation_split)
+
+    if not resume_dir:
+        shutil.copy(tokenizer_vocab_path, os.path.join(model_dir, 'tokenizer_vocab.json'))
+        logging.info(f"Copied tokenizer vocabulary to {model_dir}")
+
     model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
 
     total_params = model.count_parameters()
