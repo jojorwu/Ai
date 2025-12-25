@@ -1,31 +1,31 @@
-import numpy as np
+"""
+Implementation of the Embedding layer.
+"""
+from backend import np
+
 
 class Embedding:
     """
-    Слой для преобразования целочисленных индексов в плотные векторы (эмбеддинги).
+    An Embedding layer that maps token IDs to dense vectors.
     """
     def __init__(self, vocab_size, d_model):
-        self.vocab_size = vocab_size
-        self.d_model = d_model
-        self.W = np.random.randn(vocab_size, d_model) * 0.01
-        self.x_indices = None
-        self.dW = None
-
-    def get_trainable_params(self):
-        return {'W': (self.W, self.dW)}
+        self.W = np.random.randn(vocab_size, d_model)
+        self.dW = np.zeros_like(self.W)
+        self.last_x = None
 
     def forward(self, x):
-        """
-        Прямой проход. Извлекает эмбеддинги для входных индексов.
-        """
-        self.x_indices = x
+        self.last_x = x
         return self.W[x]
 
     def backward(self, dout):
         """
-        Обратный проход. Накапливает градиент для матрицы эмбеддингов.
+        Performs the backward pass for the Embedding layer.
         """
-        if self.dW is None:
-            self.dW = np.zeros_like(self.W)
-        np.add.at(self.dW, self.x_indices, dout)
-        return None
+        np.add.at(self.dW, self.last_x, dout)
+        return
+
+    def get_trainable_params(self):
+        """
+        Returns the trainable parameters and their gradients.
+        """
+        return {'W': (self.W, self.dW)}

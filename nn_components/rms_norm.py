@@ -1,46 +1,49 @@
-import numpy as np
+"""
+Implementation of the Root Mean Square Normalization (RMSNorm) layer.
+"""
+from backend import np
+
 
 class RMSNorm:
     """
-    Реализация Root Mean Square Normalization.
+    Implements Root Mean Square Normalization.
     """
-    def __init__(self, d_model, epsilon=1e-5):
-        self.d_model = d_model
-        self.epsilon = epsilon
+    def __init__(self, d_model, eps=1e-5):
+        self.eps = eps
         self.gamma = np.ones(d_model)
-
-        self.x = None
-        self.rms = None
-        self.dgamma = None
-
-    def get_trainable_params(self):
-        """Возвращает словарь с обучаемыми параметрами и их градиентами."""
-        return {'gamma': (self.gamma, self.dgamma)}
+        # For backward pass
+        self.normalized_x = None
+        self.std_inv = None
+        self.dgamma = np.zeros_like(self.gamma)
 
     def forward(self, x):
         """
-        Прямой проход для RMSNorm.
-        y = (x / sqrt(mean(x^2) + eps)) * gamma
+        Performs the forward pass for RMSNorm.
         """
-        self.x = x
-        self.rms = np.sqrt(np.mean(np.square(x), axis=-1, keepdims=True) + self.epsilon)
-        normalized_x = x / self.rms
-        output = self.gamma * normalized_x
-        return output
+        self.std_inv = 1.0 / np.sqrt(np.mean(x**2, axis=-1, keepdims=True) + self.eps)
+        self.normalized_x = x * self.std_inv
+        return self.normalized_x * self.gamma
 
     def backward(self, dout):
         """
-        Обратный проход для RMSNorm.
+        Performs the backward pass for RMSNorm.
         """
-        normalized_x = self.x / self.rms
-        dgamma = np.sum(dout * normalized_x, axis=tuple(range(dout.ndim - 1)))
-
-        if self.dgamma is None:
-            self.dgamma = dgamma
-        else:
-            self.dgamma += dgamma
-
+        dgamma = np.sum(dout * self.normalized_x, axis=(0, 1))
         d_normalized_x = dout * self.gamma
-        d_rms = -np.sum(d_normalized_x * self.x, axis=-1, keepdims=True) / (self.rms**2)
-        dx = (d_normalized_x / self.rms) + (d_rms * self.x / (self.d_model * self.rms))
+        dx = d_normalized_x * self.std_inv
+        dx -= self.normalized_x * np.mean(d_normalized_x * self.std_inv * self.normalized_x, axis=-1, keepdims=True)
+        # Store gradients
+        self.dgamma += dgamma
         return dx
+
+    def get_trainable_params(self):
+        """
+        Returns the trainable parameters and their gradients.
+        """
+        return {'gamma': (self.gamma, self.dgamma)}
+
+    def get_children(self):
+        """
+        This layer has no children with trainable parameters in the conventional sense.
+        """
+        return {}
