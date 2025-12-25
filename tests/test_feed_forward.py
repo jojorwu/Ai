@@ -35,17 +35,15 @@ class TestFeedForward(unittest.TestCase):
         # --- Numerical Gradient Check ---
         # Check gradients with respect to the input 'x'
         logging.info("Checking gradients for input: dx...")
-        model_forward = lambda x: ffn.forward(x)
-        dx_numerical = numerical_gradient(model_forward, x_input, dout)
+        dx_numerical = numerical_gradient(ffn.forward, x_input, dout)
         check_gradient(self, dx_analytic, dx_numerical, "dx")
 
         # Check gradients for all trainable parameters
         all_params = ffn.get_trainable_params()
         for param_name, (param_val, param_grad) in all_params.items():
-            logging.info(f"Checking gradients for parameter: {param_name}...")
+            logging.info("Checking gradients for parameter: %s...", param_name)
             # Use a lambda that captures the current parameter being tested
-            param_forward = lambda p: ffn.forward(x_input)
-            grad_numerical = numerical_gradient(param_forward, param_val, dout)
+            grad_numerical = numerical_gradient(lambda p: ffn.forward(x_input), param_val, dout)
             check_gradient(self, param_grad, grad_numerical, f"d{param_name}")
 
         logging.info("Optimized FeedForward gradient checks passed!")

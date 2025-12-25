@@ -155,7 +155,7 @@ def main():
         val_loss = trainer.run_validation()
         log_msg = (f"    - Validation Loss: {val_loss:.4f}\n"
                    f"    - Epoch Time: {epoch_time:.2f}s")
-        if avg_loss is not not None:
+        if avg_loss is not None:
             log_msg = f"    - Average Loss: {avg_loss:.4f}\n" + log_msg
         if is_pretrain:
             log_msg += f"\n    - Learning Rate: {optimizer.lr:.6f}"

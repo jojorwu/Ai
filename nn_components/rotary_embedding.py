@@ -1,3 +1,6 @@
+"""
+Implementation of Rotary Positional Embeddings (RoPE).
+"""
 import numpy as np
 
 class RotaryPositionalEmbedding:
@@ -41,24 +44,9 @@ def rotary_backward(dout, x, cos, sin):
     """
     Вычисляет градиенты для RoPE.
     """
-    # Разделяем x на две половины
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-
-    # Прямое преобразование:
-    # y1 = x1 * cos1 + (-x2 * sin1)
-    # y2 = x2 * cos2 + ( x1 * sin2)
-
     # Градиенты:
-    # dL/dx1 = dL/dy1 * dy1/dx1 + dL/dy2 * dy2/dx1
-    # dy1/dx1 = cos1
-    # dy2/dx1 = sin2 (для одинаковых cos/sin)
     # dL/dx1 = dout1 * cos1 + dout2 * sin2
-
-    # dL/dx2 = dL/dy1 * dy1/dx2 + dL/dy2 * dy2/dx2
-    # dy1/dx2 = -sin1
-    # dy2/dx2 = cos2
-    # dL/dx2 = dout1 * (-sin1) + dout2 * cos2
+    # dL/dx2 = -dout1 * sin1 + dout2 * cos2
 
     dout1 = dout[..., 0::2]
     dout2 = dout[..., 1::2]

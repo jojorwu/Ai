@@ -29,16 +29,16 @@ def save_checkpoint(model, optimizer, training_state, config, filepath):
         checkpoint['config'] = np.array([config_str], dtype=object)
 
         np.savez(filepath, **checkpoint)
-        logging.info(f"Checkpoint successfully saved to {filepath}")
+        logging.info("Checkpoint successfully saved to %s", filepath)
 
     except Exception as e:
-        logging.error(f"Error saving checkpoint to {filepath}: {e}", exc_info=True)
+        logging.error("Error saving checkpoint to %s: %s", filepath, e, exc_info=True)
 
 
 def load_checkpoint(model, optimizer, filepath):
     """Loads the state of the model, optimizer, and training."""
     if not os.path.exists(filepath):
-        logging.warning(f"Checkpoint file not found: {filepath}")
+        logging.warning("Checkpoint file not found: %s", filepath)
         return None, None
 
     try:
@@ -62,11 +62,11 @@ def load_checkpoint(model, optimizer, filepath):
 
         config = json.loads(data['config'][0])
 
-        logging.info(f"Checkpoint successfully loaded from {filepath}")
+        logging.info("Checkpoint successfully loaded from %s", filepath)
         return training_state, config
 
     except Exception as e:
-        logging.error(f"Error loading checkpoint from {filepath}: {e}", exc_info=True)
+        logging.error("Error loading checkpoint from %s: %s", filepath, e, exc_info=True)
         return None, None
 
 def get_batches(data, batch_size, seq_len, shuffle=False):
@@ -105,3 +105,14 @@ def get_batches(data, batch_size, seq_len, shuffle=False):
             yield np.array(x_list), np.array(y_list), np.array(img_list)
         else:
             yield np.array(x_list), np.array(y_list)
+
+def zero_gradients(model):
+    """Resets gradients in all trainable layers of a model to zero."""
+    for layer_obj in model.get_named_params().values():
+        if hasattr(layer_obj, 'get_trainable_params'):
+            for param_name, _ in layer_obj.get_trainable_params().items():
+                grad_attr_name = f"d{param_name}"
+                if hasattr(layer_obj, grad_attr_name):
+                    grad_val = getattr(layer_obj, grad_attr_name)
+                    if grad_val is not None:
+                        setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))

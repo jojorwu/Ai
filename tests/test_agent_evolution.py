@@ -79,21 +79,24 @@ class TestAgentEvolution(unittest.TestCase):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
                 def mock_generate(model_self, start_tokens, **kwargs):
-                    # Find which agent is calling generate
-                    agent_id = next(agent.agent_id for agent in agent_manager.agents if agent.model is model_self)
+                    del start_tokens, kwargs
+                    agent_id = next(
+                        agent.agent_id for agent in agent_manager.agents if agent.model is model_self)
                     return np.array(details['agents_setup'][agent_id]['response'])
 
                 def mock_critique_response(agent_self, prompt, image_data, response):
-                    if details['agents_setup']['agent_0']['response'][0] == tokenizer.char_to_idx[
-                        '<ASK_FOR_HELP>']:
+                    del agent_self, prompt, image_data
+                    if (details['agents_setup']['agent_0']['response'][0] ==
+                            tokenizer.char_to_idx['<ASK_FOR_HELP>']):
                         return details['agents_setup']['agent_1']['critique_score']
 
                     for agent_id, setup in details['agents_setup'].items():
+                        del agent_id
                         if setup['response'] == response:
                             return setup['critique_score']
                     return 0.0
 
-                for i, agent in enumerate(agent_manager.agents):
+                for agent in agent_manager.agents:
                     agent.model.generate = types.MethodType(mock_generate, agent.model)
                     agent.critique_response = types.MethodType(mock_critique_response, agent)
 
@@ -104,7 +107,7 @@ class TestAgentEvolution(unittest.TestCase):
                 )
 
                 self.assertEqual(best_agents[0].agent_id, details["expected_winner"])
-                logging.info(f"  - Scenario '{scenario_name}' PASSED.")
+                logging.info("  - Scenario '%s' PASSED.", scenario_name)
 
     def test_merge_agents_functionality(self):
         """
