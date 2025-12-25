@@ -47,7 +47,7 @@ class TestMultimodalDataLoader(unittest.TestCase):
         loaded_data = load_multimodal_data_from_directory(self.test_dir)
         self.assertEqual(len(loaded_data), 3)
 
-        results = {text: img for text, img in loaded_data}
+        results = dict(loaded_data)
 
         text1 = "Here is an image <IMAGE>"
         self.assertIn(text1, results)

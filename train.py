@@ -59,19 +59,21 @@ def initialize_components(config: Config, vocab_size: int, tokenizer):
     return model, policy_loss_fn, optimizer
 
 
-def main():
-    """Orchestrates the agent-centric training process."""
+def _parse_args():
+    """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description="Agent-centric Transformer Training")
     parser.add_argument('--model-name', type=str, required=True,
                         help="Name for the new model. A directory will be created under 'models/'.")
     parser.add_argument('--resume-from', type=str,
                         help="Name of an existing model to resume training from.")
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def _setup_environment(args):
+    """Sets up the training environment, directories, and logging."""
     model_dir = os.path.join('models', args.model_name)
     resume_dir = os.path.join('models', args.resume_from) if args.resume_from else None
 
-    # --- Configuration and Setup ---
     if resume_dir:
         if not os.path.isdir(resume_dir):
             raise FileNotFoundError(f"Resume directory not found: {resume_dir}")
@@ -79,14 +81,13 @@ def main():
         log_file_path = os.path.join(model_dir, 'training.log')
         os.makedirs(model_dir, exist_ok=True)
         setup_logging(log_file_path)
-        logging.info("Resuming training from '%s'. New checkpoints and logs will be saved to '%s'.",
+        logging.info("Resuming training from '%s'. New logs will be saved to '%s'.",
                      args.resume_from, args.model_name)
-        logging.info("Loading config from %s", config_path)
     else:
         if os.path.exists(model_dir):
             raise FileExistsError(f"Model directory '{model_dir}' already exists. "
                                   "Choose a different name or use --resume-from.")
-        os.makedirs(model_dir, exist_ok=True)
+        os.makedirs(model_dir)
         config_path = 'config.json'
         log_file_path = os.path.join(model_dir, 'training.log')
         setup_logging(log_file_path)
@@ -100,82 +101,59 @@ def main():
 
     config = Config.from_json(config_path)
     set_backend(config.hardware.device)
+    return config, model_dir, resume_dir
 
-    # --- Initialization ---
-    tokenizer_vocab_path = os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json')
-    tokenizer, train_data, val_data = load_and_prepare_data(
-        config.evolution.data_dir, config.evolution.data_dir, config.evolution.validation_split)
 
-    if not resume_dir:
-        shutil.copy(tokenizer_vocab_path, os.path.join(model_dir, 'tokenizer_vocab.json'))
-        logging.info("Copied tokenizer vocabulary to %s", model_dir)
-
-    model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
-
-    total_params = model.count_parameters()
-    logging.info("Model initialized with %d trainable parameters.", total_params)
-
-    training_components = {'model': model, 'optimizer': optimizer,
-                           'loss_fn': loss_fn, 'tokenizer': tokenizer}
-    training_data = {'train': train_data, 'validation': val_data}
-
-    trainer = Trainer(training_components, training_data, config)
-
-    # --- State Loading ---
+def _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir):
+    """Initializes training state and executes the main training loop."""
     start_epoch, current_step, best_val_loss, epochs_no_improve = 0, 0, float('inf'), 0
     checkpoint_path = os.path.join(model_dir, 'checkpoint.npz')
 
     if resume_dir:
-        resume_weights_path = os.path.join(resume_dir, 'best_model.npz') # Prioritize best
-        if not os.path.exists(resume_weights_path):
-            resume_weights_path = os.path.join(resume_dir, 'model.npz')
-
-        if os.path.exists(resume_weights_path):
-            model.load_weights(resume_weights_path)
-            logging.info("Loaded model weights from %s", resume_weights_path)
+        weights_path = os.path.join(resume_dir, 'best_model.npz')
+        if not os.path.exists(weights_path):
+            weights_path = os.path.join(resume_dir, 'model.npz')
+        if os.path.exists(weights_path):
+            model.load_weights(weights_path)
+            logging.info("Loaded model weights from %s", weights_path)
 
     if os.path.exists(checkpoint_path):
         state, _ = load_checkpoint(model, optimizer, checkpoint_path)
         if state:
-            start_epoch, current_step = state.get('epoch', 0), state.get('current_step', 0)
-            best_val_loss, epochs_no_improve = state.get('best_val_loss', float('inf')), state.get('epochs_no_improve', 0)
+            start_epoch = state.get('epoch', 0)
+            current_step = state.get('current_step', 0)
+            best_val_loss = state.get('best_val_loss', float('inf'))
+            epochs_no_improve = state.get('epochs_no_improve', 0)
             logging.info("Resuming from checkpoint. Start Epoch: %d, Step: %d.", start_epoch, current_step)
 
-    # --- Training Loop ---
-    pretrain_epochs, evolution_epochs = config.evolution.pretrain_epochs, config.evolution.evolution_epochs
-    total_epochs = pretrain_epochs + evolution_epochs
+    total_epochs = config.evolution.pretrain_epochs + config.evolution.evolution_epochs
     logging.info("Starting training loop for %d total epochs.", total_epochs)
 
     for epoch in range(start_epoch, total_epochs):
-        is_pretrain = epoch < pretrain_epochs
+        is_pretrain = epoch < config.evolution.pretrain_epochs
         phase = "Pre-training" if is_pretrain else "Evolution"
-        phase_epoch = epoch if is_pretrain else epoch - pretrain_epochs
-        phase_total_epochs = pretrain_epochs if is_pretrain else evolution_epochs
+        phase_epoch = epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
+        total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else config.evolution.evolution_epochs
 
-        logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, phase_total_epochs)
+        logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, total_phase_epochs)
 
+        avg_loss, epoch_time = None, 0
         if is_pretrain:
             avg_loss, epoch_time, current_step = trainer.train_pretrain_epoch(current_step)
         else:
             epoch_time = trainer.run_evolution_cycle()
-            avg_loss = None  # N/A for evolution phase
 
         val_loss = trainer.run_validation()
-        log_msg_parts = [
-            f"    - Validation Loss: {val_loss:.4f}",
-            f"    - Epoch Time: {epoch_time:.2f}s"
-        ]
+        log_parts = [f"Validation Loss: {val_loss:.4f}", f"Epoch Time: {epoch_time:.2f}s"]
         if avg_loss is not None:
-            log_msg_parts.insert(0, f"    - Average Loss: {avg_loss:.4f}")
+            log_parts.insert(0, f"Average Loss: {avg_loss:.4f}")
         if is_pretrain:
-            log_msg_parts.append(f"    - Learning Rate: {optimizer.lr:.6f}")
-        logging.info("\n".join(log_msg_parts))
+            log_parts.append(f"Learning Rate: {optimizer.lr:.6f}")
+        logging.info("    - " + "\n    - ".join(log_parts))
 
-        # --- Checkpointing & Early Stopping ---
         if val_loss < best_val_loss:
             best_val_loss, epochs_no_improve = val_loss, 0
-            best_model_path = os.path.join(model_dir, 'best_model.npz')
-            model.save_weights(best_model_path, config.model_dump())
+            model.save_weights(os.path.join(model_dir, 'best_model.npz'), config.model_dump())
             logging.info("    - New best model saved (Val Loss: %.4f)", best_val_loss)
         else:
             epochs_no_improve += 1
@@ -189,7 +167,33 @@ def main():
             logging.warning("Early stopping triggered. Ending training.")
             break
 
-    # --- Final Save ---
+
+def main():
+    """Orchestrates the agent-centric training process."""
+    args = _parse_args()
+    config, model_dir, resume_dir = _setup_environment(args)
+
+    tokenizer, train_data, val_data = load_and_prepare_data(
+        config.evolution.data_dir, config.evolution.data_dir, config.evolution.validation_split)
+
+    if not resume_dir:
+        shutil.copy(os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
+                    os.path.join(model_dir, 'tokenizer_vocab.json'))
+        logging.info("Copied tokenizer vocabulary to %s", model_dir)
+
+    model, loss_fn, optimizer = initialize_components(config, tokenizer.vocab_size, tokenizer)
+    total_params = model.count_parameters()
+    logging.info("Model initialized with %d trainable parameters.", total_params)
+
+    trainer = Trainer(
+        training_components={'model': model, 'optimizer': optimizer,
+                             'loss_fn': loss_fn, 'tokenizer': tokenizer},
+        training_data={'train': train_data, 'validation': val_data},
+        config=config
+    )
+
+    _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir)
+
     final_weights_path = os.path.join(model_dir, 'model.npz')
     model.save_weights(final_weights_path, config.model_dump())
     logging.info("\n--------------------------------------------------")

@@ -8,11 +8,8 @@ import numpy as np
 
 from agent_manager import AgentManager
 from config import Config
-from model import Transformer
-from nn_components.loss import SoftmaxCrossEntropy
 from nn_components.lr_scheduler import cosine_decay_with_warmup
-from optimizer import Adam, clip_gradients
-from tokenizer import Tokenizer
+from optimizer import clip_gradients
 from data_loader import get_batches
 
 class Trainer:

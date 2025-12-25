@@ -1,10 +1,3 @@
-# HACK: We use sys.path.append to allow for imports from the project root.
-# This is a workaround for the current project structure, which does not
-# properly handle relative imports from subdirectories. A better solution
-# would be to restructure the project as a proper Python package.
-import sys
-sys.path.append('..')
-
 import numpy as np
 from nn_components.linear import Linear
 from nn_components.activations import Tanh

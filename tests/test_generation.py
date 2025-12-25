@@ -22,12 +22,12 @@ class TestGeneration(unittest.TestCase):
             ltm_config=self.config.ltm
         )
 
-    def test_generate_is_not_implemented_for_now(self):
+    def test_generate_returns_result(self):
         """
-        Tests that the generate method is not implemented yet.
+        Tests that the generate method returns a result.
         """
-        # This is a placeholder test until generate is fully implemented.
-        self.assertTrue(True)
+        result = self.model.generate(start_tokens=[1, 2, 3], max_new_tokens=10)
+        self.assertIsNotNone(result)
 
 
 if __name__ == '__main__':
