@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from config import Config
-from model import Transformer
+from model import Transformer, ForwardPassInput
 from tokenizer import Tokenizer
 
 
@@ -61,7 +61,8 @@ class TestMultimodalIntegration(unittest.TestCase):
         image_array = np.array(image)
         image_batch = np.array([image_array])
 
-        logits, value, _ = self.model.forward(token_array, images=image_batch)
+        forward_input = ForwardPassInput(x=token_array, ltm_state=0, images=image_batch)
+        logits, value, _ = self.model.forward(forward_input)
 
         # Expected sequence length = tokens - 1 (for <IMAGE>) + num_patches
         num_patches = (self.config.vision.image_size[0] // self.config.vision.patch_size) ** 2

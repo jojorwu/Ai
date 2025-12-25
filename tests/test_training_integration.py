@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from config import Config
-from model import Transformer
+from model import Transformer, ForwardPassInput
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 
@@ -55,7 +55,8 @@ class TestTrainingIntegration(unittest.TestCase):
 
         model.train()
         model.zero_grad()
-        logits, value, _ = model.forward(x, mask=mask)
+        forward_input = ForwardPassInput(x=x, ltm_state=0, mask=mask)
+        logits, value, _ = model.forward(forward_input)
         _ = policy_loss_fn.forward(logits, y)
         dlogits = policy_loss_fn.backward()
         model.backward(dlogits, np.zeros_like(value))

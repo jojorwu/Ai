@@ -6,7 +6,7 @@ import json
 import numpy as np
 
 from nn_components.activations import Tanh
-from nn_components.decoder_block import DecoderBlock
+from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from config import DecoderBlockConfig
 from nn_components.embedding import Embedding
 from nn_components.kv_cache import KVCache
@@ -15,6 +15,7 @@ from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
 from nn_components.rotary_embedding import precompute_rope_embeddings
 from nn_components.utils import softmax
+from dataclasses import dataclass
 from nn_components.vision_encoder import VisionEncoder
 from optimizer import Adam
 from utils import zero_gradients
@@ -202,22 +203,22 @@ class Transformer:
         return model
 
     # pylint: disable=too-many-arguments
-    def forward(self, x, images=None, mask=None, kv_cache=None, seq_offset=0):
+    def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the model."""
-        text_embeddings = self.embedding.forward(x) * np.sqrt(self.d_model)
+        text_embeddings = self.embedding.forward(inputs.x) * np.sqrt(self.d_model)
 
-        if images is not None and self.tokenizer is not None:
+        if inputs.images is not None and self.tokenizer is not None:
             image_token_id = self.tokenizer.char_to_idx.get('<IMAGE>')
             if image_token_id is not None:
-                image_token_indices = np.where(x == image_token_id)
+                image_token_indices = np.where(inputs.x == image_token_id)
                 if image_token_indices[0].size > 0:
-                    patch_embeddings = self.vision_encoder.forward(images)
+                    patch_embeddings = self.vision_encoder.forward(inputs.images)
                     # For simplicity, we handle one image per batch item.
                     # The image token in each batch item is replaced by the patch embeddings.
                     # This logic assumes a single <IMAGE> token per sequence for replacement.
                     final_embeddings = []
-                    for i in range(x.shape[0]):
-                        img_tok_idx = np.where(x[i] == image_token_id)[0]
+                    for i in range(inputs.x.shape[0]):
+                        img_tok_idx = np.where(inputs.x[i] == image_token_id)[0]
                         if img_tok_idx.size > 0:
                             start_idx = img_tok_idx[0]
                             # Replace the <IMAGE> token embedding with patch embeddings
@@ -247,8 +248,15 @@ class Transformer:
         total_aux_loss = 0
 
         for i, block in enumerate(self.decoder_blocks):
-            h, aux_loss = block.forward(h, current_ltm_state, mask, kv_cache=kv_cache,
-                                        layer_idx=i, seq_offset=seq_offset)
+            forward_pass_input = ForwardPassInput(
+                x=h,
+                ltm_state=current_ltm_state,
+                mask=inputs.mask,
+                kv_cache=inputs.kv_cache,
+                layer_idx=i,
+                seq_offset=inputs.seq_offset
+            )
+            h, aux_loss = block.forward(forward_pass_input)
             total_aux_loss += aux_loss
 
         h = self.final_norm.forward(h)
@@ -299,9 +307,13 @@ class Transformer:
         self.zero_grad()
         self.long_term_memory.zero_grad()
 
-        logits_for_grad, token_val, _ = self.forward(token_arr,
-                                                     kv_cache=kv_cache,
-                                                     seq_offset=seq_offset)
+        forward_pass_input = ForwardPassInput(
+            x=token_arr,
+            ltm_state=0,
+            kv_cache=kv_cache,
+            seq_offset=seq_offset
+        )
+        logits_for_grad, token_val, _ = self.forward(forward_pass_input)
         d_val = np.ones_like(token_val)
         d_logits = np.zeros_like(logits_for_grad)
         self.backward(d_logits, d_val)
@@ -316,29 +328,56 @@ class Transformer:
 
         self.long_term_memory.zero_grad()
 
-    def _generate_speculative_chunk(self, temp_logits, kv_cache, current_seq_len,
-                                    max_new_tokens, speculative_steps,
-                                    temperature, top_k, top_p):
+    @dataclass
+    class SpeculativeChunkInput:
+        """Dataclass for storing inputs to the _generate_speculative_chunk method."""
+        temp_logits: np.ndarray
+        kv_cache: 'KVCache'
+        current_seq_len: int
+        max_new_tokens: int
+        speculative_steps: int
+        temperature: float
+        top_k: int
+        top_p: float
+
+    def _generate_speculative_chunk(self, inputs: SpeculativeChunkInput):
         """Generates a small 'chunk' of tokens speculatively."""
         speculative_chunk = []
-        chunk_len = min(speculative_steps, max_new_tokens - len(speculative_chunk))
+        chunk_len = min(inputs.speculative_steps, inputs.max_new_tokens - len(speculative_chunk))
         final_value = None
+        temp_logits = inputs.temp_logits
 
         for i in range(chunk_len):
-            token_id = _sample_from_logits(temp_logits[0, -1, :], temperature, top_k, top_p)
+            token_id = _sample_from_logits(temp_logits[0, -1, :], inputs.temperature, inputs.top_k, inputs.top_p)
             speculative_chunk.append(token_id)
             next_token_arr = np.array([[token_id]])
 
-            self._update_ltm_if_surprised(next_token_arr, kv_cache, current_seq_len + i)
+            self._update_ltm_if_surprised(next_token_arr, inputs.kv_cache, inputs.current_seq_len + i)
 
-            temp_logits, final_value, _ = self.forward(next_token_arr,
-                                                       kv_cache=kv_cache,
-                                                       seq_offset=current_seq_len + i)
+            forward_pass_input = ForwardPassInput(
+                x=next_token_arr,
+                ltm_state=0,
+                kv_cache=inputs.kv_cache,
+                seq_offset=inputs.current_seq_len + i
+            )
+            temp_logits, final_value, _ = self.forward(forward_pass_input)
         return speculative_chunk, temp_logits, final_value
 
-    # pylint: disable=too-many-locals, too-many-arguments, too-many-branches, too-many-statements
-    def generate(self, start_tokens, max_new_tokens, images=None, temperature=1.0, top_k=0, top_p=0.0,
-                 speculative_steps=5, value_threshold=-1.0, max_retries=3):
+    @dataclass
+    class GenerateInput:
+        """Dataclass for storing inputs to the generate method."""
+        start_tokens: np.ndarray
+        max_new_tokens: int
+        images: np.ndarray = None
+        temperature: float = 1.0
+        top_k: int = 0
+        top_p: float = 0.0
+        speculative_steps: int = 5
+        value_threshold: float = -1.0
+        max_retries: int = 3
+
+    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
+    def generate(self, inputs: GenerateInput):
         """Generates a sequence of tokens."""
         self.eval()
 
@@ -347,30 +386,43 @@ class Transformer:
         kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
 
         all_generated_tokens = []
-        prompt_tokens = np.array(start_tokens).reshape(batch_size, -1)
+        prompt_tokens = np.array(inputs.start_tokens).reshape(batch_size, -1)
 
         # Initial forward pass for the prompt (can contain an image).
-        logits, _, _ = self.forward(prompt_tokens, images=images, kv_cache=kv_cache, seq_offset=0)
+        forward_pass_input = ForwardPassInput(
+            x=prompt_tokens,
+            ltm_state=0,
+            kv_cache=kv_cache,
+            seq_offset=0
+        )
+        logits, _, _ = self.forward(forward_pass_input)
 
         # Calculate new sequence length if an image was present.
-        if (images is not None and self.tokenizer is not None and
+        if (inputs.images is not None and self.tokenizer is not None and
                 self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens):
             num_patches = (self.vision_encoder.patch_size // 16) ** 2
             current_seq_len = prompt_tokens.shape[1] - 1 + num_patches
         else:
             current_seq_len = prompt_tokens.shape[1]
 
-        while len(all_generated_tokens) < max_new_tokens:
+        while len(all_generated_tokens) < inputs.max_new_tokens:
             accepted = False
-            for _ in range(max_retries):
+            for _ in range(inputs.max_retries):
                 attempt_cache = kv_cache.copy()
 
-                chunk, temp_logits, final_value = self._generate_speculative_chunk(
-                    logits, attempt_cache, current_seq_len,
-                    max_new_tokens - len(all_generated_tokens),
-                    speculative_steps, temperature, top_k, top_p)
+                speculative_chunk_input = self.SpeculativeChunkInput(
+                    temp_logits=logits,
+                    kv_cache=attempt_cache,
+                    current_seq_len=current_seq_len,
+                    max_new_tokens=inputs.max_new_tokens - len(all_generated_tokens),
+                    speculative_steps=inputs.speculative_steps,
+                    temperature=inputs.temperature,
+                    top_k=inputs.top_k,
+                    top_p=inputs.top_p
+                )
+                chunk, temp_logits, final_value = self._generate_speculative_chunk(speculative_chunk_input)
 
-                if final_value is not None and final_value.item() >= value_threshold:
+                if final_value is not None and final_value.item() >= inputs.value_threshold:
                     all_generated_tokens.extend(chunk)
                     current_seq_len += len(chunk)
                     logits = temp_logits

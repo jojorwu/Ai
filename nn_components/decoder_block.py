@@ -1,6 +1,8 @@
 """
 Implementation of a single Transformer Decoder Block.
 """
+from dataclasses import dataclass
+
 from backend import np
 from config import MoEConfig, MultiHeadAttentionConfig
 from nn_components.dropout import Dropout
@@ -8,6 +10,18 @@ from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rms_norm import RMSNorm
+
+
+@dataclass
+class ForwardPassInput:
+    """Dataclass for storing inputs to the forward pass of a DecoderBlock."""
+    x: np.ndarray
+    ltm_state: np.ndarray
+    mask: np.ndarray = None
+    kv_cache: 'KVCache' = None
+    images: np.ndarray = None
+    layer_idx: int = None
+    seq_offset: int = 0
 
 
 # pylint: disable=too-many-instance-attributes
@@ -58,18 +72,18 @@ class DecoderBlock:
         self.dropout1.is_training = False
         self.dropout2.is_training = False
 
-    def forward(self, x, ltm_state, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
+    def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the Decoder Block."""
         aux_loss = 0
         # Additive memory injection before the first sub-layer
-        x_with_mem = x + ltm_state if self.ltm else x
+        x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
         x_norm1 = self.norm1.forward(x_with_mem)
 
-        attn_output = self.mha.forward(x_norm1, mask=mask, kv_cache=kv_cache,
-                                       layer_idx=layer_idx, seq_offset=seq_offset)
+        attn_output = self.mha.forward(x_norm1, mask=inputs.mask, kv_cache=inputs.kv_cache,
+                                       layer_idx=inputs.layer_idx, seq_offset=inputs.seq_offset)
 
         # First residual connection
-        x = x + self.dropout1.forward(attn_output)
+        x = inputs.x + self.dropout1.forward(attn_output)
 
         x_norm2 = self.norm2.forward(x)
 

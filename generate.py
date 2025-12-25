@@ -72,7 +72,7 @@ def load_model_and_tokenizer(model_name: str, config: Config):
                                     f"found in {model_dir}")
 
     tokenizer = Tokenizer(model_dir)
-    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config)
+    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config, tokenizer)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
@@ -101,74 +101,89 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
         return None, None
 
 
-def main():
-    """Main agent loop."""
+def initialize_environment():
+    """Initializes the environment, including logging, args, and model selection."""
     setup_logging()
     parser = argparse.ArgumentParser(description="Interact with a trained Transformer model.")
     parser.add_argument('--model-name', type=str, help="The name of the model to use.")
     args = parser.parse_args()
 
-    try:
-        model_name = args.model_name
+    model_name = args.model_name
+    if not model_name:
+        model_name = select_model_interactively()
         if not model_name:
-            model_name = select_model_interactively()
-            if not model_name:
-                return  # Exit if no model was selected
+            return None, None, None
 
-        model_dir = os.path.join('models', model_name)
-        config_path = os.path.join(model_dir, 'config.json')
+    model_dir = os.path.join('models', model_name)
+    config_path = os.path.join(model_dir, 'config.json')
 
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
 
-        config = Config.from_json(config_path)
-        set_backend(config.hardware.device)
+    config = Config.from_json(config_path)
+    set_backend(config.hardware.device)
+    model, tokenizer = load_model_and_tokenizer(model_name, config)
+    return model, tokenizer, config
 
-        model, tokenizer = load_model_and_tokenizer(model_name, config)
 
-        start_text = config.generation.start_text
-        logging.info(f"Initial task: {start_text}")
+def run_agent_loop(model, tokenizer, config):
+    """Runs the main agent loop."""
+    start_text = config.generation.start_text
+    logging.info(f"Initial task: {start_text}")
 
-        conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
+    conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
 
-        for turn in range(config.generation.max_turns):
-            logging.info(f"\n--- Iteration {turn + 1} ---")
+    for turn in range(config.generation.max_turns):
+        logging.info(f"\n--- Iteration {turn + 1} ---")
 
-            # Trim conversation history to the context window size
-            context_window = config.generation.context_window_size
-            if len(conversation_history_tokens) > context_window:
-                logging.info(f"Trimming context from {len(conversation_history_tokens)} "
-                             f"to {context_window} tokens.")
-                conversation_history_tokens = conversation_history_tokens[-context_window:]
+        # Trim conversation history to the context window size
+        context_window = config.generation.context_window_size
+        if len(conversation_history_tokens) > context_window:
+            logging.info(f"Trimming context from {len(conversation_history_tokens)} "
+                         f"to {context_window} tokens.")
+            conversation_history_tokens = conversation_history_tokens[-context_window:]
 
-            gen_config = deepcopy(config.generation)
+        gen_config = deepcopy(config.generation)
+        generate_input = model.GenerateInput(
+            start_tokens=conversation_history_tokens,
+            max_new_tokens=gen_config.max_len,
+            temperature=gen_config.temperature,
+            top_k=gen_config.top_k,
+            top_p=gen_config.top_p,
+            speculative_steps=gen_config.speculative_steps,
+            value_threshold=gen_config.value_threshold,
+            max_retries=gen_config.max_retries
+        )
+        generated_tokens_stream = model.generate(generate_input)
+        # We yield from the generator to handle the token stream
+        generated_tokens = list(generated_tokens_stream)
+        generated_text = tokenizer.decode(generated_tokens)
+        logging.info(f"Model generated:\n{generated_text}")
 
-            generated_tokens_stream = model.generate(
-                conversation_history_tokens,
-                **gen_config.model_dump()
-            )
-            # We yield from the generator to handle the token stream
-            generated_tokens = list(generated_tokens_stream)
-            generated_text = tokenizer.decode(generated_tokens)
-            logging.info(f"Model generated:\n{generated_text}")
+        conversation_history_tokens.extend(tokenizer.encode(generated_text))
 
-            conversation_history_tokens.extend(tokenizer.encode(generated_text))
-
-            tool_name, args = parse_tool_call(generated_text)
-            if tool_name and args is not None:
-                tool_output = execute_tool(tool_name, args)
-                logging.info(f"Output of tool '{tool_name}':\n{tool_output}")
-                tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
-                tool_output_tokens = tokenizer.encode(tool_output_formatted)
-                conversation_history_tokens.extend(tool_output_tokens)
-            else:
-                logging.info("\n--- Final Answer ---")
-                final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
-                print(final_answer)
-                break
+        tool_name, args = parse_tool_call(generated_text)
+        if tool_name and args is not None:
+            tool_output = execute_tool(tool_name, args)
+            logging.info(f"Output of tool '{tool_name}':\n{tool_output}")
+            tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
+            tool_output_tokens = tokenizer.encode(tool_output_formatted)
+            conversation_history_tokens.extend(tool_output_tokens)
         else:
-            logging.warning("Maximum number of iterations reached. Terminating.")
+            logging.info("\n--- Final Answer ---")
+            final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
+            print(final_answer)
+            break
+    else:
+        logging.warning("Maximum number of iterations reached. Terminating.")
 
+
+def main():
+    """Main agent loop."""
+    try:
+        model, tokenizer, config = initialize_environment()
+        if model and tokenizer and config:
+            run_agent_loop(model, tokenizer, config)
     except FileNotFoundError as e:
         logging.error(f"Error: {e}. Ensure the model name is correct and the model files exist.")
     except Exception as e:

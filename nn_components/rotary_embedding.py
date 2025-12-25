@@ -46,10 +46,6 @@ def rotary_backward(dout, x, cos, sin):
     """
     Calculates the gradients for RoPE.
     """
-    # Split x into two halves
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-
     # Forward transformation:
     # y1 = x1 * cos1 + (-x2 * sin1)
     # y2 = x2 * cos2 + ( x1 * sin2)

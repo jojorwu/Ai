@@ -1,8 +1,18 @@
 """
 Implementation of the AdamW optimizer.
 """
+from dataclasses import dataclass
+
 from backend import np
 from config import OptimizerConfig
+
+
+@dataclass
+class AdamCache:
+    """Cache for storing optimizer state."""
+    m: dict
+    v: dict
+    t: int
 
 
 class Adam:
@@ -16,44 +26,42 @@ class Adam:
         self.beta2 = config.beta2
         self.epsilon = config.epsilon
         self.weight_decay = config.weight_decay
-        self.t = 0
-        self.m = {}
-        self.v = {}
+        self.cache = AdamCache(m={}, v={}, t=0)
 
     def step(self, params_with_grads):
         """Performs a single optimization step."""
-        self.t += 1
+        self.cache.t += 1
 
         for name, (param, grad) in params_with_grads.items():
             if grad is None or param is None:
                 continue
 
             # Lazy initialization of optimizer state
-            if name not in self.m:
-                self.m[name] = np.zeros_like(param)
-                self.v[name] = np.zeros_like(param)
+            if name not in self.cache.m:
+                self.cache.m[name] = np.zeros_like(param)
+                self.cache.v[name] = np.zeros_like(param)
 
             # AdamW-style weight decay
             param -= self.lr * self.weight_decay * param
 
             # Update moments
-            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * grad
-            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (grad ** 2)
+            self.cache.m[name] = self.beta1 * self.cache.m[name] + (1 - self.beta1) * grad
+            self.cache.v[name] = self.beta2 * self.cache.v[name] + (1 - self.beta2) * (grad ** 2)
 
             # Bias correction
-            m_corrected = self.m[name] / (1 - self.beta1 ** self.t)
-            v_corrected = self.v[name] / (1 - self.beta2 ** self.t)
+            m_corrected = self.cache.m[name] / (1 - self.beta1 ** self.cache.t)
+            v_corrected = self.cache.v[name] / (1 - self.beta2 ** self.cache.t)
 
             # Update weights
             param -= self.lr * m_corrected / (np.sqrt(v_corrected) + self.epsilon)
 
     def get_state(self):
         """Returns the state of the optimizer."""
-        return {'m': self.m, 'v': self.v, 't': self.t}
+        return {'m': self.cache.m, 'v': self.cache.v, 't': self.cache.t}
 
     def set_state(self, state):
         """Sets the state of the optimizer."""
-        self.m, self.v, self.t = state['m'], state['v'], state['t']
+        self.cache.m, self.cache.v, self.cache.t = state['m'], state['v'], state['t']
 
 
 def clip_gradients(named_params, max_norm):

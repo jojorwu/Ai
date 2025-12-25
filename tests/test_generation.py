@@ -26,7 +26,8 @@ class TestGeneration(unittest.TestCase):
         """
         Tests that the generate method returns a result.
         """
-        result = self.model.generate(start_tokens=[1, 2, 3], max_new_tokens=10)
+        generate_input = self.model.GenerateInput(start_tokens=[1, 2, 3], max_new_tokens=10)
+        result = self.model.generate(generate_input)
         self.assertIsNotNone(result)
 
 
