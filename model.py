@@ -277,7 +277,7 @@ class Transformer:
         h = self.final_norm.forward(h)
         self.final_norm_output = h
 
-        logits = self.final_norm_output @ self.embedding.W.T
+        logits = self.final_norm_output @ self.embedding.weights.T
         last_token_hidden_state = h[:, -1, :]
         value_hidden = self.value_head_linear.forward(last_token_hidden_state)
         value = self.value_head_activation.forward(value_hidden)
@@ -295,7 +295,7 @@ class Transformer:
 
         d_h_value = np.zeros_like(self.final_norm_output)
         d_h_value[:, -1, :] = d_last_token_hidden_state
-        d_h_policy = dlogits @ self.embedding.W
+        d_h_policy = dlogits @ self.embedding.weights
         dx = d_h_policy + d_h_value
 
         dx = self.final_norm.backward(dx)
@@ -311,7 +311,7 @@ class Transformer:
             dx += d_ltm_input / seq_len
 
         self.embedding.backward(dx * np.sqrt(self.d_model))
-        self.embedding.dW += d_embedding_w_from_output
+        self.embedding.dweights += d_embedding_w_from_output
         return dx
 
     def _update_ltm_if_surprised(self, token_arr, kv_cache, seq_offset):

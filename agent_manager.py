@@ -97,10 +97,10 @@ class AgentManager:
         avg_ltm_state = copy.deepcopy(ltm_states[0])
 
         for layer_name in avg_ltm_state:
-            sum_w = sum(state[layer_name]['W'] for state in ltm_states)
+            sum_w = sum(state[layer_name]['weights'] for state in ltm_states)
             sum_b = sum(state[layer_name].get('b', 0) for state in ltm_states)
 
-            avg_ltm_state[layer_name]['W'] = sum_w / len(ltm_states)
+            avg_ltm_state[layer_name]['weights'] = sum_w / len(ltm_states)
             if 'b' in avg_ltm_state[layer_name]:
                 avg_ltm_state[layer_name]['b'] = sum_b / len(ltm_states)
 

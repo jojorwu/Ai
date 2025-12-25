@@ -28,14 +28,14 @@ class TestLinear(unittest.TestCase):
 
         _ = layer.forward(x)
         dx = layer.backward(dout)
-        dw = layer.dW
+        dweights = layer.dweights
         db = layer.db
 
         dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")
 
-        dw_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.W, dout)
-        check_gradient(self, dw, dw_num, "dW")
+        dweights_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.weights, dout)
+        check_gradient(self, dweights, dweights_num, "dweights")
 
         db_num = numerical_gradient(lambda b_arg: layer.forward(x), layer.b, dout)
         check_gradient(self, db, db_num, "db")

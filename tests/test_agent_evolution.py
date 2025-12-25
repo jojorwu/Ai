@@ -44,8 +44,10 @@ class TestAgentEvolution(unittest.TestCase):
         config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
 
         tokenizer = Tokenizer(self.data_dir)
-        base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
-                                 vision_config=config.vision, ltm_config=config.ltm)
+        base_model = Transformer(
+            vocab_size=tokenizer.vocab_size, model_config=config.model,
+            vision_config=config.vision, ltm_config=config.ltm
+        )
 
         scenarios = {
             "INDEPENDENT_SUCCESS": {
@@ -62,13 +64,17 @@ class TestAgentEvolution(unittest.TestCase):
             },
             "RECEIVES_GOOD_HELP": {
                 "agents_setup": {
-                    'agent_0': {'response': [tokenizer.char_to_idx['<ASK_FOR_HELP>']], 'critique_score': 0.9},
+                    'agent_0': {
+                        'response': [tokenizer.char_to_idx['<ASK_FOR_HELP>']], 'critique_score': 0.9
+                    },
                     'agent_1': {'response': [1, 2], 'critique_score': 0.9}
                 }, "expected_winner": "agent_1"
             },
             "RECEIVES_BAD_HELP": {
                 "agents_setup": {
-                    'agent_0': {'response': [tokenizer.char_to_idx['<ASK_FOR_HELP>']], 'critique_score': 0.2},
+                    'agent_0': {
+                        'response': [tokenizer.char_to_idx['<ASK_FOR_HELP>']], 'critique_score': 0.2
+                    },
                     'agent_1': {'response': [1, 2], 'critique_score': 0.2}
                 }, "expected_winner": "agent_0"
             }
@@ -78,27 +84,33 @@ class TestAgentEvolution(unittest.TestCase):
             with self.subTest(scenario=scenario_name):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
-                def mock_generate(model_self, start_tokens, **kwargs):
-                    del start_tokens, kwargs
-                    agent_id = next(
-                        agent.agent_id for agent in agent_manager.agents if agent.model is model_self)
-                    return np.array(details['agents_setup'][agent_id]['response'])
+                def create_mock_generate(d, am):
+                    def mock_generate(model_self, start_tokens, **kwargs):
+                        del start_tokens, kwargs
+                        agent_id = next(
+                            agent.agent_id for agent in am.agents if agent.model is model_self)
+                        return np.array(d['agents_setup'][agent_id]['response'])
+                    return mock_generate
 
-                def mock_critique_response(agent_self, prompt, image_data, response):
-                    del agent_self, prompt, image_data
-                    if (details['agents_setup']['agent_0']['response'][0] ==
-                            tokenizer.char_to_idx['<ASK_FOR_HELP>']):
-                        return details['agents_setup']['agent_1']['critique_score']
+                def create_mock_critique(d, t):
+                    def mock_critique_response(agent_self, prompt, image_data, response):
+                        del agent_self, prompt, image_data
+                        if (d['agents_setup']['agent_0']['response'][0] ==
+                                t.char_to_idx['<ASK_FOR_HELP>']):
+                            return d['agents_setup']['agent_1']['critique_score']
 
-                    for agent_id, setup in details['agents_setup'].items():
-                        del agent_id
-                        if setup['response'] == response:
-                            return setup['critique_score']
-                    return 0.0
+                        for agent_id, setup in d['agents_setup'].items():
+                            del agent_id
+                            if setup['response'] == response:
+                                return setup['critique_score']
+                        return 0.0
+                    return mock_critique_response
 
                 for agent in agent_manager.agents:
-                    agent.model.generate = types.MethodType(mock_generate, agent.model)
-                    agent.critique_response = types.MethodType(mock_critique_response, agent)
+                    agent.model.generate = types.MethodType(
+                        create_mock_generate(details, agent_manager), agent.model)
+                    agent.critique_response = types.MethodType(
+                        create_mock_critique(details, tokenizer), agent)
 
                 best_agents = agent_manager.collaborative_evaluation(
                     evaluation_data=[([1, 2, 3], None)],
@@ -122,20 +134,20 @@ class TestAgentEvolution(unittest.TestCase):
         base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
                                  vision_config=config.vision, ltm_config=config.ltm)
         initial_ltm_state = base_model.long_term_memory.get_state()
-        initial_ltm_weights = initial_ltm_state['linear_0']['W']
+        initial_ltm_weights = initial_ltm_state['linear_0']['weights']
 
         agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
         best_agent = agent_manager.agents[0]
         winning_agent_ltm = best_agent.model.long_term_memory
-        changed_weights = np.copy(winning_agent_ltm.layers[0].W)
+        changed_weights = np.copy(winning_agent_ltm.layers[0].weights)
         changed_weights += 0.5
-        winning_agent_ltm.layers[0].W = changed_weights
+        winning_agent_ltm.layers[0].weights = changed_weights
 
         agent_manager.merge_agents([best_agent])
 
         updated_ltm_state = base_model.long_term_memory.get_state()
-        updated_ltm_weights = updated_ltm_state['linear_0']['W']
+        updated_ltm_weights = updated_ltm_state['linear_0']['weights']
 
         self.assertFalse(np.allclose(initial_ltm_weights, updated_ltm_weights),
                          "Base model's LTM weights did not change after merge.")
