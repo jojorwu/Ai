@@ -31,10 +31,11 @@ class Trainer:
         """Runs validation on the model."""
         self.model.eval()
         total_loss, num_batches = 0, 0
-        batch_iterator = get_batches(self.val_data, self.config.evolution.batch_size,
-                                     self.config.evolution.seq_len)
+        batch_iterator = get_batches(
+            self.val_data, self.config.evolution.batch_size, self.config.evolution.seq_len)
         for x, y in batch_iterator:
-            mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
+            mask = np.triu(
+                np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
             logits, _, _ = self.model.forward(x, mask)
             total_loss += self.loss_fn.forward(logits, y)
             num_batches += 1
@@ -48,9 +49,12 @@ class Trainer:
         start_time = time.time()
         total_policy_loss = 0
 
-        batch_iterator = get_batches(self.train_data, evo_config.batch_size, evo_config.seq_len)
-        num_batches = len(self.train_data) // (evo_config.batch_size * evo_config.seq_len)
-        training_steps = (num_batches // evo_config.gradient_accumulation_steps) * evo_config.pretrain_epochs
+        batch_iterator = get_batches(
+            self.train_data, evo_config.batch_size, evo_config.seq_len)
+        num_batches = len(self.train_data) // \
+                      (evo_config.batch_size * evo_config.seq_len)
+        training_steps = (num_batches // evo_config.gradient_accumulation_steps) * \
+                         evo_config.pretrain_epochs
 
         self.model.zero_grad()
         for i, (x, y) in enumerate(batch_iterator):
@@ -66,15 +70,20 @@ class Trainer:
             self.model.backward(dlogits, np.zeros((x.shape[0], 1)))
 
             if (i + 1) % evo_config.gradient_accumulation_steps == 0:
-                clip_gradients(self.model.get_named_params(flat=False), self.max_norm)
+                clip_gradients(self.model.get_named_params(
+                    flat=False), self.max_norm)
 
                 max_lr = self.optimizer.initial_lr
-                new_lr = cosine_decay_with_warmup(current_step, training_steps, max_lr, **scheduler_config.model_dump())
+                new_lr = cosine_decay_with_warmup(
+                    current_step, training_steps, max_lr, **scheduler_config.model_dump())
                 self.optimizer.lr = new_lr
 
-                params_with_grads = {f"{name}.{k}": (v[0], v[1]) for name, layer in self.model.get_named_params().items()
-                                     if hasattr(layer, 'get_trainable_params')
-                                     for k, v in layer.get_trainable_params().items()}
+                params_with_grads = {
+                    f"{name}.{k}": (v[0], v[1])
+                    for name, layer in self.model.get_named_params().items()
+                    if hasattr(layer, 'get_trainable_params')
+                    for k, v in layer.get_trainable_params().items()
+                }
                 self.optimizer.step(params_with_grads)
 
                 self.model.zero_grad()

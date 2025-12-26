@@ -63,11 +63,14 @@ def initialize_components(config: Config, vocab_size: int, tokenizer):
 
 def _parse_args():
     """Parses command-line arguments."""
-    parser = argparse.ArgumentParser(description="Agent-centric Transformer Training")
-    parser.add_argument('--model-name', type=str, required=True,
-                        help="Name for the new model. A directory will be created under 'models/'.")
-    parser.add_argument('--resume-from', type=str,
-                        help="Name of an existing model to resume training from.")
+    parser = argparse.ArgumentParser(
+        description="Agent-centric Transformer Training")
+    parser.add_argument(
+        '--model-name', type=str, required=True,
+        help="Name for the new model. A directory will be created under 'models/'.")
+    parser.add_argument(
+        '--resume-from', type=str,
+        help="Name of an existing model to resume training from.")
     return parser.parse_args()
 
 
@@ -134,10 +137,13 @@ def _run_epoch(epoch, config, trainer, optimizer):
     """Runs a single epoch of training (either pre-training or evolution)."""
     is_pretrain = epoch < config.evolution.pretrain_epochs
     phase = "Pre-training" if is_pretrain else "Evolution"
-    phase_epoch = epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
-    total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else config.evolution.evolution_epochs
+    phase_epoch = epoch if is_pretrain else epoch - \
+                  config.evolution.pretrain_epochs
+    total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else \
+        config.evolution.evolution_epochs
 
-    logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, total_phase_epochs)
+    logging.info("\n--- %s Epoch %d/%d ---", phase,
+                 phase_epoch + 1, total_phase_epochs)
 
     avg_loss, epoch_time, current_step_delta = None, 0, 0
     if is_pretrain:
@@ -180,8 +186,10 @@ def _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir)
         best_val_loss, epochs_no_improve = _handle_epoch_end(
             val_loss, best_val_loss, epochs_no_improve, model, config, model_dir)
         state = {'epoch': epoch + 1, 'current_step': current_step,
-                 'best_val_loss': best_val_loss, 'epochs_no_improve': epochs_no_improve}
-        save_checkpoint(model, optimizer, state, config.model_dump(), os.path.join(model_dir, 'checkpoint.npz'))
+                 'best_val_loss': best_val_loss,
+                 'epochs_no_improve': epochs_no_improve}
+        save_checkpoint(model, optimizer, state, config.model_dump(),
+                        os.path.join(model_dir, 'checkpoint.npz'))
         if epochs_no_improve >= config.evolution.early_stopping_patience:
             logging.warning("Early stopping triggered. Ending training.")
             break

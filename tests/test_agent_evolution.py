@@ -40,12 +40,15 @@ class TestAgentEvolution(unittest.TestCase):
         logging.info("\nRunning Test: Collaborative Evaluation Scenarios...")
 
         config = Config.from_json('config.json')
-        config.model.d_model, config.model.num_layers, config.model.num_heads, config.model.d_ff = 16, 1, 2, 32
+        config.model.d_model, config.model.num_layers, config.model.num_heads, \
+            config.model.d_ff = 16, 1, 2, 32
         config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
 
         tokenizer = Tokenizer(self.data_dir)
-        base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
-                                 vision_config=config.vision, ltm_config=config.ltm)
+        base_model = Transformer(vocab_size=tokenizer.vocab_size,
+                                 model_config=config.model,
+                                 vision_config=config.vision,
+                                 ltm_config=config.ltm)
 
         scenarios = {
             "INDEPENDENT_SUCCESS": {
@@ -80,18 +83,19 @@ class TestAgentEvolution(unittest.TestCase):
             with self.subTest(scenario=scenario_name):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
-                def mock_generate(model_self, start_tokens, **__):
+                def mock_generate(model_self, inputs, details=details,
+                                  agent_manager=agent_manager):
                     agent_id = next(agent.agent_id for agent in agent_manager.agents
                                     if agent.model is model_self)
                     return np.array(details['agents_setup'][agent_id]['response'])
 
-                def mock_critique_response(_, __, ___, response):
-                    if (details['agents_setup']['agent_0']['response'][0] ==
-                            tokenizer.char_to_idx['<ASK_FOR_HELP>']):
+                def mock_critique_response(_, __, ___, response, details=details):
+                    if (details['agents_setup']['agent_0']['response'][0]
+                            == tokenizer.char_to_idx['<ASK_FOR_HELP>']):
                         return details['agents_setup']['agent_1']['critique_score']
 
                     for setup in details['agents_setup'].values():
-                        if setup['response'] == response:
+                        if np.array_equal(setup['response'], response):
                             return setup['critique_score']
                     return 0.0
 
@@ -114,12 +118,15 @@ class TestAgentEvolution(unittest.TestCase):
         """
         logging.info("\nRunning Test: Agent Merging Functionality...")
         config = Config.from_json('config.json')
-        config.model.d_model, config.model.num_layers, config.model.num_heads, config.model.d_ff = 16, 1, 2, 32
+        config.model.d_model, config.model.num_layers, config.model.num_heads, \
+            config.model.d_ff = 16, 1, 2, 32
         config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
 
         tokenizer = Tokenizer(self.data_dir)
-        base_model = Transformer(vocab_size=tokenizer.vocab_size, model_config=config.model,
-                                 vision_config=config.vision, ltm_config=config.ltm)
+        base_model = Transformer(vocab_size=tokenizer.vocab_size,
+                                 model_config=config.model,
+                                 vision_config=config.vision,
+                                 ltm_config=config.ltm)
         initial_ltm_state = base_model.long_term_memory.get_state()
         initial_ltm_weights = initial_ltm_state['linear_0']['weights']
 

@@ -1,22 +1,29 @@
 """
 This module implements the Key-Value Cache for the self-attention layers.
 """
+from dataclasses import dataclass
+
 import numpy as np
+
+
+@dataclass
+class KVCacheConfig:
+    """Configuration for the KV cache."""
+    num_layers: int
+    batch_size: int
+    num_kv_heads: int
+    d_k: int
+    max_seq_len: int
 
 
 class KVCache:
     """
     Cache for key-value pairs in self-attention layers, optimized for GQA.
     """
-    def __init__(self, num_layers, batch_size, num_kv_heads, d_k, max_seq_len):
-        self.num_layers = num_layers
-        self.batch_size = batch_size
-        self.num_kv_heads = num_kv_heads
-        self.d_k = d_k
-        self.max_seq_len = max_seq_len
-
-        self.k_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
-        self.v_cache = np.zeros((num_layers, batch_size, num_kv_heads, max_seq_len, d_k))
+    def __init__(self, config: KVCacheConfig):
+        self.config = config
+        self.k_cache = np.zeros((config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k))
+        self.v_cache = np.zeros((config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k))
 
     def update(self, k, v, layer_idx, seq_offset):
         """
@@ -27,7 +34,7 @@ class KVCache:
         seq_len = k.shape[2]
         end_pos = seq_offset + seq_len
 
-        if end_pos > self.max_seq_len:
+        if end_pos > self.config.max_seq_len:
             raise ValueError("KVCache: sequence exceeds maximum length.")
 
         self.k_cache[layer_idx, :, :, seq_offset:end_pos, :] = k
@@ -53,7 +60,7 @@ class KVCache:
 
     def copy(self):
         """Creates a deep copy of this KVCache instance."""
-        new_cache = KVCache(self.num_layers, self.batch_size, self.num_kv_heads, self.d_k, self.max_seq_len)
+        new_cache = KVCache(self.config)
         new_cache.k_cache = np.copy(self.k_cache)
         new_cache.v_cache = np.copy(self.v_cache)
         return new_cache

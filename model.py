@@ -2,6 +2,7 @@
 Main Transformer model implementation.
 """
 import json
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -10,7 +11,7 @@ from config import DecoderBlockConfig
 from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from nn_components.embedding import Embedding
-from nn_components.kv_cache import KVCache
+from nn_components.kv_cache import KVCache, KVCacheConfig
 from nn_components.linear import Linear
 from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
@@ -186,7 +187,7 @@ class Transformer:
         config_str = json.dumps(config)
         params_to_save['config'] = np.array([config_str], dtype=object)
         np.savez(filepath, **params_to_save)
-        print(f"Model weights and config saved to {filepath}")
+        logging.info("Model weights and config saved to %s", filepath)
 
     @staticmethod
     def load_model(filepath, vocab_size, config, tokenizer):
@@ -199,7 +200,7 @@ class Transformer:
         with np.load(filepath, allow_pickle=True) as data:
             state_dict = {k: data[k] for k in data if k != 'config'}
             model.set_state(state_dict)
-        print(f"Model weights loaded from {filepath}")
+        logging.info("Model weights loaded from %s", filepath)
         return model
 
     def _get_embeddings(self, inputs: ForwardPassInput):
@@ -372,7 +373,14 @@ class Transformer:
 
         batch_size = 1
         d_k = self.d_model // self.num_heads
-        kv_cache = KVCache(self.num_layers, batch_size, self.num_kv_heads, d_k, self.max_seq_len)
+        kv_cache_config = KVCacheConfig(
+            num_layers=self.num_layers,
+            batch_size=batch_size,
+            num_kv_heads=self.num_kv_heads,
+            d_k=d_k,
+            max_seq_len=self.max_seq_len
+        )
+        kv_cache = KVCache(kv_cache_config)
 
         all_generated_tokens = []
         prompt_tokens = np.array(inputs.start_tokens).reshape(batch_size, -1)

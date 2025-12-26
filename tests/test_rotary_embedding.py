@@ -19,7 +19,8 @@ class TestRotaryEmbedding(unittest.TestCase):
 
     def test_rotary_embedding_backward_gradient_check(self):
         """Numerically checks the gradients for the `rotary_backward` function."""
-        logging.info("\nRunning Test: Gradient check for Rotary Positional Embedding backward pass...")
+        logging.info(
+            "\nRunning Test: Gradient check for Rotary Positional Embedding backward pass...")
 
         batch_size, n_heads, seq_len, dim = 2, 4, 8, 16
 
@@ -32,7 +33,8 @@ class TestRotaryEmbedding(unittest.TestCase):
 
         dx_analytic = rotary_backward(dout, x, cos, sin)
 
-        dx_numerical = numerical_gradient(lambda x_arg: apply_rotary_pos_emb(x_arg, cos, sin), x, dout)
+        dx_numerical = numerical_gradient(
+            lambda x_arg: apply_rotary_pos_emb(x_arg, cos, sin), x, dout)
 
         check_gradient(self, dx_analytic, dx_numerical, "dx")
         logging.info("All Rotary Embedding gradient checks passed!")

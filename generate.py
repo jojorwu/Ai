@@ -41,20 +41,20 @@ def select_model_interactively() -> str | None:
         logging.info(f"Automatically selecting the only available model: {available_models[0]}")
         return available_models[0]
 
-    print("Available models:")
+    logging.info("Available models:")
     for i, model_name in enumerate(available_models):
-        print(f"  {i + 1}: {model_name}")
+        logging.info("  %d: %s", i + 1, model_name)
 
     while True:
         try:
             choice = int(input("Please select a model by number: "))
             if 1 <= choice <= len(available_models):
                 return available_models[choice - 1]
-            print("Invalid number. Please try again.")
+            logging.warning("Invalid number. Please try again.")
         except ValueError:
-            print("Invalid input. Please enter a number.")
+            logging.warning("Invalid input. Please enter a number.")
         except (KeyboardInterrupt, EOFError):
-            print("\nSelection cancelled.")
+            logging.info("\nSelection cancelled.")
             return None
 
 
@@ -172,7 +172,7 @@ def run_agent_loop(model, tokenizer, config):
         else:
             logging.info("\n--- Final Answer ---")
             final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
-            print(final_answer)
+            logging.info(final_answer)
             break
     else:
         logging.warning("Maximum number of iterations reached. Terminating.")
