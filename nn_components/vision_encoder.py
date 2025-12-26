@@ -29,7 +29,8 @@ class VisionEncoder:
         num_patches_h = height // p
         num_patches_w = width // p
 
-        patches = images.reshape(batch_size, num_patches_h, p, num_patches_w, p, self.num_channels)
+        patches = images.reshape(batch_size, num_patches_h, p,
+                                 num_patches_w, p, self.num_channels)
         patches = patches.transpose(0, 1, 3, 2, 4, 5)
         patches = patches.reshape(batch_size, num_patches_h * num_patches_w, -1)
 

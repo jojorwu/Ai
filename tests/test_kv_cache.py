@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from nn_components.kv_cache import KVCache
+from nn_components.kv_cache import KVCache, KVCacheConfig
 
 
 class TestKVCache(unittest.TestCase):
@@ -21,8 +21,14 @@ class TestKVCache(unittest.TestCase):
         self.num_kv_heads = 4
         self.d_k = 8
         self.max_seq_len = 16
-        self.cache = KVCache(self.num_layers, self.batch_size,
-                             self.num_kv_heads, self.d_k, self.max_seq_len)
+        config = KVCacheConfig(
+            num_layers=self.num_layers,
+            batch_size=self.batch_size,
+            num_kv_heads=self.num_kv_heads,
+            d_k=self.d_k,
+            max_seq_len=self.max_seq_len
+        )
+        self.cache = KVCache(config)
         logging.info("\nRunning Test: KVCache snapshot and restore...")
 
     def test_snapshot_and_restore(self):

@@ -5,7 +5,6 @@ import logging
 import unittest
 
 from backend import np
-
 from config import OptimizerConfig
 from nn_components.linear import Linear
 from optimizer import Adam
@@ -32,9 +31,9 @@ class TestOptimizer(unittest.TestCase):
         _ = linear_layer.forward(x)
         _ = linear_layer.backward(d_out)
 
-        weights_before = np.copy(linear_layer.W)
+        weights_before = np.copy(linear_layer.weights)
         optimizer.step(linear_layer.get_trainable_params())
-        weights_after = linear_layer.W
+        weights_after = linear_layer.weights
 
         self.assertFalse(np.array_equal(weights_before, weights_after),
                          "Optimizer step did not update weights.")

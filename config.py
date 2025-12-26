@@ -24,6 +24,46 @@ class ModelConfig(BaseModel):
                                        description="Number of 'experts' to select for each token.")
 
 
+from typing import Any, Tuple
+
+
+class MultiHeadAttentionConfig(BaseModel):
+    """Configuration for the Multi-Head Attention layer."""
+    d_model: int
+    num_heads: int
+    num_kv_heads: int
+    rotary_emb: Optional[Tuple[Any, Any]] = None
+    bias: bool = False
+    num_layers: int = 1
+
+
+class MoEConfig(BaseModel):
+    """Configuration for the Mixture of Experts layer."""
+    d_model: int
+    d_ff: int
+    num_experts: int
+    top_k: int
+    bias: bool = False
+
+
+class DecoderBlockConfig(BaseModel):
+    """Configuration for a single DecoderBlock."""
+    d_model: int
+    num_heads: int
+    d_ff: int
+    dropout_rate: float
+    num_kv_heads: int
+    num_layers: int
+    num_experts: Optional[int] = None
+    top_k_experts: Optional[int] = None
+    rotary_emb: Optional[Tuple[Any, Any]] = None
+    long_term_memory: Optional[Any] = None
+
+    class Config:
+        """Pydantic config."""
+        arbitrary_types_allowed = True
+
+
 class VisionConfig(BaseModel):
     """Configuration for the Vision Encoder."""
     image_size: tuple[int, int] = Field((224, 224), description="Input image size (height, width).")

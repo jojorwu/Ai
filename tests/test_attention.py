@@ -26,7 +26,8 @@ class TestAttention(unittest.TestCase):
 
     def test_attention_backward(self):
         """Numerically checks the gradients for the `backward` method."""
-        logging.info("\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
+        logging.info(
+            "\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
 
         np.random.seed(42)
         q, k, v, dout = _create_test_data(2, 8, 3, 4, 5)

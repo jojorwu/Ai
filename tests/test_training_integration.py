@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from config import Config
-from model import Transformer
+from model import ForwardPassInput, Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 
@@ -40,13 +40,17 @@ class TestTrainingIntegration(unittest.TestCase):
         vocab_size = 10
         config = _create_test_config()
 
-        model = Transformer(vocab_size=vocab_size,
-                            model_config=config.model,
-                            vision_config=config.vision,
-                            ltm_config=config.ltm)
-        x = np.random.randint(0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
-        y = np.random.randint(0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
-        mask = np.triu(np.ones((config.evolution.seq_len, config.evolution.seq_len)), k=1).astype(bool)
+        model = Transformer(
+            vocab_size=vocab_size,
+            model_config=config.model,
+            vision_config=config.vision,
+            ltm_config=config.ltm)
+        x = np.random.randint(
+            0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
+        y = np.random.randint(
+            0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
+        mask = np.triu(np.ones((config.evolution.seq_len,
+                                config.evolution.seq_len)), k=1).astype(bool)
 
         policy_loss_fn = SoftmaxCrossEntropy()
         optimizer = Adam(config.optimizer)
@@ -55,14 +59,18 @@ class TestTrainingIntegration(unittest.TestCase):
 
         model.train()
         model.zero_grad()
-        logits, value, _ = model.forward(x, mask=mask)
+        forward_input = ForwardPassInput(x=x, ltm_state=0, mask=mask)
+        logits, value, _ = model.forward(forward_input)
         _ = policy_loss_fn.forward(logits, y)
         dlogits = policy_loss_fn.backward()
         model.backward(dlogits, np.zeros_like(value))
 
-        params_with_grads = {f"{name}.{k}": (v[0], v[1]) for name, layer in model.get_named_params().items()
-                                     if hasattr(layer, 'get_trainable_params')
-                                     for k, v in layer.get_trainable_params().items()}
+        params_with_grads = {
+            f"{name}.{k}": (v[0], v[1])
+            for name, layer in model.get_named_params().items()
+            if hasattr(layer, 'get_trainable_params')
+            for k, v in layer.get_trainable_params().items()
+        }
         optimizer.step(params_with_grads)
 
         updated_state = model.get_state()

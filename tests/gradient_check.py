@@ -10,12 +10,12 @@ def check_gradient(test_case, analytical_grad, numerical_grad, name):
     """Compares analytical and numerical gradients."""
     is_close = np.allclose(analytical_grad, numerical_grad, rtol=1e-4, atol=1e-4)
     if not is_close:
-        logging.error(f"Gradient check for {name} FAILED")
-        logging.error(f"Analytical grad: {analytical_grad}")
-        logging.error(f"Numerical grad: {numerical_grad}")
-        logging.error(f"Difference: {np.abs(analytical_grad - numerical_grad)}")
+        logging.error("Gradient check for %s FAILED", name)
+        logging.error("Analytical grad: %s", analytical_grad)
+        logging.error("Numerical grad: %s", numerical_grad)
+        logging.error("Difference: %s", np.abs(analytical_grad - numerical_grad))
     test_case.assertTrue(is_close, f"Gradient check for {name} FAILED")
-    logging.info(f"Gradient check for {name} PASSED.")
+    logging.info("Gradient check for %s PASSED.", name)
 
 
 def numerical_gradient(model_forward, param, dout, epsilon=1e-5):

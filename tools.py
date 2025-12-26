@@ -130,5 +130,5 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return tool_function(**args)
     except TypeError as e:
         return f"Error: Invalid arguments for tool '{tool_name}': {e}"
-    except Exception as e:
-        return f"Error: An unexpected error occurred while executing tool '{tool_name}': {e}"
+    except (IOError, OSError) as e:
+        return f"A file system error occurred while executing tool '{tool_name}': {e}"

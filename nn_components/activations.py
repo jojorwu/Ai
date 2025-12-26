@@ -1,4 +1,8 @@
+"""
+This module implements various activation functions used in neural networks.
+"""
 from backend import np
+
 
 class SiLU:
     """
@@ -13,6 +17,7 @@ class SiLU:
         return 1 / (1 + np.exp(-x))
 
     def forward(self, x):
+        """Forward pass for the SiLU activation function."""
         self.x = x
         self.sigmoid_x = self._sigmoid(x)
         return x * self.sigmoid_x
@@ -29,10 +34,15 @@ class SiLU:
 
 class Tanh:
     """Hyperbolic tangent activation function."""
+    def __init__(self):
+        self.output = None
+
     def forward(self, x):
+        """Forward pass for the Tanh activation function."""
         self.output = np.tanh(x)
         return self.output
 
     def backward(self, dout):
+        """Backward pass for the Tanh activation function."""
         # Derivative of tanh(x) = 1 - tanh^2(x)
         return dout * (1 - self.output**2)

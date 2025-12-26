@@ -5,7 +5,6 @@ import copy
 import uuid
 
 from backend import np
-
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
@@ -109,13 +108,14 @@ class Agent:
 
         images = np.array([image_data]) if image_data is not None else None
 
-        generated_tokens = self.model.generate(
+        generate_input = self.model.GenerateInput(
             start_tokens=prompt_tokens,
             images=images,
             max_new_tokens=max_new_tokens,
             temperature=0.7,
             top_k=50
         )
+        generated_tokens = self.model.generate(generate_input)
 
         return generated_tokens.tolist()
 

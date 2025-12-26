@@ -6,6 +6,7 @@ import unittest
 
 import numpy as np
 
+from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
 from tests.gradient_check import check_gradient, numerical_gradient
 
@@ -19,7 +20,9 @@ class TestMoE(unittest.TestCase):
         self.d_ff = 32
         self.num_experts = 4
         self.top_k = 2
-        self.moe = MixtureOfExperts(self.d_model, self.d_ff, self.num_experts, self.top_k)
+        config = MoEConfig(d_model=self.d_model, d_ff=self.d_ff,
+                           num_experts=self.num_experts, top_k=self.top_k)
+        self.moe = MixtureOfExperts(config)
         self.batch_size = 4
         self.seq_len = 8
         self.input_data = np.random.randn(self.batch_size, self.seq_len, self.d_model)

@@ -8,7 +8,7 @@ import shutil
 
 from backend import set_backend
 from config import Config
-from data_loader import load_text_from_directory
+from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
@@ -37,9 +37,11 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     """Initializes the tokenizer and loads the training data."""
     logging.info("Initializing tokenizer and loading data...")
     tokenizer = Tokenizer(tokenizer_path)
-    all_text = load_text_from_directory(data_dir)
-    if not all_text:
-        raise ValueError(f"Failed to load text from directory: {data_dir}")
+    # Load multimodal data and concatenate text for pre-training
+    multimodal_data = load_multimodal_data_from_directory(data_dir)
+    if not multimodal_data:
+        raise ValueError(f"Failed to load any data from directory: {data_dir}")
+    all_text = " ".join([text for text, _ in multimodal_data])
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
     split_idx = int(len(data_tokens) * (1 - validation_split))
     train_data, val_data = data_tokens[:split_idx], data_tokens[split_idx:]
@@ -61,11 +63,14 @@ def initialize_components(config: Config, vocab_size: int, tokenizer):
 
 def _parse_args():
     """Parses command-line arguments."""
-    parser = argparse.ArgumentParser(description="Agent-centric Transformer Training")
-    parser.add_argument('--model-name', type=str, required=True,
-                        help="Name for the new model. A directory will be created under 'models/'.")
-    parser.add_argument('--resume-from', type=str,
-                        help="Name of an existing model to resume training from.")
+    parser = argparse.ArgumentParser(
+        description="Agent-centric Transformer Training")
+    parser.add_argument(
+        '--model-name', type=str, required=True,
+        help="Name for the new model. A directory will be created under 'models/'.")
+    parser.add_argument(
+        '--resume-from', type=str,
+        help="Name of an existing model to resume training from.")
     return parser.parse_args()
 
 
@@ -104,8 +109,8 @@ def _setup_environment(args):
     return config, model_dir, resume_dir
 
 
-def _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir):
-    """Initializes training state and executes the main training loop."""
+def _initialize_training_state(model, optimizer, model_dir, resume_dir):
+    """Initializes or resumes the training state."""
     start_epoch, current_step, best_val_loss, epochs_no_improve = 0, 0, float('inf'), 0
     checkpoint_path = os.path.join(model_dir, 'checkpoint.npz')
 
@@ -125,44 +130,66 @@ def _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir)
             best_val_loss = state.get('best_val_loss', float('inf'))
             epochs_no_improve = state.get('epochs_no_improve', 0)
             logging.info("Resuming from checkpoint. Start Epoch: %d, Step: %d.", start_epoch, current_step)
+    return start_epoch, current_step, best_val_loss, epochs_no_improve
 
+
+def _run_epoch(epoch, config, trainer, optimizer):
+    """Runs a single epoch of training (either pre-training or evolution)."""
+    is_pretrain = epoch < config.evolution.pretrain_epochs
+    phase = "Pre-training" if is_pretrain else "Evolution"
+    phase_epoch = epoch if is_pretrain else epoch - \
+                  config.evolution.pretrain_epochs
+    total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else \
+        config.evolution.evolution_epochs
+
+    logging.info("\n--- %s Epoch %d/%d ---", phase,
+                 phase_epoch + 1, total_phase_epochs)
+
+    avg_loss, epoch_time, current_step_delta = None, 0, 0
+    if is_pretrain:
+        avg_loss, epoch_time, current_step_delta = trainer.train_pretrain_epoch(0)
+    else:
+        epoch_time = trainer.run_evolution_cycle()
+
+    val_loss = trainer.run_validation()
+    log_parts = [f"Validation Loss: {val_loss:.4f}", f"Epoch Time: {epoch_time:.2f}s"]
+    if avg_loss is not None:
+        log_parts.insert(0, f"Average Loss: {avg_loss:.4f}")
+    if is_pretrain:
+        log_parts.append(f"Learning Rate: {optimizer.lr:.6f}")
+    logging.info("    - " + "\n    - ".join(log_parts))
+    return val_loss, current_step_delta
+
+
+def _handle_epoch_end(val_loss, best_val_loss, epochs_no_improve, model, config, model_dir):
+    """Handles end-of-epoch logic like saving the best model."""
+    if val_loss < best_val_loss:
+        best_val_loss, epochs_no_improve = val_loss, 0
+        model.save_weights(os.path.join(model_dir, 'best_model.npz'), config.model_dump())
+        logging.info("    - New best model saved (Val Loss: %.4f)", best_val_loss)
+    else:
+        epochs_no_improve += 1
+        logging.info("    - No improvement in validation loss for %d epochs.", epochs_no_improve)
+    return best_val_loss, epochs_no_improve
+
+
+def _run_training_loop(trainer, config, model, optimizer, model_dir, resume_dir):
+    """Executes the main training loop."""
+    start_epoch, current_step, best_val_loss, epochs_no_improve = _initialize_training_state(
+        model, optimizer, model_dir, resume_dir)
     total_epochs = config.evolution.pretrain_epochs + config.evolution.evolution_epochs
     logging.info("Starting training loop for %d total epochs.", total_epochs)
 
     for epoch in range(start_epoch, total_epochs):
-        is_pretrain = epoch < config.evolution.pretrain_epochs
-        phase = "Pre-training" if is_pretrain else "Evolution"
-        phase_epoch = epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
-        total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else config.evolution.evolution_epochs
-
-        logging.info("\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, total_phase_epochs)
-
-        avg_loss, epoch_time = None, 0
-        if is_pretrain:
-            avg_loss, epoch_time, current_step = trainer.train_pretrain_epoch(current_step)
-        else:
-            epoch_time = trainer.run_evolution_cycle()
-
-        val_loss = trainer.run_validation()
-        log_parts = [f"Validation Loss: {val_loss:.4f}", f"Epoch Time: {epoch_time:.2f}s"]
-        if avg_loss is not None:
-            log_parts.insert(0, f"Average Loss: {avg_loss:.4f}")
-        if is_pretrain:
-            log_parts.append(f"Learning Rate: {optimizer.lr:.6f}")
-        logging.info("    - " + "\n    - ".join(log_parts))
-
-        if val_loss < best_val_loss:
-            best_val_loss, epochs_no_improve = val_loss, 0
-            model.save_weights(os.path.join(model_dir, 'best_model.npz'), config.model_dump())
-            logging.info("    - New best model saved (Val Loss: %.4f)", best_val_loss)
-        else:
-            epochs_no_improve += 1
-            logging.info("    - No improvement in validation loss for %d epochs.", epochs_no_improve)
-
+        val_loss, current_step_delta = _run_epoch(epoch, config, trainer, optimizer)
+        current_step += current_step_delta
+        best_val_loss, epochs_no_improve = _handle_epoch_end(
+            val_loss, best_val_loss, epochs_no_improve, model, config, model_dir)
         state = {'epoch': epoch + 1, 'current_step': current_step,
-                 'best_val_loss': best_val_loss, 'epochs_no_improve': epochs_no_improve}
-        save_checkpoint(model, optimizer, state, config.model_dump(), checkpoint_path)
-
+                 'best_val_loss': best_val_loss,
+                 'epochs_no_improve': epochs_no_improve}
+        save_checkpoint(model, optimizer, state, config.model_dump(),
+                        os.path.join(model_dir, 'checkpoint.npz'))
         if epochs_no_improve >= config.evolution.early_stopping_patience:
             logging.warning("Early stopping triggered. Ending training.")
             break
