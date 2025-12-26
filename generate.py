@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from backend import np, set_backend
+from backend import set_backend
 from config import Config, DynamicParametersConfig
 from model import Transformer
 from tokenizer import Tokenizer
@@ -80,13 +80,17 @@ def select_model_interactively() -> str | None:
         logging.error("No models found in the '%s' directory.", models_dir)
         return None
 
-    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+    available_models = [
+        d for d in os.listdir(models_dir)
+        if os.path.isdir(os.path.join(models_dir, d))
+    ]
 
     if not available_models:
         logging.error("No valid model directories found in '%s'.", models_dir)
         return None
     if len(available_models) == 1:
-        logging.info("Automatically selecting the only available model: %s", available_models[0])
+        logging.info("Automatically selecting the only available model: %s",
+                     available_models[0])
         return available_models[0]
 
     logging.info("Available models:")
@@ -146,11 +150,14 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
     return None, None
 
 
-def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None, Config | None]:
+def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None,
+                                     Config | None]:
     """Initializes the environment, including logging, args, and model selection."""
     setup_logging()
-    parser = argparse.ArgumentParser(description="Interact with a trained Transformer model.")
-    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
+    parser = argparse.ArgumentParser(
+        description="Interact with a trained Transformer model.")
+    parser.add_argument('--model-name', type=str,
+                        help="The name of the model to use.")
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()

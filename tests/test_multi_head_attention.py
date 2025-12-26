@@ -2,10 +2,14 @@
 Tests for the optimized MultiHeadAttention layer.
 """
 import logging
+import sys
+import os
 import unittest
 
-from gradient_check import check_gradient, numerical_gradient
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from gradient_check import check_gradient, numerical_gradient
 from backend import np
 from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention

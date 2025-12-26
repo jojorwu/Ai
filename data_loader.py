@@ -72,7 +72,9 @@ def _find_text_files(directory_path: str, text_handlers: dict) -> List[str]:
     return text_files
 
 
-def _process_text_file(text_path: str, text_handlers: dict, image_extensions: set) -> Optional[Tuple[str, Optional[np.ndarray]]]:
+def _process_text_file(
+        text_path: str, text_handlers: dict,
+        image_extensions: set) -> Optional[Tuple[str, Optional[np.ndarray]]]:
     """Processes a single text file, finds its corresponding image, and returns the pair."""
     try:
         base_name, _ = os.path.splitext(text_path)
@@ -89,25 +91,30 @@ def _process_text_file(text_path: str, text_handlers: dict, image_extensions: se
             for img_ext in image_extensions:
                 image_path = base_name + img_ext
                 if os.path.exists(image_path):
-                    logging.info("Found pair: %s and %s", os.path.basename(text_path), os.path.basename(image_path))
+                    logging.info("Found pair: %s and %s",
+                                 os.path.basename(text_path),
+                                 os.path.basename(image_path))
                     image_data = _read_image(image_path)
                     if image_data is not None:
                         found_image = True
                         break
             if not found_image:
                 logging.warning(
-                    "Text %s contains <IMAGE>, but no image was found.", os.path.basename(text_path))
+                    "Text %s contains <IMAGE>, but no image was found.",
+                    os.path.basename(text_path))
         return text_content, image_data
     except (IOError, OSError) as e:
         logging.error("Error processing file %s: %s", text_path, e)
         return None
 
 
-def load_multimodal_data_from_directory(directory_path: str) -> List[Tuple[str, Optional[np.ndarray]]]:
+def load_multimodal_data_from_directory(
+        directory_path: str) -> List[Tuple[str, Optional[np.ndarray]]]:
     """
     Scans a directory, finds text-image pairs, and loads them.
     """
-    logging.info("Scanning directory '%s' for multimodal data...", directory_path)
+    logging.info("Scanning directory '%s' for multimodal data...",
+                 directory_path)
     text_handlers = {'.txt': _read_txt, '.pdf': _read_pdf, '.docx': _read_docx}
     image_extensions = {'.jpg', '.jpeg', '.png'}
     text_files = _find_text_files(directory_path, text_handlers)

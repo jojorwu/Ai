@@ -2,11 +2,16 @@
 Unit tests for the MixtureOfExperts module.
 """
 import logging
+import sys
+import os
 import unittest
 
 import numpy as np
-from gradient_check import check_gradient, numerical_gradient
 
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from gradient_check import check_gradient, numerical_gradient
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
 
