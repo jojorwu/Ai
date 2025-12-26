@@ -1,7 +1,6 @@
 """
 Tests for the KVCache.
 """
-import logging
 import unittest
 
 import numpy as np

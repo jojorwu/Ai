@@ -23,7 +23,6 @@ class SpecializationConfig:
 def get_agent_batches(data, batch_size, seq_len):
     """
     Simplified batch generator for agent specialization.
-    Unlike the main one, it doesn't shuffle and works with a single data chunk.
     """
     num_total_tokens = len(data)
     if num_total_tokens < seq_len:

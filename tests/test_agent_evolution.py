@@ -88,7 +88,7 @@ class TestAgentEvolution(unittest.TestCase):
                     agent_id = next(agent.agent_id for agent in agent_manager.agents
                                     if agent.model is model_self)
                     response_chunk = np.array(details['agents_setup'][agent_id]['response'])
-                    yield response_chunk, 0.5  # Yield a tuple with a dummy surprise value
+                    yield response_chunk, 0.5
 
                 def mock_critique_response(_, __, ___, response, details=details):
                     if (details['agents_setup']['agent_0']['response'][0]
