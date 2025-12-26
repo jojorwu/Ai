@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from nn_components.linear import Linear
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 class TestLinear(unittest.TestCase):

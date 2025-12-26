@@ -40,6 +40,7 @@ class TestKVCache(unittest.TestCase):
         self.assertEqual(k_cached.shape[-2], 5)
         np.testing.assert_array_equal(k_cached, k_data)
         np.testing.assert_array_equal(v_cached, v_data)
+        np.testing.assert_array_equal(v_cached, v_data)
 
     def test_ring_buffer_wrapping(self):
         """Test that the ring buffer wraps around correctly."""

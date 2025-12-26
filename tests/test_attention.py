@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from nn_components.attention import ScaledDotProductAttention
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 def _create_test_data(batch_size, num_heads, seq_len, d_k, d_v):

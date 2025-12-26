@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from nn_components.long_term_memory import LongTermMemory
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 class TestLongTermMemory(unittest.TestCase):

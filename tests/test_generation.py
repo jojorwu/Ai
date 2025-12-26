@@ -4,7 +4,7 @@ Tests for the text generation functionality.
 import unittest
 
 from config import Config
-from model import Transformer
+from model import Transformer, GenerateInput
 
 
 class TestGeneration(unittest.TestCase):
@@ -26,7 +26,7 @@ class TestGeneration(unittest.TestCase):
         """
         Tests that the generate method returns a result.
         """
-        generate_input = self.model.GenerateInput(start_tokens=[1, 2, 3], max_new_tokens=10)
+        generate_input = GenerateInput(start_tokens=[1, 2, 3], max_new_tokens=10)
         result = self.model.generate(generate_input)
         self.assertIsNotNone(result)
 

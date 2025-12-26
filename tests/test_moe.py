@@ -8,7 +8,7 @@ import numpy as np
 
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 class TestMoE(unittest.TestCase):

@@ -6,7 +6,7 @@ import unittest
 
 from backend import np
 from nn_components.feed_forward import FeedForward
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 class TestFeedForward(unittest.TestCase):

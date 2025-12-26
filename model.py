@@ -4,6 +4,7 @@ Main Transformer model implementation.
 import json
 import logging
 from dataclasses import dataclass
+from typing import Generator, Tuple
 
 import numpy as np
 
@@ -44,6 +45,44 @@ def _sample_from_logits(logits, temperature, top_k, top_p):
     else:
         token_id = np.argmax(logits)
     return token_id
+
+
+@dataclass
+class GenerateInput:
+    """Dataclass for storing inputs to the generate method."""
+    start_tokens: np.ndarray
+    max_new_tokens: int
+    images: np.ndarray = None
+    temperature: float = 1.0
+    top_k: int = 0
+    top_p: float = 0.0
+    speculative_steps: int = 5
+    value_threshold: float = -1.0
+    max_retries: int = 3
+    dynamic_top_k: int = None
+
+
+@dataclass
+class SpeculativeChunkInput:
+    """Dataclass for storing inputs to the _generate_speculative_chunk method."""
+    temp_logits: np.ndarray
+    kv_cache: 'KVCache'
+    current_seq_len: int
+    max_new_tokens: int
+    speculative_steps: int
+    temperature: float
+    top_k: int
+    top_p: float
+    dynamic_top_k: int = None
+
+
+@dataclass
+class GenerationState:
+    """Keeps track of the state during the generation process."""
+    all_generated_tokens: list
+    current_seq_len: int
+    logits: np.ndarray
+    kv_cache: KVCache
 
 
 # pylint: disable=too-many-instance-attributes
@@ -142,7 +181,6 @@ class Transformer:
     def count_parameters(self):
         """Counts the total number of trainable parameters in the model."""
         total_params = 0
-        # We use flat=True to get a dictionary of individual parameter tensors
         named_params = self.get_named_params(flat=True)
         for _, (param_val, _) in named_params.items():
             total_params += param_val.size
@@ -226,15 +264,11 @@ class Transformer:
 
     def _run_decoder_stack(self, h, inputs: ForwardPassInput):
         """Runs the forward pass through the decoder stack."""
+        ltm_state_for_blocks = 0
         if self.long_term_memory:
-            # Retrieve memory vector from LTM
             memory_context = self.long_term_memory.retrieve_memory()
-            # Prepend the memory context to the input sequence
             h = np.concatenate([memory_context, h], axis=1)
-            # The LTM state passed to decoder blocks is now the memory context itself
             ltm_state_for_blocks = memory_context
-        else:
-            ltm_state_for_blocks = 0
 
         total_aux_loss = 0
         for i, block in enumerate(self.decoder_blocks):
@@ -246,17 +280,12 @@ class Transformer:
             total_aux_loss += aux_loss
         return h, total_aux_loss
 
-    # pylint: disable=too-many-arguments
     def forward(self, inputs: ForwardPassInput, dynamic_top_k: int = None):
         """Performs the forward pass of the model."""
-        # Get embeddings for the input tokens first
         h = self._get_embeddings(inputs)
-
-        # Now, run the decoder stack, which will prepend the memory context
         inputs.dynamic_top_k = dynamic_top_k
         h, total_aux_loss = self._run_decoder_stack(h, inputs)
 
-        # The rest of the forward pass remains the same
         h = self.final_norm.forward(h)
         self.final_norm_output = h
 
@@ -298,35 +327,20 @@ class Transformer:
         return dx
 
     def _update_ltm_if_surprised(self, token_arr, kv_cache):
-        """
-        Calculates 'surprise' and updates LTM if the threshold is exceeded.
-        This is a form of test-time training (TTT).
-        """
+        """Calculates 'surprise' and updates LTM if the threshold is exceeded."""
         if not self.long_term_memory:
-            return
+            return 0.0
 
-        # 1. Get the hidden state for the new token
         forward_pass_input = ForwardPassInput(x=token_arr, ltm_state=0, kv_cache=kv_cache)
         h = self._get_embeddings(forward_pass_input)
-        # Note: We don't run the full decoder stack here, just enough to get a representation
-        # for the LTM. This is a simplification for performance.
         ltm_input = np.mean(h, axis=1, keepdims=True)
-
-        # 2. Forward pass on LTM to update its internal state
         self.long_term_memory.forward(ltm_input)
 
-        # 3. Calculate "surprise" based on the gradient of the value function
         self.zero_grad()
         self.long_term_memory.zero_grad()
-
-        # We need to run a forward pass *with* the (old) memory to calculate gradients against it
-        forward_pass_input_for_grad = ForwardPassInput(
-            x=token_arr, ltm_state=0, kv_cache=kv_cache
-        )
-        # We don't use dynamic top_k for surprise calculation, as it should reflect a consistent baseline
+        forward_pass_input_for_grad = ForwardPassInput(x=token_arr, ltm_state=0, kv_cache=kv_cache)
         logits_for_grad, token_val, _ = self.forward(forward_pass_input_for_grad, dynamic_top_k=None)
-        d_val = np.ones_like(token_val)
-        d_logits = np.zeros_like(logits_for_grad)
+        d_val, d_logits = np.ones_like(token_val), np.zeros_like(logits_for_grad)
         self.backward(d_logits, d_val)
 
         ltm_params = self.long_term_memory.get_trainable_params()
@@ -336,23 +350,9 @@ class Transformer:
         if squared_grads:
             grad_norm = np.sqrt(sum(squared_grads))
             if grad_norm > self.ltm_surprise_threshold:
-                # 4. If surprised, update LTM weights (TTT)
                 self.ltm_optimizer.step(ltm_params)
-
         self.long_term_memory.zero_grad()
         return grad_norm
-
-    @dataclass
-    class SpeculativeChunkInput:
-        """Dataclass for storing inputs to the _generate_speculative_chunk method."""
-        temp_logits: np.ndarray
-        kv_cache: 'KVCache'
-        current_seq_len: int
-        max_new_tokens: int
-        speculative_steps: int
-        temperature: float
-        top_k: int
-        top_p: float
 
     def _generate_speculative_chunk(self, inputs: SpeculativeChunkInput):
         """Generates a small 'chunk' of tokens speculatively."""
@@ -365,100 +365,81 @@ class Transformer:
             token_id = _sample_from_logits(temp_logits[0, -1, :], inputs.temperature, inputs.top_k, inputs.top_p)
             speculative_chunk.append(token_id)
             next_token_arr = np.array([[token_id]])
-
-            # Forward pass for the next token in the chunk
-            forward_pass_input = ForwardPassInput(
-                x=next_token_arr,
-                ltm_state=0,
-                kv_cache=inputs.kv_cache
-            )
+            forward_pass_input = ForwardPassInput(x=next_token_arr, ltm_state=0, kv_cache=inputs.kv_cache)
             temp_logits, final_value, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
 
-        # After generating the whole chunk, update LTM based on this chunk
         surprise_value = 0.0
         if speculative_chunk:
             chunk_array = np.array([speculative_chunk])
             surprise_value = self._update_ltm_if_surprised(chunk_array, inputs.kv_cache)
-
         return speculative_chunk, temp_logits, final_value, surprise_value
 
-    @dataclass
-    class GenerateInput:
-        """Dataclass for storing inputs to the generate method."""
-        start_tokens: np.ndarray
-        max_new_tokens: int
-        images: np.ndarray = None
-        temperature: float = 1.0
-        top_k: int = 0
-        top_p: float = 0.0
-        speculative_steps: int = 5
-        value_threshold: float = -1.0
-        max_retries: int = 3
-        dynamic_top_k: int = None
-
-    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
-    def generate(self, inputs: GenerateInput):
-        """Generates a sequence of tokens."""
-        self.eval()
-
-        batch_size = 1
+    def _prepare_kv_cache(self) -> KVCache:
+        """Initializes the KV cache for generation."""
         d_k = self.d_model // self.num_heads
-        kv_cache_config = KVCacheConfig(
+        return KVCache(KVCacheConfig(
             num_layers=self.num_layers,
-            batch_size=batch_size,
+            batch_size=1,
             num_kv_heads=self.num_kv_heads,
             d_k=d_k,
             max_seq_len=self.max_seq_len
-        )
-        kv_cache = KVCache(kv_cache_config)
+        ))
 
-        all_generated_tokens = []
-        prompt_tokens = np.array(inputs.start_tokens).reshape(batch_size, -1)
-
-        # Initial forward pass for the prompt (can contain an image).
-        forward_pass_input = ForwardPassInput(
-            x=prompt_tokens,
-            ltm_state=0,
-            kv_cache=kv_cache
-        )
+    def _process_prompt(self, inputs: GenerateInput, kv_cache: KVCache) -> Tuple[np.ndarray, int]:
+        """Processes the initial prompt and returns initial logits and sequence length."""
+        prompt_tokens = np.array(inputs.start_tokens).reshape(1, -1)
+        forward_pass_input = ForwardPassInput(x=prompt_tokens, ltm_state=0, kv_cache=kv_cache)
         logits, _, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
 
-        # Calculate new sequence length if an image was present.
-        if (inputs.images is not None and self.tokenizer is not None and
+        if (inputs.images is not None and self.tokenizer and
                 self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens):
             num_patches = (self.vision_encoder.patch_size // 16) ** 2
             current_seq_len = prompt_tokens.shape[1] - 1 + num_patches
         else:
             current_seq_len = prompt_tokens.shape[1]
+        return logits, current_seq_len
 
-        surprise_history = []
-        while len(all_generated_tokens) < inputs.max_new_tokens:
+    def _initialize_generation_state(self, inputs: GenerateInput) -> GenerationState:
+        """Initializes the state for the generation process."""
+        kv_cache = self._prepare_kv_cache()
+        logits, current_seq_len = self._process_prompt(inputs, kv_cache)
+        return GenerationState(
+            all_generated_tokens=[],
+            current_seq_len=current_seq_len,
+            logits=logits,
+            kv_cache=kv_cache
+        )
+
+    def generate(self, inputs: GenerateInput) -> Generator[Tuple[np.ndarray, float], None, None]:
+        """Generates a sequence of tokens as a generator."""
+        self.eval()
+        state = self._initialize_generation_state(inputs)
+
+        while len(state.all_generated_tokens) < inputs.max_new_tokens:
             accepted = False
             for _ in range(inputs.max_retries):
-                attempt_cache = kv_cache.copy()
+                attempt_cache = state.kv_cache.copy()
 
-                speculative_chunk_input = self.SpeculativeChunkInput(
-                    temp_logits=logits,
+                speculative_chunk_input = SpeculativeChunkInput(
+                    temp_logits=state.logits,
                     kv_cache=attempt_cache,
-                    current_seq_len=current_seq_len,
-                    max_new_tokens=inputs.max_new_tokens - len(all_generated_tokens),
+                    current_seq_len=state.current_seq_len,
+                    max_new_tokens=inputs.max_new_tokens - len(state.all_generated_tokens),
                     speculative_steps=inputs.speculative_steps,
                     temperature=inputs.temperature,
                     top_k=inputs.top_k,
                     top_p=inputs.top_p,
                     dynamic_top_k=inputs.dynamic_top_k
                 )
-                chunk, temp_logits, final_value, surprise_value = self._generate_speculative_chunk(speculative_chunk_input)
-                surprise_history.append(surprise_value)
+                chunk, temp_logits, final_value, surprise = self._generate_speculative_chunk(speculative_chunk_input)
 
                 if final_value is not None and final_value.item() >= inputs.value_threshold:
-                    all_generated_tokens.extend(chunk)
-                    current_seq_len += len(chunk)
-                    logits = temp_logits
-                    kv_cache.restore(attempt_cache.snapshot())
+                    state.all_generated_tokens.extend(chunk)
+                    state.current_seq_len += len(chunk)
+                    state.logits = temp_logits
+                    state.kv_cache.restore(attempt_cache.snapshot())
                     accepted = True
-                    # Yield the generated chunk and the surprise value for this step
-                    yield np.array(chunk), surprise_value
+                    yield np.array(chunk), surprise
                     break
 
             if not accepted:
