@@ -21,7 +21,7 @@ class ForwardPassInput:
     kv_cache: 'KVCache' = None
     images: np.ndarray = None
     layer_idx: int = None
-    seq_offset: int = 0
+    dynamic_top_k: int = None
 
 
 # pylint: disable=too-many-instance-attributes
@@ -80,7 +80,7 @@ class DecoderBlock:
         x_norm1 = self.norm1.forward(x_with_mem)
 
         attn_output = self.mha.forward(x_norm1, mask=inputs.mask, kv_cache=inputs.kv_cache,
-                                       layer_idx=inputs.layer_idx, seq_offset=inputs.seq_offset)
+                                       layer_idx=inputs.layer_idx)
 
         # First residual connection
         x = inputs.x + self.dropout1.forward(attn_output)
@@ -88,7 +88,7 @@ class DecoderBlock:
         x_norm2 = self.norm2.forward(x)
 
         if self.use_moe:
-            ffn_output, aux_loss = self.moe_layer.forward(x_norm2)
+            ffn_output, aux_loss = self.moe_layer.forward(x_norm2, dynamic_top_k=inputs.dynamic_top_k)
         else:
             ffn_output = self.ffn.forward(x_norm2)
 

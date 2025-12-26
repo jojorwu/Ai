@@ -3,6 +3,7 @@ Tests for the main agent execution loop in generate.py.
 """
 import unittest
 from unittest.mock import MagicMock, Mock, patch
+import numpy as np
 
 import generate
 
@@ -28,15 +29,17 @@ class TestAgentExecution(unittest.TestCase):
         # Mock config and model loading
         mock_config.return_value.generation.max_turns = 5
         mock_config.return_value.generation.start_text = "Initial prompt"
-        mock_config.return_value.generation.context_window_size = 1024  # Fix TypeError
+        mock_config.return_value.generation.context_window_size = 1024
         mock_config.return_value.hardware.device = "cpu"
+        mock_config.return_value.dynamic_parameters = None  # Disable for this test
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.encode.return_value = [1, 2, 3]
         mock_tokenizer.decode.return_value = "This is the final answer."
 
         mock_model = MagicMock()
-        mock_model.generate.return_value = iter([4, 5, 6])
+        # Ensure the mock returns the expected (chunk, surprise_value) tuple format
+        mock_model.generate.return_value = iter([(np.array([4, 5, 6]), 0.5)])
 
         mock_load_model.return_value = (mock_model, mock_tokenizer)
 

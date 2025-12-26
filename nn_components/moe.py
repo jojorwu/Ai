@@ -48,12 +48,13 @@ class MixtureOfExperts:
         """
         return {}
 
-    def forward(self, x):
+    def forward(self, x, dynamic_top_k=None):
         """
         Forward pass through the MoE layer.
 
         Args:
             x (np.ndarray): Input tensor of shape (batch_size, seq_len, d_model).
+            dynamic_top_k (int, optional): If provided, overrides the default top_k for this pass.
 
         Returns:
             Tuple[np.ndarray, float]: Output tensor and auxiliary loss.
@@ -64,7 +65,8 @@ class MixtureOfExperts:
         router_logits = self.gate.forward(self.cache.x_reshaped)
         self.cache.router_weights = softmax(router_logits)
 
-        self.cache.top_k_indices = np.argsort(router_logits, axis=1)[:, -self.top_k:]
+        current_top_k = dynamic_top_k if dynamic_top_k is not None else self.top_k
+        self.cache.top_k_indices = np.argsort(router_logits, axis=1)[:, -current_top_k:]
         self.cache.top_k_mask = np.zeros_like(self.cache.router_weights)
         np.put_along_axis(self.cache.top_k_mask, self.cache.top_k_indices, 1, axis=1)
 

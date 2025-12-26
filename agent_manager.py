@@ -3,18 +3,26 @@ Implementation of the AgentManager class for managing the agent lifecycle.
 """
 import copy
 import logging
+from dataclasses import dataclass
 from typing import List
 
 from agent import Agent
 from backend import np
 from model import Transformer
-from tokenizer import Tokenizer
+
+
+@dataclass
+class SpecializationConfig:
+    """Configuration for the agent specialization process."""
+    full_data: list
+    seq_len: int
+    batch_size: int
+    steps_per_agent: int
 
 
 def get_agent_batches(data, batch_size, seq_len):
     """
     Simplified batch generator for agent specialization.
-    Unlike the main one, it doesn't shuffle and works with a single data chunk.
     """
     num_total_tokens = len(data)
     if num_total_tokens < seq_len:
@@ -50,45 +58,44 @@ class AgentManager:
 
     def fork_agents(self):
         """Creates (clones) a population of agents from the base model."""
-        logging.info(f"Cloning {self.num_agents} agents from the base model...")
+        logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
             agent = Agent(self.base_model, agent_id=f"agent_{i}")
             self.agents.append(agent)
         logging.info("Agents cloned successfully.")
 
-    def specialize_agents_on_dataset(self, full_data: list, tokenizer: Tokenizer,
-                                     seq_len: int, batch_size: int, steps_per_agent: int):
+    def specialize_agents_on_dataset(self, spec_config: SpecializationConfig):
         """
         Conducts a "specialization" phase where each agent is trained
         on a unique subset of the data.
         """
-        if not full_data:
+        if not spec_config.full_data:
             logging.warning("No data provided for agent specialization.")
             return
 
-        data_chunks = np.array_split(full_data, self.num_agents)
+        data_chunks = np.array_split(spec_config.full_data, self.num_agents)
 
         logging.info("Specializing agents on different data subsets...")
         for i, agent in enumerate(self.agents):
             agent_data = data_chunks[i]
             if len(agent_data) == 0:
-                logging.info(f"  - Skipping {agent.agent_id}, no data assigned.")
+                logging.info("  - Skipping %s, no data assigned.", agent.agent_id)
                 continue
 
-            logging.info(f"  - Specializing {agent.agent_id} on {len(agent_data)} items...")
+            logging.info("  - Specializing %s on %d items...", agent.agent_id, len(agent_data))
 
-            batch_generator = get_agent_batches(agent_data, batch_size, seq_len)
+            batch_generator = get_agent_batches(agent_data, spec_config.batch_size, spec_config.seq_len)
 
             steps_done = 0
             for x_batch, y_batch, image_batch in batch_generator:
-                if steps_done >= steps_per_agent:
+                if steps_done >= spec_config.steps_per_agent:
                     break
                 agent.experience(x_batch, y_batch, image_batch)
                 steps_done += 1
 
-            if steps_done < steps_per_agent:
-                logging.warning(f"    - Only {steps_done}/{steps_per_agent} steps were "
-                                f"performed for {agent.agent_id} due to insufficient data.")
+            if steps_done < spec_config.steps_per_agent:
+                logging.warning("    - Only %d/%d steps were performed for %s due to insufficient data.",
+                                steps_done, spec_config.steps_per_agent, agent.agent_id)
 
         logging.info("Agent specialization complete.")
 
@@ -100,7 +107,7 @@ class AgentManager:
             logging.warning("No best agents to merge.")
             return
 
-        logging.info(f"Merging LTM weights from {len(best_agents)} best agents...")
+        logging.info("Merging LTM weights from %d best agents...", len(best_agents))
 
         ltm_states = [agent.get_ltm_state() for agent in best_agents if agent.get_ltm_state() is not None]
         if not ltm_states:
@@ -108,25 +115,35 @@ class AgentManager:
             return
 
         avg_ltm_state = copy.deepcopy(ltm_states[0])
+        avg_ltm_state['memory_state'] = np.zeros_like(avg_ltm_state['memory_state'])
+        for layer_name in avg_ltm_state['children']:
+            avg_ltm_state['children'][layer_name]['weights'] = np.zeros_like(
+                avg_ltm_state['children'][layer_name]['weights'])
+            if 'bias' in avg_ltm_state['children'][layer_name]:
+                avg_ltm_state['children'][layer_name]['bias'] = np.zeros_like(
+                    avg_ltm_state['children'][layer_name]['bias'])
 
-        for layer_name in avg_ltm_state:
-            sum_w = sum(state[layer_name]['weights'] for state in ltm_states)
-            sum_b = sum(state[layer_name].get('bias', 0) for state in ltm_states)
+        for state in ltm_states:
+            avg_ltm_state['memory_state'] += state['memory_state']
+            for layer_name, layer_state in state['children'].items():
+                avg_ltm_state['children'][layer_name]['weights'] += layer_state['weights']
+                if 'bias' in layer_state:
+                    avg_ltm_state['children'][layer_name]['bias'] += layer_state.get('bias', 0)
 
-            avg_ltm_state[layer_name]['weights'] = sum_w / len(ltm_states)
-            if 'bias' in avg_ltm_state[layer_name]:
-                avg_ltm_state[layer_name]['bias'] = sum_b / len(ltm_states)
+        num_best_agents = len(ltm_states)
+        avg_ltm_state['memory_state'] /= num_best_agents
+        for layer_name in avg_ltm_state['children']:
+            avg_ltm_state['children'][layer_name]['weights'] /= num_best_agents
+            if 'bias' in avg_ltm_state['children'][layer_name]:
+                avg_ltm_state['children'][layer_name]['bias'] /= num_best_agents
 
         if self.base_model.long_term_memory:
             self.base_model.long_term_memory.set_state(avg_ltm_state)
             logging.info("Base model's LTM has been updated with merged weights.")
 
-    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
-    def collaborative_evaluation(self, evaluation_data: list,
-                                 tokenizer: Tokenizer, top_k: int) -> List[Agent]:
+    def collaborative_evaluation(self, evaluation_data, tokenizer, top_k):
         """
-        Evaluates agents with a nuanced scoring system that rewards independent success
-        and penalizes failure and bad help, based on peer critique.
+        Evaluates agents with a nuanced scoring system.
         """
         if not self.agents or len(self.agents) < 2:
             logging.warning("Collaborative evaluation requires at least 2 agents.")
@@ -158,7 +175,7 @@ class AgentManager:
                     if helper.agent_id == proposer.agent_id:
                         continue
 
-                    context = list(prompt_tokens) + proposer_response
+                    context = list(prompt_tokens) + proposer_response.tolist()
                     helper_response = helper.generate_response(np.array(context), prompt_image)
 
                     critics_for_helper = [a for a in self.agents if
@@ -195,5 +212,5 @@ class AgentManager:
         sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
         logging.info("  - Collaborative Evaluation Fitness scores:")
         for agent in sorted_agents:
-            logging.info(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
+            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
         return sorted_agents[:top_k]

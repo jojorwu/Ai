@@ -46,6 +46,7 @@ class MultiHeadAttention:
         self.x_input = None
         self.q_proj_rotary = None
         self.k_proj_rotary = None
+        self.seq_offset = 0
 
     def get_children(self):
         """Returns a dictionary of child layers for parameter traversal."""
@@ -89,22 +90,21 @@ class MultiHeadAttention:
             return q_rotary, k_rotary
         return q_proj, k_proj
 
-    def _get_cached_kv(self, k_rotary, v_proj, kv_cache, layer_idx, seq_offset):
-        """Updates and retrieves KV from cache if available."""
-        if kv_cache is not None:
-            seq_len = k_rotary.shape[2]
-            kv_cache.update(k_rotary, v_proj, layer_idx, seq_offset)
-            return kv_cache.get(layer_idx, seq_offset + seq_len)
-        return k_rotary, v_proj
-
-    def forward(self, x, mask=None, kv_cache=None, layer_idx=None, seq_offset=0):
+    def forward(self, x, mask=None, kv_cache=None, layer_idx=None):
         """Performs the forward pass of the GQA layer."""
         self.x_input = x
+        self.seq_offset = kv_cache.current_pos if kv_cache is not None else 0
+
         q_proj, k_proj, v_proj = self._project_qkv(x)
         self.q_proj_rotary, self.k_proj_rotary = self._apply_rotary_embeddings(
-            q_proj, k_proj, seq_offset)
-        k_cached, v_cached = self._get_cached_kv(
-            self.k_proj_rotary, v_proj, kv_cache, layer_idx, seq_offset)
+            q_proj, k_proj, self.seq_offset)
+
+        if kv_cache is not None:
+            kv_cache.update(self.k_proj_rotary, v_proj, layer_idx)
+            k_cached, v_cached = kv_cache.get(layer_idx)
+        else:
+            k_cached, v_cached = self.k_proj_rotary, v_proj
+
         k_repeated = self._repeat_kv(k_cached, self.num_q_per_kv)
         v_repeated = self._repeat_kv(v_cached, self.num_q_per_kv)
         attention_output = self.attention.forward(
@@ -128,11 +128,21 @@ class MultiHeadAttention:
         if self.rotary_emb is not None:
             cos, sin = self.rotary_emb
             seq_len = self.q_proj_rotary.shape[2]
-            cos = cos[:, :, :seq_len, :]
-            sin = sin[:, :, :seq_len, :]
+            cos = cos[:, :, self.seq_offset:self.seq_offset + seq_len, :]
+            sin = sin[:, :, self.seq_offset:self.seq_offset + seq_len, :]
             dq_proj = rotary_backward(dq_rotary, self.q_proj_rotary, cos, sin)
-            dk_proj = rotary_backward(dk_cached, self.k_proj_rotary, cos, sin)
+
+            # With KV cache, the gradient dk_cached is for the whole sequence, while k_proj_rotary
+            # is only for the new tokens. We apply rotary backward only to the part of the gradient
+            # that corresponds to the new tokens, as that is what qkv_proj processed.
+            if dk_cached.shape[2] != seq_len:
+                dk_cached_new = dk_cached[:, :, -seq_len:, :]
+            else:
+                dk_cached_new = dk_cached
+
+            dk_proj = rotary_backward(dk_cached_new, self.k_proj_rotary, cos, sin)
             return dq_proj, dk_proj
+
         return dq_rotary, dk_cached
 
     def backward(self, dout):

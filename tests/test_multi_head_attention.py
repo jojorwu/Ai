@@ -8,7 +8,7 @@ from backend import np
 from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import precompute_rope_embeddings
-from tests.gradient_check import check_gradient, numerical_gradient
+from gradient_check import check_gradient, numerical_gradient
 
 
 class TestMultiHeadAttention(unittest.TestCase):

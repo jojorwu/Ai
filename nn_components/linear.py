@@ -1,32 +1,27 @@
 """
 Module containing the linear layer.
 """
-import numpy as np
+from backend import np
+from quantization import dequantize, quantize
 
 
 class Linear:
     """
-    A fully connected (linear) layer with an optional bias.
+    A fully connected (linear) layer with optional bias and weight quantization.
     """
     def __init__(self, input_dim, output_dim, bias=True):
-        """
-        Initializes the layer.
-        Args:
-            input_dim (int): Input dimension.
-            output_dim (int): Output dimension.
-            bias (bool): Whether to use a bias vector.
-        """
         self.use_bias = bias
-        self.weights = np.random.randn(input_dim, output_dim) * 0.02
-        self.bias = np.zeros(output_dim) if self.use_bias else None
-
+        self.weights = np.random.randn(input_dim, output_dim).astype(np.float32) * 0.02
+        self.bias = np.zeros(output_dim, dtype=np.float32) if self.use_bias else None
+        self.quantized_weights = None
+        self.weight_scale = None
         self.x = None
         self.dweights = None
         self.dbias = None
 
     def special_residual_init(self, num_layers):
         """Special initialization for residual connections, as in GPT-2."""
-        self.weights = np.random.randn(*self.weights.shape) * 0.02 / np.sqrt(2 * num_layers)
+        self.weights = np.random.randn(*self.weights.shape).astype(np.float32) * 0.02 / np.sqrt(2 * num_layers)
 
     def get_trainable_params(self):
         """Returns a dictionary of trainable parameters and their gradients."""
@@ -42,7 +37,8 @@ class Linear:
     def forward(self, x):
         """Forward pass."""
         self.x = x
-        output = self.x @ self.weights
+        weights = dequantize(self.quantized_weights, self.weight_scale) if self.quantized_weights is not None else self.weights
+        output = self.x @ weights
         if self.use_bias:
             output += self.bias
         return output
@@ -53,6 +49,7 @@ class Linear:
         x_reshaped = self.x.reshape(-1, original_shape[-1])
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
+        weights = dequantize(self.quantized_weights, self.weight_scale) if self.quantized_weights is not None else self.weights
         dweights = x_reshaped.T @ dout_reshaped
         if self.dweights is None:
             self.dweights = dweights
@@ -66,7 +63,7 @@ class Linear:
             else:
                 self.dbias += dbias
 
-        dx = dout_reshaped @ self.weights.T
+        dx = dout_reshaped @ weights.T
         return dx.reshape(original_shape)
 
     def get_state(self):
@@ -81,3 +78,9 @@ class Linear:
         self.weights = state['weights']
         if self.use_bias and 'bias' in state:
             self.bias = state['bias']
+
+    def quantize_weights(self):
+        """Quantizes the weights and removes the float32 version to save memory."""
+        if self.weights is not None:
+            self.quantized_weights, self.weight_scale, _ = quantize(self.weights)
+            self.weights = None  # Free up memory

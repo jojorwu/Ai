@@ -11,8 +11,10 @@ from utils import zero_gradients
 class LongTermMemory:
     """
     The long-term memory module, implemented as a multilayer perceptron (MLP).
+    It maintains an internal memory state that can be updated and retrieved.
     """
     def __init__(self, d_model, d_hidden, num_layers):
+        self.d_model = d_model
         self.layers = []
         # Input layer
         self.layers.append(Linear(d_model, d_hidden))
@@ -24,6 +26,9 @@ class LongTermMemory:
         # Output layer
         self.layers.append(Linear(d_hidden, d_model))
 
+        # Initialize memory state
+        self.memory_state = np.zeros((1, 1, self.d_model))
+
     def get_children(self):
         """Returns a dictionary of child layers."""
         children = {}
@@ -33,10 +38,17 @@ class LongTermMemory:
         return children
 
     def forward(self, x):
-        """Forward pass through the MLP."""
+        """
+        Forward pass through the MLP. Updates the internal memory state and returns it.
+        """
         for layer in self.layers:
             x = layer.forward(x)
+        self.memory_state = x  # Update the memory state
         return x
+
+    def retrieve_memory(self):
+        """Returns the current memory state."""
+        return self.memory_state
 
     def backward(self, dout):
         """Backward pass through the MLP."""
@@ -69,17 +81,22 @@ class LongTermMemory:
         zero_gradients(self)
 
     def get_state(self):
-        """Collects the state (weights) of all trainable layers."""
-        state = {}
+        """Collects the state (weights and memory_state) of the LTM."""
+        state = {'memory_state': self.memory_state}
+        children_state = {}
         for name, layer in self.get_children().items():
-            state[name] = layer.get_state()
+            children_state[name] = layer.get_state()
+        state['children'] = children_state
         return state
 
     def set_state(self, state):
-        """Loads the state (weights) for all trainable layers."""
+        """Loads the state (weights and memory_state) for the LTM."""
+        self.memory_state = state.get('memory_state', np.zeros((1, 1, self.d_model)))
+        children_state = state.get('children', {})
         for name, layer in self.get_children().items():
-            if name in state:
-                layer.set_state(state[name])
+            if name in children_state:
+                layer.set_state(children_state[name])
+
 
     def reinitialize_weights(self):
         """Reinitializes the weights of all linear layers."""

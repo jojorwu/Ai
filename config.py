@@ -2,7 +2,7 @@
 Pydantic models for strong typing and validation of the project configuration.
 """
 import json
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -12,19 +12,14 @@ class ModelConfig(BaseModel):
     d_model: int = Field(..., description="Dimensionality of the model's vectors.")
     num_layers: int = Field(..., description="Number of layers in the encoder and decoder.")
     num_heads: int = Field(..., description="Number of heads in Multi-Head Attention.")
-    num_kv_heads: int = Field(...,
-                                description="Number of heads for Key/Value in Grouped-Query Attention.")
+    num_kv_heads: int = Field(..., description="Number of heads for Key/Value in Grouped-Query Attention.")
     d_ff: int = Field(..., description="Dimensionality in Feed-Forward layers.")
     max_seq_len: int = Field(..., description="Maximum sequence length.")
     dropout_rate: float = Field(..., description="Dropout probability.")
     ltm_d_hidden: Optional[int] = Field(None, description="Dimensionality of the hidden layer in LTM.")
     ltm_num_layers: Optional[int] = Field(None, description="Number of layers in LTM.")
     num_experts: Optional[int] = Field(None, description="Number of 'experts' in the MoE layer.")
-    top_k_experts: Optional[int] = Field(None,
-                                       description="Number of 'experts' to select for each token.")
-
-
-from typing import Any, Tuple
+    top_k_experts: Optional[int] = Field(None, description="Number of 'experts' to select for each token.")
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -73,25 +68,20 @@ class VisionConfig(BaseModel):
 
 class EvolutionConfig(BaseModel):
     """Configuration for the evolutionary training process."""
-    pretrain_epochs: int = Field(...,
-                                 description="Number of epochs for initial pre-training of the base model.")
-    evolution_epochs: int = Field(..., description="Number of evolution cycles (generations) for agents.")
+    pretrain_epochs: int = Field(..., description="Number of epochs for initial pre-training.")
+    evolution_epochs: int = Field(..., description="Number of evolution cycles (generations).")
     num_agents: int = Field(..., description="Number of agents in a single population.")
-    num_survivors: int = Field(...,
-                                 description="Number of best agents whose LTMs will be merged.")
+    num_survivors: int = Field(..., description="Number of best agents whose LTMs will be merged.")
     batch_size: int = Field(..., description="Size of a single batch.")
     seq_len: int = Field(..., description="Sequence length for training.")
-    gradient_accumulation_steps: int = Field(...,
-                                               description="Number of steps to accumulate gradients.")
+    gradient_accumulation_steps: int = Field(..., description="Number of steps to accumulate gradients.")
     validation_split: float = Field(..., description="Fraction of data to use for validation.")
     data_dir: str = Field(..., description="Directory with training data.")
     weights_path: str = Field(..., description="Path to save the final model weights.")
     checkpoint_path: Optional[str] = Field(None, description="Path to save checkpoints.")
-    early_stopping_patience: int = Field(3,
-                                         description="Number of epochs without improvement for early stopping.")
+    early_stopping_patience: int = Field(3, description="Epochs without improvement for early stopping.")
     best_model_path: str = Field("best_model.npz", description="Path to save the best model.")
-    moe_aux_loss_coeff: float = Field(0.01,
-                                      description="Coefficient for the MoE auxiliary 'balancing' loss.")
+    moe_aux_loss_coeff: float = Field(0.01, description="Coefficient for the MoE auxiliary loss.")
 
 
 class OptimizerConfig(BaseModel):
@@ -133,20 +123,25 @@ class GenerationConfig(BaseModel):
     top_k: int = Field(..., description="Top-k for sampling.")
     top_p: float = Field(..., description="Top-p (nucleus) for sampling.")
     speculative_steps: int = Field(..., description="Number of speculative steps.")
-    value_threshold: float = Field(...,
-                                     description="Value threshold for accepting speculative generation.")
+    value_threshold: float = Field(..., description="Value threshold for accepting speculative generation.")
     max_thought_len: int = Field(..., description="Maximum length of 'thoughts'.")
     max_retries: int = Field(..., description="Maximum number of retries on failed speculation.")
-    max_turns: int = Field(10,
-                             description="Maximum number of iterations (tool calls) in the agent loop.")
-    context_window_size: int = Field(2048,
-                                       description="The number of tokens to retain in the conversation history.")
+    max_turns: int = Field(10, description="Maximum number of iterations in the agent loop.")
+    context_window_size: int = Field(2048, description="The number of tokens to retain in history.")
 
 
 class HardwareConfig(BaseModel):
     """Hardware configuration."""
-    device: Literal["cpu", "gpu", "mps"] = Field("cpu",
-                                                  description="Device for computations (cpu, gpu, mps).")
+    device: Literal["cpu", "gpu", "mps"] = Field("cpu", description="Device for computations (cpu, gpu, mps).")
+
+
+class DynamicParametersConfig(BaseModel):
+    """Configuration for dynamic parameter allocation."""
+    medium_complexity_threshold: float = Field(..., description="Surprise threshold to switch to medium complexity.")
+    high_complexity_threshold: float = Field(..., description="Surprise threshold to switch to high complexity.")
+    low_complexity_top_k: int = Field(..., description="Top-k experts for low complexity tasks.")
+    medium_complexity_top_k: int = Field(..., description="Top-k experts for medium complexity tasks.")
+    high_complexity_top_k: int = Field(..., description="Top-k experts for high complexity tasks.")
 
 
 class Config(BaseModel):
@@ -159,6 +154,7 @@ class Config(BaseModel):
     scheduler: SchedulerConfig
     generation: GenerationConfig
     hardware: HardwareConfig
+    dynamic_parameters: Optional[DynamicParametersConfig] = None
 
     @classmethod
     def from_json(cls, file_path: str) -> 'Config':
