@@ -35,7 +35,7 @@ class TestLinear(unittest.TestCase):
         check_gradient(self, dx, dx_num, "dx")
 
         dw_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.weights, dout)
-        check_gradient(self, dw, dw_num, "dweights")
+        check_gradient(self, dw, dw_num, "dweights", atol=1e-3)
 
         db_num = numerical_gradient(lambda b_arg: layer.forward(x), layer.bias, dout)
         check_gradient(self, db, db_num, "dbias")

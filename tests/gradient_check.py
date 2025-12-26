@@ -1,44 +1,41 @@
 """
-Utilities for numerical gradient checking in tests.
+This module provides functions for numerical gradient checking.
 """
 import logging
 
-import numpy as np
+from backend import np
 
 
-def check_gradient(test_case, analytical_grad, numerical_grad, name):
-    """Compares analytical and numerical gradients."""
-    is_close = np.allclose(analytical_grad, numerical_grad, rtol=1e-4, atol=1e-4)
+def check_gradient(test_case, analytical_grad, numerical_grad, name, atol=1e-4, rtol=1e-5):
+    """
+    Checks if the analytical and numerical gradients are close.
+    """
+    is_close = np.allclose(analytical_grad, numerical_grad, atol=atol, rtol=rtol)
     if not is_close:
         logging.error("Gradient check for %s FAILED", name)
         logging.error("Analytical grad: %s", analytical_grad)
         logging.error("Numerical grad: %s", numerical_grad)
-        logging.error("Difference: %s", np.abs(analytical_grad - numerical_grad))
+        logging.error("Difference: %s", analytical_grad - numerical_grad)
     test_case.assertTrue(is_close, f"Gradient check for {name} FAILED")
-    logging.info("Gradient check for %s PASSED.", name)
 
 
-def numerical_gradient(model_forward, param, dout, epsilon=1e-5):
+def numerical_gradient(model_forward, weights, dout, epsilon=1e-5):
     """
-    Computes the numerical gradient for a parameter `param` using
-    the forward pass function `model_forward`.
+    Computes the numerical gradient of a model's forward pass.
     """
-    grad_numerical = np.zeros_like(param)
-    it = np.nditer(param, flags=['multi_index'], op_flags=['readwrite'])
+    grad = np.zeros_like(weights)
+    it = np.nditer(weights, flags=['multi_index'], op_flags=['readwrite'])
     while not it.finished:
-        ix = it.multi_index
-        original_value = param[ix]
+        idx = it.multi_index
+        old_value = weights[idx]
 
-        param[ix] = original_value + epsilon
-        # Pass the perturbed parameter to the forward function
-        fx_plus_h = np.sum(model_forward(param) * dout)
+        weights[idx] = old_value + epsilon
+        pos_loss = np.sum(model_forward(weights) * dout)
 
-        param[ix] = original_value - epsilon
-        # Pass the perturbed parameter to the forward function
-        fx_minus_h = np.sum(model_forward(param) * dout)
+        weights[idx] = old_value - epsilon
+        neg_loss = np.sum(model_forward(weights) * dout)
 
-        grad_numerical[ix] = (fx_plus_h - fx_minus_h) / (2 * epsilon)
-
-        param[ix] = original_value
+        grad[idx] = (pos_loss - neg_loss) / (2 * epsilon)
+        weights[idx] = old_value
         it.iternext()
-    return grad_numerical
+    return grad

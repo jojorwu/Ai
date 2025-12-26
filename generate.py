@@ -122,6 +122,7 @@ def load_model_and_tokenizer(model_name: str, config: Config) -> Tuple[Transform
     model = Transformer.load_model(weights_path, tokenizer.vocab_size, config, tokenizer)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
+    model.quantize_model()
     return model, tokenizer
 
 

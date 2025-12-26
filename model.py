@@ -240,6 +240,14 @@ class Transformer:
         logging.info("Model weights loaded from %s", filepath)
         return model
 
+    def quantize_model(self):
+        """Quantizes all Linear layers in the model, except for the LTM."""
+        logging.info("Quantizing model weights to int8...")
+        for name, layer in self.get_named_params().items():
+            if 'long_term_memory' not in name and hasattr(layer, 'quantize_weights'):
+                layer.quantize_weights()
+        logging.info("Model quantization complete.")
+
     def _get_embeddings(self, inputs: ForwardPassInput):
         """Gets text and image embeddings."""
         text_embeddings = self.embedding.forward(inputs.x) * np.sqrt(self.d_model)
@@ -266,7 +274,9 @@ class Transformer:
         """Runs the forward pass through the decoder stack."""
         ltm_state_for_blocks = 0
         if self.long_term_memory:
-            memory_context = self.long_term_memory.retrieve_memory()
+            # The LTM processes the mean of the input embeddings to generate context for the decoder stack.
+            ltm_input = np.mean(h, axis=1, keepdims=True)
+            memory_context = self.long_term_memory.forward(ltm_input)
             h = np.concatenate([memory_context, h], axis=1)
             ltm_state_for_blocks = memory_context
 
@@ -321,8 +331,11 @@ class Transformer:
             d_ltm_input = self.long_term_memory.backward(total_d_ltm_state)
             _, seq_len, _ = dx.shape
             dx += d_ltm_input / seq_len
+            dx_for_embedding = dx[:, 1:, :]
+        else:
+            dx_for_embedding = dx
 
-        self.embedding.backward(dx * np.sqrt(self.d_model))
+        self.embedding.backward(dx_for_embedding * np.sqrt(self.d_model))
         self.embedding.dweights += d_embedding_w_from_output
         return dx
 

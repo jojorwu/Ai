@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from backend import np
 from model import GenerateInput, Transformer
+from nn_components.decoder_block import ForwardPassInput
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
 
@@ -42,9 +43,26 @@ class Agent:
         self.model.train()
         self.model.zero_grad()
 
-        logits, values, _ = self.model.forward(x_batch, images=image_batch)
-        _ = self.loss_fn.forward(logits, y_batch)
-        dlogits = self.loss_fn.backward()
+        forward_pass_input = ForwardPassInput(x=x_batch, images=image_batch, ltm_state=0)
+        logits, values, _ = self.model.forward(forward_pass_input)
+
+        # Slice logits to match target length if LTM is used, as LTM prepends a context token
+        if self.model.long_term_memory:
+            logits_for_loss = logits[:, 1:, :]
+        else:
+            logits_for_loss = logits
+
+        _ = self.loss_fn.forward(logits_for_loss, y_batch)
+        dlogits_from_loss = self.loss_fn.backward()
+
+        # Pad dlogits if LTM was used, to match the original logit shape
+        if self.model.long_term_memory:
+            batch_size, _, vocab_size = logits.shape
+            padding = np.zeros((batch_size, 1, vocab_size), dtype=dlogits_from_loss.dtype)
+            dlogits = np.concatenate([padding, dlogits_from_loss], axis=1)
+        else:
+            dlogits = dlogits_from_loss
+
         dvalues = np.ones_like(values)
         self.model.backward(dlogits, dvalues)
 
