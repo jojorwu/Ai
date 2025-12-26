@@ -5,9 +5,9 @@ import logging
 import unittest
 
 import numpy as np
+from gradient_check import check_gradient, numerical_gradient
 
 from nn_components.linear import Linear
-from gradient_check import check_gradient, numerical_gradient
 
 
 class TestLinear(unittest.TestCase):

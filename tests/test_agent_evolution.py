@@ -83,17 +83,25 @@ class TestAgentEvolution(unittest.TestCase):
             with self.subTest(scenario=scenario_name):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
-                def mock_generate(model_self, inputs, details=details,
-                                  agent_manager=agent_manager):
-                    agent_id = next(agent.agent_id for agent in agent_manager.agents
+                def mock_generate(model_self, inputs, details_arg=None,
+                                  agent_manager_arg=None):
+                    if details_arg is None:
+                        details_arg = details
+                    if agent_manager_arg is None:
+                        agent_manager_arg = agent_manager
+                    agent_id = next(agent.agent_id
+                                    for agent in agent_manager_arg.agents
                                     if agent.model is model_self)
-                    response_chunk = np.array(details['agents_setup'][agent_id]['response'])
+                    response_chunk = np.array(
+                        details_arg['agents_setup'][agent_id]['response'])
                     yield response_chunk, 0.5
 
-                def mock_critique_response(_, __, ___, response, details=details):
-                    if (details['agents_setup']['agent_0']['response'][0]
-                            == tokenizer.char_to_idx['<ASK_FOR_HELP>']):
-                        return details['agents_setup']['agent_1']['critique_score']
+                def mock_critique_response(_, __, ___, response, details_arg=None):
+                    if details_arg is None:
+                        details_arg = details
+                    if (details_arg['agents_setup']['agent_0']['response'][0] ==
+                            tokenizer.char_to_idx['<ASK_FOR_HELP>']):
+                        return details_arg['agents_setup']['agent_1']['critique_score']
 
                     for setup in details['agents_setup'].values():
                         if np.array_equal(setup['response'], response):

@@ -85,58 +85,76 @@ class GenerationState:
     kv_cache: KVCache
 
 
-# pylint: disable=too-many-instance-attributes
+@dataclass
+class ModelConfig:
+    """Groups model-specific configuration."""
+    vocab_size: int
+    d_model: int
+    num_layers: int
+    num_heads: int
+    num_kv_heads: int
+    d_ff: int
+    max_seq_len: int
+    dropout_rate: float
+    ltm_d_hidden: int
+    ltm_num_layers: int
+    num_experts: int
+    top_k_experts: int
+
+
 class Transformer:
     """
     Full GPT-style (decoder-only) Transformer model.
     """
 
-    def __init__(self, vocab_size, model_config, vision_config, ltm_config=None, tokenizer=None):
-        self.vocab_size = vocab_size
-        self.d_model = model_config.d_model
-        self.num_layers = model_config.num_layers
-        self.num_heads = model_config.num_heads
-        self.num_kv_heads = model_config.num_kv_heads
-        self.d_ff = model_config.d_ff
-        self.max_seq_len = model_config.max_seq_len
-        self.dropout_rate = model_config.dropout_rate
+    def __init__(self, vocab_size, model_config, vision_config,
+                 ltm_config=None, tokenizer=None):
+        self.config = ModelConfig(vocab_size=vocab_size, **model_config.model_dump())
         self.ltm_config = ltm_config
-        self._flat_params_cache = None
         self.tokenizer = tokenizer
+        self._flat_params_cache = None
 
-        d_k = self.d_model // self.num_heads
-        self.rotary_emb = precompute_rope_embeddings(d_k, self.max_seq_len)
-        self.embedding = Embedding(vocab_size, self.d_model)
-        self.vision_encoder = VisionEncoder(d_model=self.d_model,
-                                            patch_size=vision_config.patch_size,
-                                            num_channels=vision_config.num_channels)
+        d_k = self.config.d_model // self.config.num_heads
+        self.rotary_emb = precompute_rope_embeddings(d_k, self.config.max_seq_len)
+        self.embedding = Embedding(self.config.vocab_size, self.config.d_model)
+        self.vision_encoder = VisionEncoder(
+            d_model=self.config.d_model,
+            patch_size=vision_config.patch_size,
+            num_channels=vision_config.num_channels
+        )
 
         self.long_term_memory = None
-        if model_config.ltm_d_hidden and model_config.ltm_num_layers and ltm_config:
-            self.long_term_memory = LongTermMemory(self.d_model, model_config.ltm_d_hidden,
-                                                   model_config.ltm_num_layers)
-            self.ltm_optimizer = Adam(ltm_config.optimizer)
-            self.ltm_surprise_threshold = ltm_config.surprise_threshold
-        else:
-            self.long_term_memory = None
+        if self.config.ltm_d_hidden and self.config.ltm_num_layers and self.ltm_config:
+            self.long_term_memory = LongTermMemory(
+                self.config.d_model, self.config.ltm_d_hidden,
+                self.config.ltm_num_layers
+            )
+            self.ltm_optimizer = Adam(self.ltm_config.optimizer)
+            self.ltm_surprise_threshold = self.ltm_config.surprise_threshold
 
-        block_config = DecoderBlockConfig(
-            d_model=self.d_model,
-            num_heads=self.num_heads,
-            d_ff=self.d_ff,
-            dropout_rate=self.dropout_rate,
-            num_kv_heads=self.num_kv_heads,
-            rotary_emb=self.rotary_emb,
-            num_layers=self.num_layers,
-            long_term_memory=self.long_term_memory,
-            num_experts=model_config.num_experts,
-            top_k_experts=model_config.top_k_experts
-        )
-        self.decoder_blocks = [DecoderBlock(block_config) for _ in range(self.num_layers)]
-        self.final_norm = RMSNorm(self.d_model)
-        self.value_head_linear = Linear(self.d_model, 1, bias=False)
+        block_config = self._create_block_config()
+        self.decoder_blocks = [
+            DecoderBlock(block_config) for _ in range(self.config.num_layers)
+        ]
+        self.final_norm = RMSNorm(self.config.d_model)
+        self.value_head_linear = Linear(self.config.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
         self.final_norm_output = None
+
+    def _create_block_config(self) -> DecoderBlockConfig:
+        """Helper method to create the DecoderBlockConfig."""
+        return DecoderBlockConfig(
+            d_model=self.config.d_model,
+            num_heads=self.config.num_heads,
+            d_ff=self.config.d_ff,
+            dropout_rate=self.config.dropout_rate,
+            num_kv_heads=self.config.num_kv_heads,
+            rotary_emb=self.rotary_emb,
+            num_layers=self.config.num_layers,
+            long_term_memory=self.long_term_memory,
+            num_experts=self.config.num_experts,
+            top_k_experts=self.config.top_k_experts
+        )
 
     def get_children(self):
         """Returns a dictionary of child layers."""
@@ -250,7 +268,8 @@ class Transformer:
 
     def _get_embeddings(self, inputs: ForwardPassInput):
         """Gets text and image embeddings."""
-        text_embeddings = self.embedding.forward(inputs.x) * np.sqrt(self.d_model)
+        text_embeddings = self.embedding.forward(inputs.x) * \
+                          np.sqrt(self.config.d_model)
         if inputs.images is None or self.tokenizer is None:
             return text_embeddings
         image_token_id = self.tokenizer.char_to_idx.get('<IMAGE>')
@@ -308,8 +327,8 @@ class Transformer:
 
     def backward(self, dlogits, dvalue):
         """Performs the backward pass of the model."""
-        x_norm_reshaped = self.final_norm_output.reshape(-1, self.d_model)
-        dlogits_reshaped = dlogits.reshape(-1, self.vocab_size)
+        x_norm_reshaped = self.final_norm_output.reshape(-1, self.config.d_model)
+        dlogits_reshaped = dlogits.reshape(-1, self.config.vocab_size)
         d_embedding_w_from_output = dlogits_reshaped.T @ x_norm_reshaped
 
         dvalue_hidden = self.value_head_activation.backward(dvalue)
@@ -335,7 +354,8 @@ class Transformer:
         else:
             dx_for_embedding = dx
 
-        self.embedding.backward(dx_for_embedding * np.sqrt(self.d_model))
+        self.embedding.backward(dx_for_embedding *
+                                np.sqrt(self.config.d_model))
         self.embedding.dweights += d_embedding_w_from_output
         return dx
 
@@ -389,13 +409,13 @@ class Transformer:
 
     def _prepare_kv_cache(self) -> KVCache:
         """Initializes the KV cache for generation."""
-        d_k = self.d_model // self.num_heads
+        d_k = self.config.d_model // self.config.num_heads
         return KVCache(KVCacheConfig(
-            num_layers=self.num_layers,
+            num_layers=self.config.num_layers,
             batch_size=1,
-            num_kv_heads=self.num_kv_heads,
+            num_kv_heads=self.config.num_kv_heads,
             d_k=d_k,
-            max_seq_len=self.max_seq_len
+            max_seq_len=self.config.max_seq_len
         ))
 
     def _process_prompt(self, inputs: GenerateInput, kv_cache: KVCache) -> Tuple[np.ndarray, int]:

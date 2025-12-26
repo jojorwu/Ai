@@ -33,19 +33,29 @@ class DecoderBlock:
     def __init__(self, config: 'DecoderBlockConfig'):
         self.config = config
 
-        mha_config = MultiHeadAttentionConfig(d_model=config.d_model, num_heads=config.num_heads,
-                                              num_kv_heads=config.num_kv_heads, rotary_emb=config.rotary_emb,
-                                              num_layers=config.num_layers)
+        mha_config = MultiHeadAttentionConfig(
+            d_model=config.d_model,
+            num_heads=config.num_heads,
+            num_kv_heads=config.num_kv_heads,
+            rotary_emb=config.rotary_emb,
+            num_layers=config.num_layers
+        )
         self.mha = MultiHeadAttention(mha_config)
         self.ltm = config.long_term_memory
 
-        self.use_moe = config.num_experts is not None and config.top_k_experts is not None
+        self.use_moe = (config.num_experts is not None and
+                        config.top_k_experts is not None)
         if self.use_moe:
-            self.moe_layer = MixtureOfExperts(MoEConfig(d_model=config.d_model, d_ff=config.d_ff,
-                                                       num_experts=config.num_experts,
-                                                       top_k=config.top_k_experts))
+            moe_config = MoEConfig(
+                d_model=config.d_model,
+                d_ff=config.d_ff,
+                num_experts=config.num_experts,
+                top_k=config.top_k_experts
+            )
+            self.moe_layer = MixtureOfExperts(moe_config)
         else:
-            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False, num_layers=config.num_layers)
+            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False,
+                                   num_layers=config.num_layers)
 
         self.norm1 = RMSNorm(config.d_model)
         self.norm2 = RMSNorm(config.d_model)

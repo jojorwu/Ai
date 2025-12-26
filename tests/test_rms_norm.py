@@ -5,9 +5,9 @@ import logging
 import unittest
 
 import numpy as np
+from gradient_check import check_gradient, numerical_gradient
 
 from nn_components.rms_norm import RMSNorm
-from gradient_check import check_gradient, numerical_gradient
 
 
 class TestRMSNorm(unittest.TestCase):

@@ -27,8 +27,10 @@ class ScaledDotProductAttention:
         if mask is not None:
             scaled_attention_logits += (mask * -1e9)
 
-        exp_logits = np.exp(scaled_attention_logits - np.max(scaled_attention_logits, axis=-1, keepdims=True))
-        self.attention_weights = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+        max_logits = np.max(scaled_attention_logits, axis=-1, keepdims=True)
+        exp_logits = np.exp(scaled_attention_logits - max_logits)
+        sum_exp_logits = np.sum(exp_logits, axis=-1, keepdims=True)
+        self.attention_weights = exp_logits / sum_exp_logits
 
         return np.matmul(self.attention_weights, v)
 
@@ -38,7 +40,8 @@ class ScaledDotProductAttention:
         dv = np.matmul(self.attention_weights.swapaxes(-2, -1), dout)
 
         s = self.attention_weights
-        ds = s * (d_attention_weights - np.sum(d_attention_weights * s, axis=-1, keepdims=True))
+        sum_ds = np.sum(d_attention_weights * s, axis=-1, keepdims=True)
+        ds = s * (d_attention_weights - sum_ds)
 
         d_k = self.k.shape[-1]
         d_matmul_qk = ds / np.sqrt(d_k)

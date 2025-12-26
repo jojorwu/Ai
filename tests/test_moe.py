@@ -5,10 +5,10 @@ import logging
 import unittest
 
 import numpy as np
+from gradient_check import check_gradient, numerical_gradient
 
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
-from gradient_check import check_gradient, numerical_gradient
 
 
 class TestMoE(unittest.TestCase):

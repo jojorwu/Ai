@@ -21,7 +21,8 @@ class Linear:
 
     def special_residual_init(self, num_layers):
         """Special initialization for residual connections, as in GPT-2."""
-        self.weights = np.random.randn(*self.weights.shape).astype(np.float32) * 0.02 / np.sqrt(2 * num_layers)
+        factor = 0.02 / np.sqrt(2 * num_layers)
+        self.weights = np.random.randn(*self.weights.shape).astype(np.float32) * factor
 
     def get_trainable_params(self):
         """Returns a dictionary of trainable parameters and their gradients."""
@@ -37,7 +38,10 @@ class Linear:
     def forward(self, x):
         """Forward pass."""
         self.x = x
-        weights = dequantize(self.quantized_weights, self.weight_scale) if self.quantized_weights is not None else self.weights
+        if self.quantized_weights is not None:
+            weights = dequantize(self.quantized_weights, self.weight_scale)
+        else:
+            weights = self.weights
         output = self.x @ weights
         if self.use_bias:
             output += self.bias
@@ -49,7 +53,10 @@ class Linear:
         x_reshaped = self.x.reshape(-1, original_shape[-1])
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
-        weights = dequantize(self.quantized_weights, self.weight_scale) if self.quantized_weights is not None else self.weights
+        if self.quantized_weights is not None:
+            weights = dequantize(self.quantized_weights, self.weight_scale)
+        else:
+            weights = self.weights
         dweights = x_reshaped.T @ dout_reshaped
         if self.dweights is None:
             self.dweights = dweights

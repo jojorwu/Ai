@@ -3,8 +3,8 @@ Tests for the text generation functionality.
 """
 import unittest
 
-from config import Config
-from model import Transformer, GenerateInput
+from model import GenerateInput
+from tests.test_utils import create_test_model
 
 
 class TestGeneration(unittest.TestCase):
@@ -14,13 +14,7 @@ class TestGeneration(unittest.TestCase):
 
     def setUp(self):
         """Set up the test environment."""
-        self.config = Config.from_json('config.json')
-        self.model = Transformer(
-            vocab_size=50,
-            model_config=self.config.model,
-            vision_config=self.config.vision,
-            ltm_config=self.config.ltm
-        )
+        self.model, self.config = create_test_model(ltm=False)
 
     def test_generate_returns_result(self):
         """

@@ -5,11 +5,11 @@ import logging
 import unittest
 
 import numpy as np
+from gradient_check import check_gradient, numerical_gradient
 
 from nn_components.rotary_embedding import (apply_rotary_pos_emb,
                                             precompute_rope_embeddings,
                                             rotary_backward)
-from gradient_check import check_gradient, numerical_gradient
 
 
 class TestRotaryEmbedding(unittest.TestCase):

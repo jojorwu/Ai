@@ -4,9 +4,10 @@ Tests for the optimized FeedForward (SwiGLU) layer.
 import logging
 import unittest
 
+from gradient_check import check_gradient, numerical_gradient
+
 from backend import np
 from nn_components.feed_forward import FeedForward
-from gradient_check import check_gradient, numerical_gradient
 
 
 class TestFeedForward(unittest.TestCase):

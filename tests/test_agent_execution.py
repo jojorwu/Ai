@@ -3,6 +3,7 @@ Tests for the main agent execution loop in generate.py.
 """
 import unittest
 from unittest.mock import MagicMock, Mock, patch
+
 import numpy as np
 
 import generate

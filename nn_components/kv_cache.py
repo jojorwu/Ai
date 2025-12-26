@@ -23,8 +23,10 @@ class KVCache:
     """
     def __init__(self, config: KVCacheConfig):
         self.config = config
-        self.k_cache = np.zeros((config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k))
-        self.v_cache = np.zeros((config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k))
+        cache_shape = (config.num_layers, config.batch_size,
+                       config.num_kv_heads, config.max_seq_len, config.d_k)
+        self.k_cache = np.zeros(cache_shape)
+        self.v_cache = np.zeros(cache_shape)
         self.current_pos = 0
         self.is_filled = False
 
