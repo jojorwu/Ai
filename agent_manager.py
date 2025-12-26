@@ -107,15 +107,32 @@ class AgentManager:
             logging.warning("None of the best agents had a valid LTM state.")
             return
 
+        # Initialize the averaged state from a deep copy of the first agent's state
         avg_ltm_state = copy.deepcopy(ltm_states[0])
+        # Make sure to clear out the old values to properly accumulate
+        avg_ltm_state['memory_state'] = np.zeros_like(avg_ltm_state['memory_state'])
+        for layer_name in avg_ltm_state['children']:
+            avg_ltm_state['children'][layer_name]['weights'] = np.zeros_like(
+                avg_ltm_state['children'][layer_name]['weights'])
+            if 'bias' in avg_ltm_state['children'][layer_name]:
+                avg_ltm_state['children'][layer_name]['bias'] = np.zeros_like(
+                    avg_ltm_state['children'][layer_name]['bias'])
 
-        for layer_name in avg_ltm_state:
-            sum_w = sum(state[layer_name]['weights'] for state in ltm_states)
-            sum_b = sum(state[layer_name].get('bias', 0) for state in ltm_states)
+        # Sum up the states
+        for state in ltm_states:
+            avg_ltm_state['memory_state'] += state['memory_state']
+            for layer_name, layer_state in state['children'].items():
+                avg_ltm_state['children'][layer_name]['weights'] += layer_state['weights']
+                if 'bias' in layer_state:
+                    avg_ltm_state['children'][layer_name]['bias'] += layer_state.get('bias', 0)
 
-            avg_ltm_state[layer_name]['weights'] = sum_w / len(ltm_states)
-            if 'bias' in avg_ltm_state[layer_name]:
-                avg_ltm_state[layer_name]['bias'] = sum_b / len(ltm_states)
+        # Divide by the number of agents to get the average
+        num_best_agents = len(ltm_states)
+        avg_ltm_state['memory_state'] /= num_best_agents
+        for layer_name in avg_ltm_state['children']:
+            avg_ltm_state['children'][layer_name]['weights'] /= num_best_agents
+            if 'bias' in avg_ltm_state['children'][layer_name]:
+                avg_ltm_state['children'][layer_name]['bias'] /= num_best_agents
 
         if self.base_model.long_term_memory:
             self.base_model.long_term_memory.set_state(avg_ltm_state)

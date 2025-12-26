@@ -97,7 +97,6 @@ class Transformer:
         self.final_norm = RMSNorm(self.d_model)
         self.value_head_linear = Linear(self.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
-        self.initial_ltm_state = None
         self.final_norm_output = None
 
     def get_children(self):
@@ -228,16 +227,20 @@ class Transformer:
     def _run_decoder_stack(self, h, inputs: ForwardPassInput):
         """Runs the forward pass through the decoder stack."""
         if self.long_term_memory:
-            ltm_input = np.mean(h, axis=1, keepdims=True)
-            self.initial_ltm_state = self.long_term_memory.forward(ltm_input)
+            # Retrieve memory vector from LTM
+            memory_context = self.long_term_memory.retrieve_memory()
+            # Prepend the memory context to the input sequence
+            h = np.concatenate([memory_context, h], axis=1)
+            # The LTM state passed to decoder blocks is now the memory context itself
+            ltm_state_for_blocks = memory_context
         else:
-            self.initial_ltm_state = 0
-        current_ltm_state = self.initial_ltm_state
+            ltm_state_for_blocks = 0
+
         total_aux_loss = 0
         for i, block in enumerate(self.decoder_blocks):
             forward_pass_input = ForwardPassInput(
-                x=h, ltm_state=current_ltm_state, mask=inputs.mask,
-                kv_cache=inputs.kv_cache, layer_idx=i, seq_offset=inputs.seq_offset
+                x=h, ltm_state=ltm_state_for_blocks, mask=inputs.mask,
+                kv_cache=inputs.kv_cache, layer_idx=i
             )
             h, aux_loss = block.forward(forward_pass_input)
             total_aux_loss += aux_loss
@@ -246,9 +249,13 @@ class Transformer:
     # pylint: disable=too-many-arguments
     def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the model."""
+        # Get embeddings for the input tokens first
         h = self._get_embeddings(inputs)
+
+        # Now, run the decoder stack, which will prepend the memory context
         h, total_aux_loss = self._run_decoder_stack(h, inputs)
 
+        # The rest of the forward pass remains the same
         h = self.final_norm.forward(h)
         self.final_norm_output = h
 
@@ -289,21 +296,33 @@ class Transformer:
         self.embedding.dweights += d_embedding_w_from_output
         return dx
 
-    def _update_ltm_if_surprised(self, token_arr, kv_cache, seq_offset):
-        """Calculates 'surprise' and updates LTM if the threshold is exceeded."""
+    def _update_ltm_if_surprised(self, token_arr, kv_cache):
+        """
+        Calculates 'surprise' and updates LTM if the threshold is exceeded.
+        This is a form of test-time training (TTT).
+        """
         if not self.long_term_memory:
             return
 
+        # 1. Get the hidden state for the new token
+        forward_pass_input = ForwardPassInput(x=token_arr, ltm_state=0, kv_cache=kv_cache)
+        h = self._get_embeddings(forward_pass_input)
+        # Note: We don't run the full decoder stack here, just enough to get a representation
+        # for the LTM. This is a simplification for performance.
+        ltm_input = np.mean(h, axis=1, keepdims=True)
+
+        # 2. Forward pass on LTM to update its internal state
+        self.long_term_memory.forward(ltm_input)
+
+        # 3. Calculate "surprise" based on the gradient of the value function
         self.zero_grad()
         self.long_term_memory.zero_grad()
 
-        forward_pass_input = ForwardPassInput(
-            x=token_arr,
-            ltm_state=0,
-            kv_cache=kv_cache,
-            seq_offset=seq_offset
+        # We need to run a forward pass *with* the (old) memory to calculate gradients against it
+        forward_pass_input_for_grad = ForwardPassInput(
+            x=token_arr, ltm_state=0, kv_cache=kv_cache
         )
-        logits_for_grad, token_val, _ = self.forward(forward_pass_input)
+        logits_for_grad, token_val, _ = self.forward(forward_pass_input_for_grad)
         d_val = np.ones_like(token_val)
         d_logits = np.zeros_like(logits_for_grad)
         self.backward(d_logits, d_val)
@@ -314,6 +333,7 @@ class Transformer:
         if squared_grads:
             grad_norm = np.sqrt(sum(squared_grads))
             if grad_norm > self.ltm_surprise_threshold:
+                # 4. If surprised, update LTM weights (TTT)
                 self.ltm_optimizer.step(ltm_params)
 
         self.long_term_memory.zero_grad()
@@ -337,20 +357,24 @@ class Transformer:
         final_value = None
         temp_logits = inputs.temp_logits
 
-        for i in range(chunk_len):
+        for _ in range(chunk_len):
             token_id = _sample_from_logits(temp_logits[0, -1, :], inputs.temperature, inputs.top_k, inputs.top_p)
             speculative_chunk.append(token_id)
             next_token_arr = np.array([[token_id]])
 
-            self._update_ltm_if_surprised(next_token_arr, inputs.kv_cache, inputs.current_seq_len + i)
-
+            # Forward pass for the next token in the chunk
             forward_pass_input = ForwardPassInput(
                 x=next_token_arr,
                 ltm_state=0,
-                kv_cache=inputs.kv_cache,
-                seq_offset=inputs.current_seq_len + i
+                kv_cache=inputs.kv_cache
             )
             temp_logits, final_value, _ = self.forward(forward_pass_input)
+
+        # After generating the whole chunk, update LTM based on this chunk
+        if speculative_chunk:
+            chunk_array = np.array([speculative_chunk])
+            self._update_ltm_if_surprised(chunk_array, inputs.kv_cache)
+
         return speculative_chunk, temp_logits, final_value
 
     @dataclass
@@ -389,8 +413,7 @@ class Transformer:
         forward_pass_input = ForwardPassInput(
             x=prompt_tokens,
             ltm_state=0,
-            kv_cache=kv_cache,
-            seq_offset=0
+            kv_cache=kv_cache
         )
         logits, _, _ = self.forward(forward_pass_input)
 

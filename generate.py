@@ -136,13 +136,8 @@ def run_agent_loop(model, tokenizer, config):
     for turn in range(config.generation.max_turns):
         logging.info(f"\n--- Iteration {turn + 1} ---")
 
-        # Trim conversation history to the context window size
-        context_window = config.generation.context_window_size
-        if len(conversation_history_tokens) > context_window:
-            logging.info(f"Trimming context from {len(conversation_history_tokens)} "
-                         f"to {context_window} tokens.")
-            conversation_history_tokens = conversation_history_tokens[-context_window:]
-
+        # The KVCache now handles the sliding window, so we don't need to trim the history here.
+        # The model will only 'see' the last `context_window_size` tokens due to the cache.
         gen_config = deepcopy(config.generation)
         generate_input = model.GenerateInput(
             start_tokens=conversation_history_tokens,

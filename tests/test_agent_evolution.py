@@ -128,7 +128,7 @@ class TestAgentEvolution(unittest.TestCase):
                                  vision_config=config.vision,
                                  ltm_config=config.ltm)
         initial_ltm_state = base_model.long_term_memory.get_state()
-        initial_ltm_weights = initial_ltm_state['linear_0']['weights']
+        initial_ltm_weights = initial_ltm_state['children']['linear_0']['weights']
 
         agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
@@ -137,16 +137,22 @@ class TestAgentEvolution(unittest.TestCase):
         changed_weights = np.copy(winning_agent_ltm.layers[0].weights)
         changed_weights += 0.5
         winning_agent_ltm.layers[0].weights = changed_weights
+        winning_agent_ltm.memory_state = np.random.randn(*winning_agent_ltm.memory_state.shape)
+
 
         agent_manager.merge_agents([best_agent])
 
         updated_ltm_state = base_model.long_term_memory.get_state()
-        updated_ltm_weights = updated_ltm_state['linear_0']['weights']
+        updated_ltm_weights = updated_ltm_state['children']['linear_0']['weights']
+        updated_memory_state = updated_ltm_state['memory_state']
+
 
         self.assertFalse(np.allclose(initial_ltm_weights, updated_ltm_weights),
                          "Base model's LTM weights did not change after merge.")
         self.assertTrue(np.allclose(updated_ltm_weights, changed_weights),
                         "Merged LTM weights do not match the winning agent's weights.")
+        self.assertTrue(np.allclose(updated_memory_state, winning_agent_ltm.memory_state),
+                        "Merged LTM memory_state does not match the winning agent's state.")
         logging.info("Agent Merging Functionality test PASSED.")
 
 
