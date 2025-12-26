@@ -16,18 +16,21 @@ def set_backend(device='cpu'):
     Args:
         device (str): The device for computations. 'cpu', 'gpu', or 'mps'.
     """
+    # pylint: disable=global-statement
     global np
     if device == 'gpu':
         try:
             np = importlib.import_module('cupy')
             logging.info("Using CuPy for GPU acceleration")
         except ImportError:
-            logging.warning("CuPy not found, falling back to NumPy on CPU for 'gpu' device.")
+            logging.warning(
+                "CuPy not found, falling back to NumPy on CPU for 'gpu' device.")
             np = importlib.import_module('numpy')
             np.set_printoptions(precision=4, suppress=True)
             np.float = np.float32
     elif device == 'mps':
-        logging.warning("MPS backend is not yet fully supported, falling back to NumPy on CPU.")
+        logging.warning(
+            "MPS backend is not yet fully supported, falling back to NumPy on CPU.")
         np = importlib.import_module('numpy')
         np.set_printoptions(precision=4, suppress=True)
         np.float = np.float32
@@ -37,7 +40,8 @@ def set_backend(device='cpu'):
         np.float = np.float32
         logging.info("Using NumPy on CPU with float32 precision")
     else:
-        raise ValueError(f"Unsupported device: {device}. Choose from 'cpu', 'gpu', 'mps'.")
+        raise ValueError(
+            f"Unsupported device: {device}. Choose from 'cpu', 'gpu', 'mps'.")
 
 
 # Set CPU (NumPy) as the default backend on first import.

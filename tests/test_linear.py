@@ -28,8 +28,8 @@ class TestLinear(unittest.TestCase):
 
         _ = layer.forward(x)
         dx = layer.backward(dout)
-        dw = layer.dweights
-        db = layer.dbias
+        dw = layer.cache.dweights
+        db = layer.cache.dbias
 
         dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")

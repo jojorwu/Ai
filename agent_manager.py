@@ -141,6 +141,56 @@ class AgentManager:
             self.base_model.long_term_memory.set_state(avg_ltm_state)
             logging.info("Base model's LTM has been updated with merged weights.")
 
+    def _initialize_evaluation(self, tokenizer):
+        """Initializes scores and special tokens for evaluation."""
+        scores = {agent.agent_id: 0.0 for agent in self.agents}
+        tokens = {
+            "ask_help": tokenizer.char_to_idx.get('<ASK_FOR_HELP>'),
+            "i_dont_know": tokenizer.char_to_idx.get('<I_DONT_KNOW>')
+        }
+        return scores, tokens
+
+    def _handle_collaboration_request(self, proposer, prompt_tokens, prompt_image, scores, i, response):
+        """Handles the scenario where an agent asks for help."""
+        scores[proposer.agent_id] += 0.5
+        helper = self.agents[(i + 1) % len(self.agents)]
+        if helper.agent_id == proposer.agent_id:
+            return
+
+        context = list(prompt_tokens) + response.tolist()
+        helper_response = helper.generate_response(np.array(context), prompt_image)
+
+        critics = [a for a in self.agents if a.agent_id not in [proposer.agent_id, helper.agent_id]] or [proposer]
+        critique_scores = [c.critique_response(context, prompt_image, helper_response) for c in critics]
+        avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+
+        if avg_critique_score > 0.5:
+            scores[helper.agent_id] += 3.0 * avg_critique_score
+            scores[proposer.agent_id] += 3.0 * avg_critique_score
+        else:
+            scores[helper.agent_id] += -3.0 * (1 - avg_critique_score)
+
+    def _handle_independent_response(self, proposer, prompt_tokens, prompt_image, scores, response):
+        """Handles the scenario where an agent responds independently."""
+        critics = [a for a in self.agents if a.agent_id != proposer.agent_id]
+        critique_scores = [c.critique_response(prompt_tokens, prompt_image, response) for c in critics]
+        avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+
+        if avg_critique_score > 0.5:
+            scores[proposer.agent_id] += 5.0 * avg_critique_score
+        else:
+            scores[proposer.agent_id] += -5.0 * (1 - avg_critique_score)
+
+    def _finalize_evaluation(self, scores, top_k):
+        """Finalizes evaluation by updating and sorting agents."""
+        for agent in self.agents:
+            agent.update_fitness_score(scores[agent.agent_id])
+        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
+        logging.info("  - Collaborative Evaluation Fitness scores:")
+        for agent in sorted_agents:
+            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
+        return sorted_agents[:top_k]
+
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k):
         """
         Evaluates agents with a nuanced scoring system.
@@ -149,68 +199,19 @@ class AgentManager:
             logging.warning("Collaborative evaluation requires at least 2 agents.")
             return self.agents[:top_k]
 
-        agent_scores = {agent.agent_id: 0.0 for agent in self.agents}
-        reward_independent_success = 5.0
-        penalty_independent_failure = -5.0
-        reward_good_help = 3.0
-        penalty_bad_help = -3.0
-        reward_asking_for_help = 0.5
-        reward_admit_ignorance = 1.0
-        success_threshold = 0.5
-
-        ask_help_token_id = tokenizer.char_to_idx.get('<ASK_FOR_HELP>')
-        i_dont_know_token_id = tokenizer.char_to_idx.get('<I_DONT_KNOW>')
-
+        scores, tokens = self._initialize_evaluation(tokenizer)
         eval_prompts = evaluation_data[:min(len(evaluation_data), self.num_agents * 2)]
 
         for prompt_data in eval_prompts:
             prompt_tokens, prompt_image = prompt_data
             for i, proposer in enumerate(self.agents):
-                critics = [a for a in self.agents if a.agent_id != proposer.agent_id]
-                proposer_response = proposer.generate_response(np.array(prompt_tokens), prompt_image)
+                response = proposer.generate_response(np.array(prompt_tokens), prompt_image)
 
-                if ask_help_token_id in proposer_response:
-                    agent_scores[proposer.agent_id] += reward_asking_for_help
-                    helper = self.agents[(i + 1) % len(self.agents)]
-                    if helper.agent_id == proposer.agent_id:
-                        continue
-
-                    context = list(prompt_tokens) + proposer_response.tolist()
-                    helper_response = helper.generate_response(np.array(context), prompt_image)
-
-                    critics_for_helper = [a for a in self.agents if
-                                          a.agent_id not in [proposer.agent_id, helper.agent_id]]
-                    if not critics_for_helper:
-                        critics_for_helper = [proposer]
-
-                    critique_scores = [c.critique_response(context, prompt_image, helper_response)
-                                       for c in critics_for_helper]
-                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
-
-                    if avg_critique_score > success_threshold:
-                        agent_scores[helper.agent_id] += reward_good_help * avg_critique_score
-                        agent_scores[proposer.agent_id] += reward_good_help * avg_critique_score
-                    else:
-                        agent_scores[helper.agent_id] += penalty_bad_help * (1 - avg_critique_score)
-
-                elif i_dont_know_token_id in proposer_response:
-                    agent_scores[proposer.agent_id] += reward_admit_ignorance
-
+                if tokens["ask_help"] in response:
+                    self._handle_collaboration_request(proposer, prompt_tokens, prompt_image, scores, i, response)
+                elif tokens["i_dont_know"] in response:
+                    scores[proposer.agent_id] += 1.0
                 else:
-                    critique_scores = [c.critique_response(prompt_tokens, prompt_image,
-                                                           proposer_response) for c in critics]
-                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+                    self._handle_independent_response(proposer, prompt_tokens, prompt_image, scores, response)
 
-                    if avg_critique_score > success_threshold:
-                        agent_scores[proposer.agent_id] += reward_independent_success * avg_critique_score
-                    else:
-                        agent_scores[proposer.agent_id] += penalty_independent_failure * (1 - avg_critique_score)
-
-        for agent in self.agents:
-            agent.update_fitness_score(agent_scores[agent.agent_id])
-
-        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
-        logging.info("  - Collaborative Evaluation Fitness scores:")
-        for agent in sorted_agents:
-            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
-        return sorted_agents[:top_k]
+        return self._finalize_evaluation(scores, top_k)

@@ -1,8 +1,18 @@
 """
 Module containing the linear layer.
 """
+from dataclasses import dataclass
+
 from backend import np
 from quantization import dequantize, quantize
+
+
+@dataclass
+class LinearCache:
+    """Cache for the Linear layer."""
+    x: np.ndarray = None
+    dweights: np.ndarray = None
+    dbias: np.ndarray = None
 
 
 class Linear:
@@ -11,13 +21,13 @@ class Linear:
     """
     def __init__(self, input_dim, output_dim, bias=True):
         self.use_bias = bias
-        self.weights = np.random.randn(input_dim, output_dim).astype(np.float32) * 0.02
-        self.bias = np.zeros(output_dim, dtype=np.float32) if self.use_bias else None
+        self.weights = np.random.randn(
+            input_dim, output_dim).astype(np.float32) * 0.02
+        self.bias = np.zeros(
+            output_dim, dtype=np.float32) if self.use_bias else None
         self.quantized_weights = None
         self.weight_scale = None
-        self.x = None
-        self.dweights = None
-        self.dbias = None
+        self.cache = LinearCache()
 
     def special_residual_init(self, num_layers):
         """Special initialization for residual connections, as in GPT-2."""
@@ -26,9 +36,9 @@ class Linear:
 
     def get_trainable_params(self):
         """Returns a dictionary of trainable parameters and their gradients."""
-        params = {'weights': (self.weights, self.dweights)}
+        params = {'weights': (self.weights, self.cache.dweights)}
         if self.use_bias:
-            params['bias'] = (self.bias, self.dbias)
+            params['bias'] = (self.bias, self.cache.dbias)
         return params
 
     def get_named_params(self, prefix=''):
@@ -37,20 +47,20 @@ class Linear:
 
     def forward(self, x):
         """Forward pass."""
-        self.x = x
+        self.cache.x = x
         if self.quantized_weights is not None:
             weights = dequantize(self.quantized_weights, self.weight_scale)
         else:
             weights = self.weights
-        output = self.x @ weights
+        output = self.cache.x @ weights
         if self.use_bias:
             output += self.bias
         return output
 
     def backward(self, dout):
         """Backward pass. Computes gradients dW, db, dx."""
-        original_shape = self.x.shape
-        x_reshaped = self.x.reshape(-1, original_shape[-1])
+        original_shape = self.cache.x.shape
+        x_reshaped = self.cache.x.reshape(-1, original_shape[-1])
         dout_reshaped = dout.reshape(-1, dout.shape[-1])
 
         if self.quantized_weights is not None:
@@ -58,17 +68,17 @@ class Linear:
         else:
             weights = self.weights
         dweights = x_reshaped.T @ dout_reshaped
-        if self.dweights is None:
-            self.dweights = dweights
+        if self.cache.dweights is None:
+            self.cache.dweights = dweights
         else:
-            self.dweights += dweights
+            self.cache.dweights += dweights
 
         if self.use_bias:
             dbias = np.sum(dout_reshaped, axis=0)
-            if self.dbias is None:
-                self.dbias = dbias
+            if self.cache.dbias is None:
+                self.cache.dbias = dbias
             else:
-                self.dbias += dbias
+                self.cache.dbias += dbias
 
         dx = dout_reshaped @ weights.T
         return dx.reshape(original_shape)

@@ -255,9 +255,12 @@ def main():
         if model and tokenizer and config:
             run_agent_loop(model, tokenizer, config)
     except FileNotFoundError as e:
-        logging.error("Error: %s. Ensure the model name is correct and the model files exist.", e)
+        logging.error(
+            "Error: %s. Ensure the model name is correct and the model files exist.", e)
     except (IOError, OSError) as e:
-        logging.error("An file system error occurred: %s", e, exc_info=True)
+        logging.error("A file system error occurred: %s", e, exc_info=True)
+    except KeyboardInterrupt:
+        logging.info("\nProcess interrupted by user. Exiting.")
     except Exception as e:
         logging.error("An unexpected error occurred: %s", e, exc_info=True)
 
