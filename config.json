@@ -63,10 +63,17 @@
         "value_threshold": -1.0,
         "max_thought_len": 50,
         "max_retries": 3,
-    "max_turns": 10,
-    "context_window_size": 2048
+        "max_turns": 10,
+        "context_window_size": 2048
     },
     "hardware": {
         "device": "cpu"
+    },
+    "dynamic_parameters": {
+        "medium_complexity_threshold": 1.5,
+        "high_complexity_threshold": 3.0,
+        "low_complexity_top_k": 1,
+        "medium_complexity_top_k": 2,
+        "high_complexity_top_k": 4
     }
 }

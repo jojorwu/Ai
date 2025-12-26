@@ -240,19 +240,20 @@ class Transformer:
         for i, block in enumerate(self.decoder_blocks):
             forward_pass_input = ForwardPassInput(
                 x=h, ltm_state=ltm_state_for_blocks, mask=inputs.mask,
-                kv_cache=inputs.kv_cache, layer_idx=i
+                kv_cache=inputs.kv_cache, layer_idx=i, dynamic_top_k=inputs.dynamic_top_k
             )
             h, aux_loss = block.forward(forward_pass_input)
             total_aux_loss += aux_loss
         return h, total_aux_loss
 
     # pylint: disable=too-many-arguments
-    def forward(self, inputs: ForwardPassInput):
+    def forward(self, inputs: ForwardPassInput, dynamic_top_k: int = None):
         """Performs the forward pass of the model."""
         # Get embeddings for the input tokens first
         h = self._get_embeddings(inputs)
 
         # Now, run the decoder stack, which will prepend the memory context
+        inputs.dynamic_top_k = dynamic_top_k
         h, total_aux_loss = self._run_decoder_stack(h, inputs)
 
         # The rest of the forward pass remains the same
@@ -322,7 +323,8 @@ class Transformer:
         forward_pass_input_for_grad = ForwardPassInput(
             x=token_arr, ltm_state=0, kv_cache=kv_cache
         )
-        logits_for_grad, token_val, _ = self.forward(forward_pass_input_for_grad)
+        # We don't use dynamic top_k for surprise calculation, as it should reflect a consistent baseline
+        logits_for_grad, token_val, _ = self.forward(forward_pass_input_for_grad, dynamic_top_k=None)
         d_val = np.ones_like(token_val)
         d_logits = np.zeros_like(logits_for_grad)
         self.backward(d_logits, d_val)
@@ -330,6 +332,7 @@ class Transformer:
         ltm_params = self.long_term_memory.get_trainable_params()
         squared_grads = [np.sum(grad ** 2) for _, grad in ltm_params.values() if grad is not None]
 
+        grad_norm = 0.0
         if squared_grads:
             grad_norm = np.sqrt(sum(squared_grads))
             if grad_norm > self.ltm_surprise_threshold:
@@ -337,6 +340,7 @@ class Transformer:
                 self.ltm_optimizer.step(ltm_params)
 
         self.long_term_memory.zero_grad()
+        return grad_norm
 
     @dataclass
     class SpeculativeChunkInput:
@@ -368,14 +372,15 @@ class Transformer:
                 ltm_state=0,
                 kv_cache=inputs.kv_cache
             )
-            temp_logits, final_value, _ = self.forward(forward_pass_input)
+            temp_logits, final_value, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
 
         # After generating the whole chunk, update LTM based on this chunk
+        surprise_value = 0.0
         if speculative_chunk:
             chunk_array = np.array([speculative_chunk])
-            self._update_ltm_if_surprised(chunk_array, inputs.kv_cache)
+            surprise_value = self._update_ltm_if_surprised(chunk_array, inputs.kv_cache)
 
-        return speculative_chunk, temp_logits, final_value
+        return speculative_chunk, temp_logits, final_value, surprise_value
 
     @dataclass
     class GenerateInput:
@@ -389,6 +394,7 @@ class Transformer:
         speculative_steps: int = 5
         value_threshold: float = -1.0
         max_retries: int = 3
+        dynamic_top_k: int = None
 
     # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     def generate(self, inputs: GenerateInput):
@@ -415,7 +421,7 @@ class Transformer:
             ltm_state=0,
             kv_cache=kv_cache
         )
-        logits, _, _ = self.forward(forward_pass_input)
+        logits, _, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
 
         # Calculate new sequence length if an image was present.
         if (inputs.images is not None and self.tokenizer is not None and
@@ -425,6 +431,7 @@ class Transformer:
         else:
             current_seq_len = prompt_tokens.shape[1]
 
+        surprise_history = []
         while len(all_generated_tokens) < inputs.max_new_tokens:
             accepted = False
             for _ in range(inputs.max_retries):
@@ -438,9 +445,11 @@ class Transformer:
                     speculative_steps=inputs.speculative_steps,
                     temperature=inputs.temperature,
                     top_k=inputs.top_k,
-                    top_p=inputs.top_p
+                    top_p=inputs.top_p,
+                    dynamic_top_k=inputs.dynamic_top_k
                 )
-                chunk, temp_logits, final_value = self._generate_speculative_chunk(speculative_chunk_input)
+                chunk, temp_logits, final_value, surprise_value = self._generate_speculative_chunk(speculative_chunk_input)
+                surprise_history.append(surprise_value)
 
                 if final_value is not None and final_value.item() >= inputs.value_threshold:
                     all_generated_tokens.extend(chunk)
@@ -448,8 +457,11 @@ class Transformer:
                     logits = temp_logits
                     kv_cache.restore(attempt_cache.snapshot())
                     accepted = True
+                    # Yield the generated chunk and the surprise value for this step
+                    yield np.array(chunk), surprise_value
                     break
 
             if not accepted:
                 break
-        return np.array(all_generated_tokens)
+        return
+        yield np.array([]), 0.0

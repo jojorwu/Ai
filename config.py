@@ -149,6 +149,17 @@ class HardwareConfig(BaseModel):
                                                   description="Device for computations (cpu, gpu, mps).")
 
 
+class DynamicParametersConfig(BaseModel):
+    """Configuration for dynamic parameter allocation."""
+    medium_complexity_threshold: float = Field(...,
+                                               description="Surprise threshold to switch to medium complexity.")
+    high_complexity_threshold: float = Field(...,
+                                             description="Surprise threshold to switch to high complexity.")
+    low_complexity_top_k: int = Field(..., description="Top-k experts for low complexity tasks.")
+    medium_complexity_top_k: int = Field(..., description="Top-k experts for medium complexity tasks.")
+    high_complexity_top_k: int = Field(..., description="Top-k experts for high complexity tasks.")
+
+
 class Config(BaseModel):
     """Main configuration model."""
     model: ModelConfig
@@ -159,6 +170,7 @@ class Config(BaseModel):
     scheduler: SchedulerConfig
     generation: GenerationConfig
     hardware: HardwareConfig
+    dynamic_parameters: Optional[DynamicParametersConfig] = None
 
     @classmethod
     def from_json(cls, file_path: str) -> 'Config':

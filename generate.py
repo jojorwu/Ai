@@ -11,10 +11,49 @@ import re
 from copy import deepcopy
 
 from backend import set_backend
-from config import Config
+from config import Config, DynamicParametersConfig
 from model import Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
+
+
+class ComplexityManager:
+    """Manages the dynamic complexity level based on a moving average of 'surprise'."""
+    def __init__(self, config: DynamicParametersConfig, window_size: int = 5):
+        self.config = config
+        self.surprise_history = []
+        self.window_size = window_size
+        self.current_complexity = "low"
+
+    def update_surprise(self, surprise_value: float):
+        """Adds a new surprise value and updates the complexity level."""
+        self.surprise_history.append(surprise_value)
+        if len(self.surprise_history) > self.window_size:
+            self.surprise_history.pop(0)
+        self._update_complexity()
+
+    def _update_complexity(self):
+        """Determines the complexity level based on the average surprise."""
+        if not self.surprise_history:
+            self.current_complexity = "low"
+            return
+
+        avg_surprise = sum(self.surprise_history) / len(self.surprise_history)
+
+        if avg_surprise >= self.config.high_complexity_threshold:
+            self.current_complexity = "high"
+        elif avg_surprise >= self.config.medium_complexity_threshold:
+            self.current_complexity = "medium"
+        else:
+            self.current_complexity = "low"
+
+    def get_top_k(self) -> int:
+        """Returns the top_k value for the current complexity level."""
+        if self.current_complexity == "high":
+            return self.config.high_complexity_top_k
+        if self.current_complexity == "medium":
+            return self.config.medium_complexity_top_k
+        return self.config.low_complexity_top_k
 
 
 def setup_logging():
@@ -131,13 +170,22 @@ def run_agent_loop(model, tokenizer, config):
     start_text = config.generation.start_text
     logging.info(f"Initial task: {start_text}")
 
+    complexity_manager = None
+    if config.dynamic_parameters:
+        complexity_manager = ComplexityManager(config.dynamic_parameters)
+        logging.info("Dynamic parameter allocation enabled.")
+
     conversation_history_tokens = tokenizer.encode(f"<THINK>{start_text}")
 
     for turn in range(config.generation.max_turns):
         logging.info(f"\n--- Iteration {turn + 1} ---")
 
-        # The KVCache now handles the sliding window, so we don't need to trim the history here.
-        # The model will only 'see' the last `context_window_size` tokens due to the cache.
+        dynamic_top_k = None
+        if complexity_manager:
+            dynamic_top_k = complexity_manager.get_top_k()
+            logging.info(f"Complexity: {complexity_manager.current_complexity}, "
+                         f"Dynamic top_k: {dynamic_top_k}")
+
         gen_config = deepcopy(config.generation)
         generate_input = model.GenerateInput(
             start_tokens=conversation_history_tokens,
@@ -147,11 +195,16 @@ def run_agent_loop(model, tokenizer, config):
             top_p=gen_config.top_p,
             speculative_steps=gen_config.speculative_steps,
             value_threshold=gen_config.value_threshold,
-            max_retries=gen_config.max_retries
+            max_retries=gen_config.max_retries,
+            dynamic_top_k=dynamic_top_k
         )
-        generated_tokens_stream = model.generate(generate_input)
-        # We yield from the generator to handle the token stream
-        generated_tokens = list(generated_tokens_stream)
+
+        generated_tokens = []
+        for chunk, surprise_value in model.generate(generate_input):
+            generated_tokens.extend(chunk.tolist())
+            if complexity_manager:
+                complexity_manager.update_surprise(surprise_value)
+
         generated_text = tokenizer.decode(generated_tokens)
         logging.info(f"Model generated:\n{generated_text}")
 
