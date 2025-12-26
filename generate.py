@@ -167,7 +167,8 @@ def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None,
     model_dir = os.path.join('models', model_name)
     config_path = os.path.join(model_dir, 'config.json')
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+        raise FileNotFoundError(
+            f"Config file not found for model '{model_name}' at {config_path}")
 
     config = Config.from_json(config_path)
     set_backend(config.hardware.device)

@@ -1,15 +1,16 @@
 """
 Unit tests for the MixtureOfExperts module.
 """
-import logging
 import sys
 import os
-import unittest
-
-import numpy as np
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import logging
+import unittest
+
+import numpy as np
 
 from gradient_check import check_gradient, numerical_gradient
 from config import MoEConfig
@@ -21,22 +22,20 @@ class TestMoE(unittest.TestCase):
 
     def setUp(self):
         """Set up a simple MoE layer for testing."""
-        self.d_model = 16
-        self.d_ff = 32
-        self.num_experts = 4
-        self.top_k = 2
-        config = MoEConfig(d_model=self.d_model, d_ff=self.d_ff,
-                           num_experts=self.num_experts, top_k=self.top_k)
-        self.moe = MixtureOfExperts(config)
-        self.batch_size = 4
-        self.seq_len = 8
-        self.input_data = np.random.randn(self.batch_size, self.seq_len, self.d_model)
+        self.config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
+        self.moe = MixtureOfExperts(self.config)
+        self.test_data = {
+            "batch_size": 4,
+            "seq_len": 8,
+            "input":
+            np.random.randn(4, 8, 16)
+        }
 
     def test_forward_pass_shape(self):
         """Test the output shape of the forward pass."""
         logging.info("\nRunning Test: MoE Forward Pass Shape...")
-        output, aux_loss = self.moe.forward(self.input_data)
-        self.assertEqual(output.shape, self.input_data.shape)
+        output, aux_loss = self.moe.forward(self.test_data["input"])
+        self.assertEqual(output.shape, self.test_data["input"].shape)
         self.assertIsInstance(aux_loss, float)
         logging.info("MoE Forward Pass Shape test PASSED.")
 
@@ -44,7 +43,7 @@ class TestMoE(unittest.TestCase):
         """Perform a numerical gradient check for the backward pass."""
         logging.info("\nRunning Test: MoE Backward Pass Gradient Check...")
 
-        output, _ = self.moe.forward(self.input_data)
+        output, _ = self.moe.forward(self.test_data["input"])
         dout = np.ones_like(output)
         self.moe.backward(dout)
 
@@ -53,22 +52,25 @@ class TestMoE(unittest.TestCase):
             if analytical_grad is None:
                 continue
             numerical_grad_val = numerical_gradient(
-                lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
-            )
-            check_gradient(self, analytical_grad, numerical_grad_val, f"gate.{param_name}")
+                lambda p_arg: self.moe.forward(self.test_data["input"])[0],
+                param, dout)
+            check_gradient(self, analytical_grad, numerical_grad_val,
+                           f"gate.{param_name}")
 
-        for i in range(self.num_experts):
+        for i in range(self.config.num_experts):
             expert = self.moe.experts[i]
             for layer_name, layer_obj in expert.get_children().items():
                 expert_params = layer_obj.get_trainable_params()
-                for param_name, (param, analytical_grad) in expert_params.items():
+                for param_name, (param,
+                                analytical_grad) in expert_params.items():
                     if analytical_grad is None:
                         continue
                     numerical_grad_val = numerical_gradient(
-                        lambda p_arg: self.moe.forward(self.input_data)[0], param, dout
-                    )
-                    check_gradient(self, analytical_grad, numerical_grad_val,
-                                 f"expert_{i}.{layer_name}.{param_name}")
+                        lambda p_arg: self.moe.forward(
+                            self.test_data["input"])[0], param, dout)
+                    check_gradient(
+                        self, analytical_grad, numerical_grad_val,
+                        f"expert_{i}.{layer_name}.{param_name}")
 
         logging.info("MoE Backward Pass Gradient Check PASSED.")
 

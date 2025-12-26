@@ -1,13 +1,14 @@
 """
 Tests for the optimized FeedForward (SwiGLU) layer.
 """
-import logging
 import sys
 import os
-import unittest
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import logging
+import unittest
 
 from gradient_check import check_gradient, numerical_gradient
 from backend import np
