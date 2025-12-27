@@ -6,12 +6,16 @@ import os
 import re
 
 
+import json
+
+
 class Tokenizer:
     """
-    A simple character-level tokenizer with enhanced support for special tokens.
+    A flexible character-level tokenizer that can build a vocabulary from a directory
+    of text files or load a pre-built vocabulary from a JSON file.
     """
 
-    def __init__(self, data_dir):
+    def __init__(self, source_path):
         self.special_tokens = [
             '<THINK>', '<ANSWER>',
             '<TOOL_CALL>', '</TOOL_CALL>',
@@ -26,10 +30,20 @@ class Tokenizer:
         self.vocab_size = 0
         self.special_token_pattern = re.compile(
             f"({'|'.join(re.escape(token) for token in self.special_tokens)})")
-        self._build_vocab(data_dir)
 
-    def _build_vocab(self, data_dir):
-        """Builds the vocabulary from all .txt files in a directory and adds special tokens."""
+        if os.path.isdir(source_path):
+            self._build_vocab_from_dir(source_path)
+        elif os.path.isfile(source_path) and source_path.endswith('.json'):
+            self._load_vocab_from_file(source_path)
+        else:
+            raise ValueError(
+                f"Invalid source_path: '{source_path}'. "
+                "Must be a directory of text files or a .json vocabulary file."
+            )
+
+    def _build_vocab_from_dir(self, data_dir):
+        """Builds vocabulary from all .txt files in a directory."""
+        logging.info("Building vocabulary from directory: %s", data_dir)
         all_text = ""
         for filename in os.listdir(data_dir):
             file_path = os.path.join(data_dir, filename)
@@ -48,6 +62,21 @@ class Tokenizer:
         for i, char in enumerate(full_vocab):
             self.char_to_idx[char] = i
             self.idx_to_char[i] = char
+        logging.info("Vocabulary built. Size: %d", self.vocab_size)
+
+    def _load_vocab_from_file(self, file_path):
+        """Loads vocabulary from a JSON file."""
+        logging.info("Loading vocabulary from file: %s", file_path)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            self.char_to_idx = json.load(f)
+
+        self.idx_to_char = {i: c for c, i in self.char_to_idx.items()}
+        self.vocab_size = len(self.char_to_idx)
+        # Ensure special tokens are consistent
+        for token in self.special_tokens:
+            if token not in self.char_to_idx:
+                logging.warning("Special token '%s' not found in loaded vocabulary.", token)
+        logging.info("Vocabulary loaded. Size: %d", self.vocab_size)
 
     def encode(self, text: str, add_special_tokens=False) -> list[int]:
         """

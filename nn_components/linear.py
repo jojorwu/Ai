@@ -84,15 +84,30 @@ class Linear:
         return dx.reshape(original_shape)
 
     def get_state(self):
-        """Returns the layer's state (weights)."""
-        state = {'weights': self.weights}
+        """Returns the layer's state."""
+        if self.quantized_weights is not None:
+            state = {
+                'quantized_weights': self.quantized_weights,
+                'weight_scale': self.weight_scale
+            }
+        else:
+            state = {'weights': self.weights}
+
         if self.use_bias:
             state['bias'] = self.bias
         return state
 
     def set_state(self, state):
-        """Loads the layer's state (weights)."""
-        self.weights = state['weights']
+        """Loads the layer's state."""
+        if 'quantized_weights' in state:
+            self.quantized_weights = state['quantized_weights']
+            self.weight_scale = state['weight_scale']
+            self.weights = None  # Ensure float32 weights are cleared
+        else:
+            self.weights = state['weights']
+            self.quantized_weights = None
+            self.weight_scale = None
+
         if self.use_bias and 'bias' in state:
             self.bias = state['bias']
 

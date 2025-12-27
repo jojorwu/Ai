@@ -230,22 +230,32 @@ class Transformer:
             block.eval()
 
     def get_state(self):
-        """Collects the state (weights) of all trainable layers."""
+        """Collects the state of all layers."""
         model_state = {}
         for layer_name, layer_obj in self.get_named_params().items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, (param_val, _) in layer_obj.get_trainable_params().items():
+            if hasattr(layer_obj, 'get_state'):
+                layer_state = layer_obj.get_state()
+                for param_name, param_val in layer_state.items():
                     model_state[f"{layer_name}.{param_name}"] = param_val
         return model_state
 
     def set_state(self, state_dict):
-        """Loads the state (weights) for all trainable layers."""
+        """Loads the state for all layers from a state dictionary."""
+        layers_states = {}
+        # Re-group the flat state_dict by layer prefix
+        for key, value in state_dict.items():
+            if '.' not in key:
+                continue
+            prefix, param_name = key.rsplit('.', 1)
+            if prefix not in layers_states:
+                layers_states[prefix] = {}
+            layers_states[prefix][param_name] = value
+
+        # Set the state for each layer that has a state to be set
         for layer_name, layer_obj in self.get_named_params().items():
-            if hasattr(layer_obj, 'get_trainable_params'):
-                for param_name, _ in layer_obj.get_trainable_params().items():
-                    load_key = f"{layer_name}.{param_name}"
-                    if load_key in state_dict:
-                        setattr(layer_obj, param_name, state_dict[load_key])
+            if layer_name in layers_states:
+                if hasattr(layer_obj, 'set_state'):
+                    layer_obj.set_state(layers_states[layer_name])
 
     def save_weights(self, filepath, config):
         """Saves model weights and configuration to an .npz file."""
