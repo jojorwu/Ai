@@ -80,17 +80,17 @@ class Trainer:
             named_params = self._config.model.get_named_params(flat=False)
             clip_gradients(named_params, self.max_norm)
             max_lr = self._config.optimizer.initial_lr
+            step = current_step // evo_config.gradient_accumulation_steps
             new_lr = cosine_decay_with_warmup(
-                current_step // evo_config.gradient_accumulation_steps,
-                training_steps, max_lr, **scheduler_config.model_dump())
+                step, training_steps, max_lr, **scheduler_config.model_dump()
+            )
             self._config.optimizer.lr = new_lr
 
             params_with_grads = {
                 f"{name}.{k}": (v[0], v[1])
                 for name, layer in self._config.model.get_named_params().items()
                 if hasattr(layer, 'get_trainable_params')
-                for k, v in layer.get_trainable_params().items()
-            }
+                for k, v in layer.get_trainable_params().items()}
             self._config.optimizer.step(params_with_grads)
             self._config.model.zero_grad()
         return total_loss.item()

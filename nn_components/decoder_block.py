@@ -89,8 +89,10 @@ class DecoderBlock:
         x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
         x_norm1 = self.norm1.forward(x_with_mem)
 
-        attn_output = self.mha.forward(x_norm1, mask=inputs.mask, kv_cache=inputs.kv_cache,
-                                       layer_idx=inputs.layer_idx)
+        attn_output = self.mha.forward(
+            x_norm1, mask=inputs.mask, kv_cache=inputs.kv_cache,
+            layer_idx=inputs.layer_idx
+        )
 
         # First residual connection
         x = inputs.x + self.dropout1.forward(attn_output)
@@ -98,7 +100,8 @@ class DecoderBlock:
         x_norm2 = self.norm2.forward(x)
 
         if self.use_moe:
-            ffn_output, aux_loss = self.moe_layer.forward(x_norm2, dynamic_top_k=inputs.dynamic_top_k)
+            ffn_output, aux_loss = self.moe_layer.forward(
+                x_norm2, dynamic_top_k=inputs.dynamic_top_k)
         else:
             ffn_output = self.ffn.forward(x_norm2)
 

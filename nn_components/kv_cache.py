@@ -47,11 +47,16 @@ class KVCache:
             # Handle wrapping around the buffer
             remaining_space = self.config.max_seq_len - start_pos
             # First part
-            self.k_cache[layer_idx, :, :, start_pos:, :] = k[:, :, :remaining_space, :]
-            self.v_cache[layer_idx, :, :, start_pos:, :] = v[:, :, :remaining_space, :]
+            self.k_cache[layer_idx, :, :, start_pos:, :] = \
+                k[:, :, :remaining_space, :]
+            self.v_cache[layer_idx, :, :, start_pos:, :] = \
+                v[:, :, :remaining_space, :]
             # Wrapped part
-            self.k_cache[layer_idx, :, :, :end_pos % self.config.max_seq_len, :] = k[:, :, remaining_space:, :]
-            self.v_cache[layer_idx, :, :, :end_pos % self.config.max_seq_len, :] = v[:, :, remaining_space:, :]
+            wrapped_end_pos = end_pos % self.config.max_seq_len
+            self.k_cache[layer_idx, :, :, :wrapped_end_pos, :] = \
+                k[:, :, remaining_space:, :]
+            self.v_cache[layer_idx, :, :, :wrapped_end_pos, :] = \
+                v[:, :, remaining_space:, :]
 
         self.current_pos = end_pos % self.config.max_seq_len
         if not self.is_filled and end_pos >= self.config.max_seq_len:
@@ -64,7 +69,8 @@ class KVCache:
         """
         if not self.is_filled:
             # If buffer is not full, just return up to the current position
-            return self.k_cache[layer_idx, ..., :self.current_pos, :], self.v_cache[layer_idx, ..., :self.current_pos, :]
+            return (self.k_cache[layer_idx, ..., :self.current_pos, :],
+                    self.v_cache[layer_idx, ..., :self.current_pos, :])
 
         # If buffer is full (ring buffer logic)
         # The order is from self.current_pos to end, then from start to self.current_pos

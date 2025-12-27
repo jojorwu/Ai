@@ -1,7 +1,6 @@
 """
 Tests for the SoftmaxCrossEntropy loss function.
 """
-import logging
 import unittest
 
 import numpy as np

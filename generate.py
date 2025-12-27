@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from backend import np, set_backend
+from backend import set_backend
 from config import Config, DynamicParametersConfig
 from model import Transformer
 from tokenizer import Tokenizer
@@ -156,8 +156,9 @@ def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None,
     setup_logging()
     parser = argparse.ArgumentParser(
         description="Interact with a trained Transformer model.")
-    parser.add_argument('--model-name', type=str,
-                        help="The name of the model to use.")
+    parser.add_argument(
+        '--model-name', type=str, help="The name of the model to use."
+    )
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()
@@ -197,8 +198,10 @@ def _generate_model_response(model: Transformer, agent_state: AgentState, config
     dynamic_top_k = None
     if agent_state.complexity_manager:
         dynamic_top_k = agent_state.complexity_manager.get_top_k()
-        logging.info("Complexity: %s, Dynamic top_k: %d",
-                     agent_state.complexity_manager.current_complexity, dynamic_top_k)
+        logging.info(
+            "Complexity: %s, Dynamic top_k: %d",
+            agent_state.complexity_manager.current_complexity,
+            dynamic_top_k)
 
     gen_config = deepcopy(config.generation)
     generate_input = model.GenerateInput(
@@ -210,8 +213,7 @@ def _generate_model_response(model: Transformer, agent_state: AgentState, config
         speculative_steps=gen_config.speculative_steps,
         value_threshold=gen_config.value_threshold,
         max_retries=gen_config.max_retries,
-        dynamic_top_k=dynamic_top_k
-    )
+        dynamic_top_k=dynamic_top_k)
 
     generated_tokens = []
     for chunk, surprise_value in model.generate(generate_input):

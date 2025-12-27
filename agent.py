@@ -47,7 +47,8 @@ class Agent:
         dlogits_from_loss = self.loss_fn.backward()
         if self.model.long_term_memory:
             batch_size, _, vocab_size = logits.shape
-            padding = np.zeros((batch_size, 1, vocab_size), dtype=dlogits_from_loss.dtype)
+            padding = np.zeros((batch_size, 1, vocab_size),
+                               dtype=dlogits_from_loss.dtype)
             dlogits = np.concatenate([padding, dlogits_from_loss], axis=1)
         else:
             dlogits = dlogits_from_loss
@@ -56,7 +57,8 @@ class Agent:
     def _update_ltm(self):
         ltm_params = self.model.long_term_memory.get_trainable_params()
         if any(p[1] is not None for p in ltm_params.values()):
-            flat_grads = np.concatenate([p[1].ravel() for p in ltm_params.values() if p[1] is not None])
+            flat_grads = np.concatenate(
+                [p[1].ravel() for p in ltm_params.values() if p[1] is not None])
             surprise = np.linalg.norm(flat_grads) if flat_grads.size > 0 else 0.0
             self.metrics.total_surprise += surprise
             if surprise > self.model.ltm_surprise_threshold:

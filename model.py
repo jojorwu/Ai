@@ -268,12 +268,13 @@ class Transformer:
 
     def _get_embeddings(self, inputs: ForwardPassInput):
         """Gets text and image embeddings."""
-        text_embeddings = self.embedding.forward(inputs.x) * \
-                          np.sqrt(self.config.d_model)
+        text_embeddings = (self.embedding.forward(inputs.x) *
+                           np.sqrt(self.config.d_model))
         if inputs.images is None or self.tokenizer is None:
             return text_embeddings
         image_token_id = self.tokenizer.char_to_idx.get('<IMAGE>')
-        if image_token_id is None or np.where(inputs.x == image_token_id)[0].size == 0:
+        if (image_token_id is None or
+                np.where(inputs.x == image_token_id)[0].size == 0):
             return text_embeddings
         patch_embeddings = self.vision_encoder.forward(inputs.images)
         final_embeddings = []
@@ -283,7 +284,9 @@ class Transformer:
                 start_idx = img_tok_idx[0]
                 pre_image_part = text_embeddings[i, :start_idx]
                 post_image_part = text_embeddings[i, start_idx + 1:]
-                combined = np.concatenate([pre_image_part, patch_embeddings[i], post_image_part], axis=0)
+                combined = np.concatenate(
+                    [pre_image_part, patch_embeddings[i], post_image_part],
+                    axis=0)
                 final_embeddings.append(combined)
             else:
                 final_embeddings.append(text_embeddings[i])
@@ -293,7 +296,8 @@ class Transformer:
         """Runs the forward pass through the decoder stack."""
         ltm_state_for_blocks = 0
         if self.long_term_memory:
-            # The LTM processes the mean of the input embeddings to generate context for the decoder stack.
+            # The LTM processes the mean of the input embeddings to generate
+            # context for the decoder stack.
             ltm_input = np.mean(h, axis=1, keepdims=True)
             memory_context = self.long_term_memory.forward(ltm_input)
             h = np.concatenate([memory_context, h], axis=1)
@@ -303,8 +307,8 @@ class Transformer:
         for i, block in enumerate(self.decoder_blocks):
             forward_pass_input = ForwardPassInput(
                 x=h, ltm_state=ltm_state_for_blocks, mask=inputs.mask,
-                kv_cache=inputs.kv_cache, layer_idx=i, dynamic_top_k=inputs.dynamic_top_k
-            )
+                kv_cache=inputs.kv_cache, layer_idx=i,
+                dynamic_top_k=inputs.dynamic_top_k)
             h, aux_loss = block.forward(forward_pass_input)
             total_aux_loss += aux_loss
         return h, total_aux_loss
@@ -371,8 +375,10 @@ class Transformer:
 
         self.zero_grad()
         self.long_term_memory.zero_grad()
-        forward_pass_input_for_grad = ForwardPassInput(x=token_arr, ltm_state=0, kv_cache=kv_cache)
-        logits_for_grad, token_val, _ = self.forward(forward_pass_input_for_grad, dynamic_top_k=None)
+        forward_pass_input_for_grad = ForwardPassInput(
+            x=token_arr, ltm_state=0, kv_cache=kv_cache)
+        logits_for_grad, token_val, _ = self.forward(
+            forward_pass_input_for_grad, dynamic_top_k=None)
         d_val, d_logits = np.ones_like(token_val), np.zeros_like(logits_for_grad)
         self.backward(d_logits, d_val)
 
@@ -390,16 +396,21 @@ class Transformer:
     def _generate_speculative_chunk(self, inputs: SpeculativeChunkInput):
         """Generates a small 'chunk' of tokens speculatively."""
         speculative_chunk = []
-        chunk_len = min(inputs.speculative_steps, inputs.max_new_tokens - len(speculative_chunk))
+        chunk_len = min(inputs.speculative_steps,
+                        inputs.max_new_tokens - len(speculative_chunk))
         final_value = None
         temp_logits = inputs.temp_logits
 
         for _ in range(chunk_len):
-            token_id = _sample_from_logits(temp_logits[0, -1, :], inputs.temperature, inputs.top_k, inputs.top_p)
+            token_id = _sample_from_logits(
+                temp_logits[0, -1, :], inputs.temperature, inputs.top_k,
+                inputs.top_p)
             speculative_chunk.append(token_id)
             next_token_arr = np.array([[token_id]])
-            forward_pass_input = ForwardPassInput(x=next_token_arr, ltm_state=0, kv_cache=inputs.kv_cache)
-            temp_logits, final_value, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
+            forward_pass_input = ForwardPassInput(
+                x=next_token_arr, ltm_state=0, kv_cache=inputs.kv_cache)
+            temp_logits, final_value, _ = self.forward(
+                forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
 
         surprise_value = 0.0
         if speculative_chunk:
@@ -418,11 +429,14 @@ class Transformer:
             max_seq_len=self.config.max_seq_len
         ))
 
-    def _process_prompt(self, inputs: GenerateInput, kv_cache: KVCache) -> Tuple[np.ndarray, int]:
+    def _process_prompt(self, inputs: GenerateInput,
+                          kv_cache: KVCache) -> Tuple[np.ndarray, int]:
         """Processes the initial prompt and returns initial logits and sequence length."""
         prompt_tokens = np.array(inputs.start_tokens).reshape(1, -1)
-        forward_pass_input = ForwardPassInput(x=prompt_tokens, ltm_state=0, kv_cache=kv_cache)
-        logits, _, _ = self.forward(forward_pass_input, dynamic_top_k=inputs.dynamic_top_k)
+        forward_pass_input = ForwardPassInput(
+            x=prompt_tokens, ltm_state=0, kv_cache=kv_cache)
+        logits, _, _ = self.forward(forward_pass_input,
+                                    dynamic_top_k=inputs.dynamic_top_k)
 
         if (inputs.images is not None and self.tokenizer and
                 self.tokenizer.char_to_idx.get('<IMAGE>') in prompt_tokens):
