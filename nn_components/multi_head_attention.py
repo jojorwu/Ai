@@ -15,7 +15,7 @@ class MultiHeadAttention(nn.Module):
     """
     Implements Grouped-Query Attention (GQA) with RoPE, migrated to PyTorch.
     """
-    def __init__(self, config: MultiHeadAttentionConfig):
+    def __init__(self, config: MultiHeadAttentionConfig, linear_class=Linear):
         super().__init__()
         if config.d_model % config.num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads.")
@@ -31,11 +31,13 @@ class MultiHeadAttention(nn.Module):
         q_dim = self.d_k * self.num_heads
         kv_dim = self.d_k * self.num_kv_heads
 
-        self.qkv_proj = Linear(config.d_model, q_dim + 2 * kv_dim, bias=config.bias)
-        self.qkv_proj.special_residual_init(config.num_layers)
+        self.qkv_proj = linear_class(config.d_model, q_dim + 2 * kv_dim, bias=config.bias)
+        if hasattr(self.qkv_proj, 'special_residual_init'):
+            self.qkv_proj.special_residual_init(config.num_layers)
 
-        self.wo = Linear(config.d_model, config.d_model, bias=config.bias)
-        self.wo.special_residual_init(config.num_layers)
+        self.wo = linear_class(config.d_model, config.d_model, bias=config.bias)
+        if hasattr(self.wo, 'special_residual_init'):
+            self.wo.special_residual_init(config.num_layers)
 
         self.attention = ScaledDotProductAttention()
         self.rotary_emb = config.rotary_emb

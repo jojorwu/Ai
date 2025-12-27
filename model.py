@@ -8,6 +8,10 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 from typing import Generator, Tuple
 
+import bitsandbytes as bnb
+from accelerate import init_empty_weights
+from bitsandbytes.nn import Linear4bit
+
 from config import TransformerConfig, DecoderBlockConfig
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from nn_components.embedding import Embedding
@@ -29,10 +33,15 @@ class Transformer(nn.Module):
     """
     Full GPT-style (decoder-only) Transformer model, migrated to PyTorch.
     """
-    def __init__(self, config: TransformerConfig):
+    _no_split_modules = ["DecoderBlock"]
+
+    def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
         super().__init__()
         self.config = config
+        self._initialize_layers(config, load_in_4bit)
 
+    def _initialize_layers(self, config: TransformerConfig, load_in_4bit: bool):
+        """Initializes the layers of the model."""
         d_k = config.model.d_model // config.model.num_heads
         rope_cos, rope_sin = precompute_rope_embeddings(d_k, config.model.max_seq_len)
         self.register_buffer("rope_cos", rope_cos)
@@ -51,20 +60,21 @@ class Transformer(nn.Module):
 
         # self.vision_encoder = VisionEncoder(...)
 
-        block_config = self._create_block_config()
+        block_config = self._create_block_config(load_in_4bit)
         self.decoder_blocks = nn.ModuleList(
             [DecoderBlock(block_config) for _ in range(config.model.num_layers)]
         )
         self.final_norm = RMSNorm(config.model.d_model)
 
         # Dual-head architecture
-        self.value_head_linear = Linear(config.model.d_model, 1, bias=False)
+        linear_class = Linear4bit if load_in_4bit else Linear
+        self.value_head_linear = linear_class(config.model.d_model, 1, bias=False)
         self.value_head_activation = Tanh()
 
         # Weight tying for the policy head
         self.embedding.weights.data = self.embedding.embedding.weight
 
-    def _create_block_config(self) -> DecoderBlockConfig:
+    def _create_block_config(self, load_in_4bit: bool) -> DecoderBlockConfig:
         """Helper method to create the DecoderBlockConfig."""
         return DecoderBlockConfig(
             d_model=self.config.model.d_model,
@@ -76,7 +86,8 @@ class Transformer(nn.Module):
             num_layers=self.config.model.num_layers,
             long_term_memory=self.long_term_memory,
             num_experts=self.config.model.num_experts,
-            top_k_experts=self.config.model.top_k_experts
+            top_k_experts=self.config.model.top_k_experts,
+            load_in_4bit=load_in_4bit
         )
 
     def forward(self, x: torch.Tensor, ltm_state: torch.Tensor = None, dynamic_top_k: int = None):

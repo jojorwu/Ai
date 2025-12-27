@@ -3,3 +3,5 @@ PyPDF2
 python-docx
 Pillow
 torch
+bitsandbytes
+accelerate

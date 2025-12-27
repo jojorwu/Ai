@@ -13,16 +13,17 @@ class FeedForward(nn.Module):
     Implements the SwiGLU Feed-Forward Network layer, migrated to PyTorch.
     FFN = SwiGLU(x, W1, V, W2) = (SiLU(x @ W1) * (x @ V)) @ W2
     """
-    def __init__(self, d_model: int, d_ff: int, bias: bool = False, num_layers: int = 1):
+    def __init__(self, d_model: int, d_ff: int, bias: bool = False, num_layers: int = 1, linear_class=Linear):
         super().__init__()
         # The SwiGLU FFN has two linear layers in parallel for the gating mechanism,
         # followed by one output linear layer.
-        self.w1 = Linear(d_model, d_ff, bias=bias)
-        self.w3 = Linear(d_model, d_ff, bias=bias) # This is 'V' in the SwiGLU paper
-        self.w2 = Linear(d_ff, d_model, bias=bias)
+        self.w1 = linear_class(d_model, d_ff, bias=bias)
+        self.w3 = linear_class(d_model, d_ff, bias=bias) # This is 'V' in the SwiGLU paper
+        self.w2 = linear_class(d_ff, d_model, bias=bias)
 
         # Apply special initialization for the output layer as in GPT-2
-        self.w2.special_residual_init(num_layers)
+        if hasattr(self.w2, 'special_residual_init'):
+            self.w2.special_residual_init(num_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

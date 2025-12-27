@@ -14,14 +14,14 @@ class MixtureOfExperts(nn.Module):
     """
     Mixture of Experts (MoE) layer, migrated to PyTorch.
     """
-    def __init__(self, config: MoEConfig):
+    def __init__(self, config: MoEConfig, linear_class=Linear):
         super().__init__()
         self.d_model = config.d_model
         self.num_experts = config.num_experts
         self.top_k = config.top_k
-        self.gate = Linear(config.d_model, config.num_experts, bias=config.bias)
+        self.gate = linear_class(config.d_model, config.num_experts, bias=config.bias)
         self.experts = nn.ModuleList(
-            [FeedForward(config.d_model, config.d_ff, bias=config.bias) for _ in range(config.num_experts)]
+            [FeedForward(config.d_model, config.d_ff, bias=config.bias, linear_class=linear_class) for _ in range(config.num_experts)]
         )
 
     def forward(self, x: torch.Tensor, dynamic_top_k: int = None):

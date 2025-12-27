@@ -11,6 +11,8 @@ from nn_components.feed_forward import FeedForward
 from nn_components.moe import MixtureOfExperts
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rms_norm import RMSNorm
+from nn_components.linear import Linear
+from bitsandbytes.nn import Linear4bit
 
 
 @dataclass
@@ -36,6 +38,8 @@ class DecoderBlock(nn.Module):
         super().__init__()
         self.config = config
 
+        linear_class = Linear4bit if config.load_in_4bit else Linear
+
         mha_config = MultiHeadAttentionConfig(
             d_model=config.d_model,
             num_heads=config.num_heads,
@@ -44,7 +48,7 @@ class DecoderBlock(nn.Module):
             bias=False, # Typically no bias in MHA projections
             num_layers=config.num_layers
         )
-        self.mha = MultiHeadAttention(mha_config)
+        self.mha = MultiHeadAttention(mha_config, linear_class=linear_class)
         self.ltm = config.long_term_memory
 
         self.use_moe = (config.num_experts is not None and
@@ -59,9 +63,9 @@ class DecoderBlock(nn.Module):
                 top_k=config.top_k_experts,
                 bias=False # Typically no bias in MoE experts
             )
-            self.moe_layer = MixtureOfExperts(moe_config)
+            self.moe_layer = MixtureOfExperts(moe_config, linear_class=linear_class)
         else:
-            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False, num_layers=config.num_layers)
+            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False, num_layers=config.num_layers, linear_class=linear_class)
 
         self.norm1 = RMSNorm(config.d_model)
         self.norm2 = RMSNorm(config.d_model)
