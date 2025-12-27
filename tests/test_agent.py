@@ -3,10 +3,9 @@ This module contains the TestAgent class, which tests the Agent's functionality.
 """
 import unittest
 
-from backend import np
 from agent import Agent
-from config import Config
-from model import Transformer
+from backend import np
+from tests.test_utils import create_test_model
 
 
 class TestAgent(unittest.TestCase):
@@ -16,16 +15,7 @@ class TestAgent(unittest.TestCase):
 
     def setUp(self):
         """Set up the test environment."""
-        self.config = Config.from_json('config.json')
-        # Ensure LTM is enabled for this test by setting its dimensions
-        self.config.model.ltm_d_hidden = 64
-        self.config.model.ltm_num_layers = 2
-        self.model = Transformer(
-            vocab_size=50,
-            model_config=self.config.model,
-            vision_config=self.config.vision,
-            ltm_config=self.config.ltm
-        )
+        self.model, self.config = create_test_model(ltm=True)
         self.agent = Agent(self.model)
 
     def test_agent_experience(self):

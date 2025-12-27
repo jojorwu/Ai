@@ -73,7 +73,9 @@ class LongTermMemory:
         params = {}
         for i, layer in enumerate(self.layers):
             if isinstance(layer, Linear):
-                params.update({f'layer_{i}_{name}': val for name, val in layer.get_trainable_params().items()})
+                layer_params = layer.get_trainable_params()
+                params.update({f'layer_{i}_{name}': val
+                               for name, val in layer_params.items()})
         return params
 
     def zero_grad(self):

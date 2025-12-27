@@ -20,6 +20,27 @@ class SpecializationConfig:
     steps_per_agent: int
 
 
+@dataclass
+class CollaborationContext:
+    """Context for handling a collaboration request."""
+    proposer: Agent
+    prompt_tokens: list
+    prompt_image: np.ndarray
+    scores: dict
+    proposer_index: int
+    response: np.ndarray
+
+
+@dataclass
+class IndependentResponseContext:
+    """Context for handling an independent response."""
+    proposer: Agent
+    prompt_tokens: list
+    prompt_image: np.ndarray
+    scores: dict
+    response: np.ndarray
+
+
 def get_agent_batches(data, batch_size, seq_len):
     """
     Simplified batch generator for agent specialization.
@@ -37,9 +58,12 @@ def get_agent_batches(data, batch_size, seq_len):
         return
 
     end_idx = num_batches * batch_size * seq_len
-    x = np.array([item[0] for item in data[:end_idx]], dtype=np.int64).reshape(batch_size, -1)
-    y = np.array([item[0] for item in data[1:end_idx + 1]], dtype=np.int64).reshape(batch_size, -1)
-    images = np.array([item[1] for item in data[:end_idx]], dtype=object).reshape(batch_size, -1)
+    x = np.array([item[0] for item in data[:end_idx]],
+                 dtype=np.int64).reshape(batch_size, -1)
+    y = np.array([item[0] for item in data[1:end_idx + 1]],
+                 dtype=np.int64).reshape(batch_size, -1)
+    images = np.array([item[1] for item in data[:end_idx]],
+                      dtype=object).reshape(batch_size, -1)
 
     for i in range(0, x.shape[1], seq_len):
         yield x[:, i:i + seq_len], y[:, i:i + seq_len], images[:, i:i + seq_len]
@@ -49,6 +73,13 @@ class AgentManager:
     """
     Manages the creation, specialization, and evaluation of a population of agents.
     """
+    REWARD_INDEPENDENT_SUCCESS = 5.0
+    PENALTY_INDEPENDENT_FAILURE = -5.0
+    REWARD_GOOD_HELP = 3.0
+    PENALTY_BAD_HELP = -3.0
+    REWARD_ASKING_FOR_HELP = 0.5
+    REWARD_ADMIT_IGNORANCE = 1.0
+    SUCCESS_THRESHOLD = 0.5
 
     def __init__(self, base_model: Transformer, num_agents: int):
         self.base_model = base_model
@@ -79,12 +110,15 @@ class AgentManager:
         for i, agent in enumerate(self.agents):
             agent_data = data_chunks[i]
             if len(agent_data) == 0:
-                logging.info("  - Skipping %s, no data assigned.", agent.agent_id)
+                logging.info("  - Skipping %s, no data assigned.",
+                             agent.agent_id)
                 continue
 
-            logging.info("  - Specializing %s on %d items...", agent.agent_id, len(agent_data))
+            logging.info("  - Specializing %s on %d items...",
+                         agent.agent_id, len(agent_data))
 
-            batch_generator = get_agent_batches(agent_data, spec_config.batch_size, spec_config.seq_len)
+            batch_generator = get_agent_batches(
+                agent_data, spec_config.batch_size, spec_config.seq_len)
 
             steps_done = 0
             for x_batch, y_batch, image_batch in batch_generator:
@@ -94,8 +128,9 @@ class AgentManager:
                 steps_done += 1
 
             if steps_done < spec_config.steps_per_agent:
-                logging.warning("    - Only %d/%d steps were performed for %s due to insufficient data.",
-                                steps_done, spec_config.steps_per_agent, agent.agent_id)
+                logging.warning(
+                    "    - Only %d/%d steps were performed for %s due to insufficient data.",
+                    steps_done, spec_config.steps_per_agent, agent.agent_id)
 
         logging.info("Agent specialization complete.")
 
@@ -107,15 +142,20 @@ class AgentManager:
             logging.warning("No best agents to merge.")
             return
 
-        logging.info("Merging LTM weights from %d best agents...", len(best_agents))
+        logging.info("Merging LTM weights from %d best agents...",
+                     len(best_agents))
 
-        ltm_states = [agent.get_ltm_state() for agent in best_agents if agent.get_ltm_state() is not None]
+        ltm_states = [
+            agent.get_ltm_state() for agent in best_agents
+            if agent.get_ltm_state() is not None
+        ]
         if not ltm_states:
             logging.warning("None of the best agents had a valid LTM state.")
             return
 
         avg_ltm_state = copy.deepcopy(ltm_states[0])
-        avg_ltm_state['memory_state'] = np.zeros_like(avg_ltm_state['memory_state'])
+        avg_ltm_state['memory_state'] = np.zeros_like(
+            avg_ltm_state['memory_state'])
         for layer_name in avg_ltm_state['children']:
             avg_ltm_state['children'][layer_name]['weights'] = np.zeros_like(
                 avg_ltm_state['children'][layer_name]['weights'])
@@ -126,9 +166,11 @@ class AgentManager:
         for state in ltm_states:
             avg_ltm_state['memory_state'] += state['memory_state']
             for layer_name, layer_state in state['children'].items():
-                avg_ltm_state['children'][layer_name]['weights'] += layer_state['weights']
+                avg_ltm_state['children'][layer_name]['weights'] += layer_state[
+                    'weights']
                 if 'bias' in layer_state:
-                    avg_ltm_state['children'][layer_name]['bias'] += layer_state.get('bias', 0)
+                    avg_ltm_state['children'][layer_name]['bias'] += layer_state.get(
+                        'bias', 0)
 
         num_best_agents = len(ltm_states)
         avg_ltm_state['memory_state'] /= num_best_agents
@@ -139,78 +181,119 @@ class AgentManager:
 
         if self.base_model.long_term_memory:
             self.base_model.long_term_memory.set_state(avg_ltm_state)
-            logging.info("Base model's LTM has been updated with merged weights.")
+            logging.info(
+                "Base model's LTM has been updated with merged weights.")
+
+    def _initialize_evaluation(self, tokenizer):
+        """Initializes scores and special tokens for evaluation."""
+        scores = {agent.agent_id: 0.0 for agent in self.agents}
+        tokens = {
+            "ask_help": tokenizer.char_to_idx.get('<ASK_FOR_HELP>'),
+            "i_dont_know": tokenizer.char_to_idx.get('<I_DONT_KNOW>')
+        }
+        return scores, tokens
+
+    def _handle_collaboration_request(self, ctx: CollaborationContext):
+        """Handles the scenario where an agent asks for help."""
+        ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
+        helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
+        if helper.agent_id == ctx.proposer.agent_id:
+            return
+
+        context = list(ctx.prompt_tokens) + ctx.response.tolist()
+        helper_response = helper.generate_response(
+            np.array(context), ctx.prompt_image)
+
+        critics = [
+            a for a in self.agents
+            if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
+        ] or [ctx.proposer]
+        critique_scores = [
+            c.critique_response(context, ctx.prompt_image, helper_response)
+            for c in critics
+        ]
+        avg_critique_score = np.mean(
+            critique_scores) if critique_scores else 0
+
+        if avg_critique_score > self.SUCCESS_THRESHOLD:
+            ctx.scores[helper.agent_id] += self.REWARD_GOOD_HELP * \
+                avg_critique_score
+            ctx.scores[
+                ctx.proposer.agent_id] += self.REWARD_GOOD_HELP * avg_critique_score
+        else:
+            ctx.scores[helper.agent_id] += self.PENALTY_BAD_HELP * \
+                (1 - avg_critique_score)
+
+    def _handle_independent_response(self, ctx: IndependentResponseContext):
+        """Handles the scenario where an agent responds independently."""
+        critics = [
+            a for a in self.agents if a.agent_id != ctx.proposer.agent_id
+        ]
+        critique_scores = [
+            c.critique_response(ctx.prompt_tokens, ctx.prompt_image,
+                                ctx.response) for c in critics
+        ]
+        avg_critique_score = np.mean(
+            critique_scores) if critique_scores else 0
+
+        if avg_critique_score > self.SUCCESS_THRESHOLD:
+            ctx.scores[
+                ctx.proposer.agent_id] += self.REWARD_INDEPENDENT_SUCCESS * avg_critique_score
+        else:
+            ctx.scores[
+                ctx.proposer.
+                agent_id] += self.PENALTY_INDEPENDENT_FAILURE * (
+                    1 - avg_critique_score)
+
+    def _finalize_evaluation(self, scores, top_k):
+        """Finalizes evaluation by updating and sorting agents."""
+        for agent in self.agents:
+            agent.update_fitness_score(scores[agent.agent_id])
+        sorted_agents = sorted(
+            self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
+        logging.info("  - Collaborative Evaluation Fitness scores:")
+        for agent in sorted_agents:
+            logging.info("    - %s: %.4f", agent.agent_id,
+                         agent.get_fitness_score())
+        return sorted_agents[:top_k]
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k):
         """
         Evaluates agents with a nuanced scoring system.
         """
         if not self.agents or len(self.agents) < 2:
-            logging.warning("Collaborative evaluation requires at least 2 agents.")
+            logging.warning(
+                "Collaborative evaluation requires at least 2 agents.")
             return self.agents[:top_k]
 
-        agent_scores = {agent.agent_id: 0.0 for agent in self.agents}
-        reward_independent_success = 5.0
-        penalty_independent_failure = -5.0
-        reward_good_help = 3.0
-        penalty_bad_help = -3.0
-        reward_asking_for_help = 0.5
-        reward_admit_ignorance = 1.0
-        success_threshold = 0.5
-
-        ask_help_token_id = tokenizer.char_to_idx.get('<ASK_FOR_HELP>')
-        i_dont_know_token_id = tokenizer.char_to_idx.get('<I_DONT_KNOW>')
-
-        eval_prompts = evaluation_data[:min(len(evaluation_data), self.num_agents * 2)]
+        scores, tokens = self._initialize_evaluation(tokenizer)
+        eval_prompts = evaluation_data[:min(
+            len(evaluation_data), self.num_agents * 2)]
 
         for prompt_data in eval_prompts:
             prompt_tokens, prompt_image = prompt_data
             for i, proposer in enumerate(self.agents):
-                critics = [a for a in self.agents if a.agent_id != proposer.agent_id]
-                proposer_response = proposer.generate_response(np.array(prompt_tokens), prompt_image)
+                response = proposer.generate_response(
+                    np.array(prompt_tokens), prompt_image)
 
-                if ask_help_token_id in proposer_response:
-                    agent_scores[proposer.agent_id] += reward_asking_for_help
-                    helper = self.agents[(i + 1) % len(self.agents)]
-                    if helper.agent_id == proposer.agent_id:
-                        continue
-
-                    context = list(prompt_tokens) + proposer_response.tolist()
-                    helper_response = helper.generate_response(np.array(context), prompt_image)
-
-                    critics_for_helper = [a for a in self.agents if
-                                          a.agent_id not in [proposer.agent_id, helper.agent_id]]
-                    if not critics_for_helper:
-                        critics_for_helper = [proposer]
-
-                    critique_scores = [c.critique_response(context, prompt_image, helper_response)
-                                       for c in critics_for_helper]
-                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
-
-                    if avg_critique_score > success_threshold:
-                        agent_scores[helper.agent_id] += reward_good_help * avg_critique_score
-                        agent_scores[proposer.agent_id] += reward_good_help * avg_critique_score
-                    else:
-                        agent_scores[helper.agent_id] += penalty_bad_help * (1 - avg_critique_score)
-
-                elif i_dont_know_token_id in proposer_response:
-                    agent_scores[proposer.agent_id] += reward_admit_ignorance
-
+                if tokens["ask_help"] in response:
+                    ctx = CollaborationContext(
+                        proposer=proposer,
+                        prompt_tokens=prompt_tokens,
+                        prompt_image=prompt_image,
+                        scores=scores,
+                        proposer_index=i,
+                        response=response)
+                    self._handle_collaboration_request(ctx)
+                elif tokens["i_dont_know"] in response:
+                    scores[proposer.agent_id] += 1.0
                 else:
-                    critique_scores = [c.critique_response(prompt_tokens, prompt_image,
-                                                           proposer_response) for c in critics]
-                    avg_critique_score = np.mean(critique_scores) if critique_scores else 0
+                    ctx = IndependentResponseContext(
+                        proposer=proposer,
+                        prompt_tokens=prompt_tokens,
+                        prompt_image=prompt_image,
+                        scores=scores,
+                        response=response)
+                    self._handle_independent_response(ctx)
 
-                    if avg_critique_score > success_threshold:
-                        agent_scores[proposer.agent_id] += reward_independent_success * avg_critique_score
-                    else:
-                        agent_scores[proposer.agent_id] += penalty_independent_failure * (1 - avg_critique_score)
-
-        for agent in self.agents:
-            agent.update_fitness_score(agent_scores[agent.agent_id])
-
-        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
-        logging.info("  - Collaborative Evaluation Fitness scores:")
-        for agent in sorted_agents:
-            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
-        return sorted_agents[:top_k]
+        return self._finalize_evaluation(scores, top_k)

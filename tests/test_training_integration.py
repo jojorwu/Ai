@@ -32,28 +32,33 @@ class TestTrainingIntegration(unittest.TestCase):
     This is a smoke test for the entire training pipeline.
     """
 
+    def _setup_test(self):
+        """Sets up the test data, model, and optimizer."""
+        vocab_size = 10
+        config = _create_test_config()
+        model = Transformer(vocab_size=vocab_size,
+                            model_config=config.model,
+                            vision_config=config.vision,
+                            ltm_config=config.ltm)
+        x = np.random.randint(
+            0, vocab_size,
+            (config.evolution.batch_size, config.evolution.seq_len))
+        y = np.random.randint(
+            0, vocab_size,
+            (config.evolution.batch_size, config.evolution.seq_len))
+        mask = np.triu(
+            np.ones((config.evolution.seq_len, config.evolution.seq_len)),
+            k=1).astype(bool)
+        policy_loss_fn = SoftmaxCrossEntropy()
+        optimizer = Adam(config.optimizer)
+        return model, x, y, mask, policy_loss_fn, optimizer
+
     def test_single_training_step(self):
         """
         Tests that a single, simple training step updates the model's weights.
         """
         logging.info("\nRunning Test: Training Integration (single step)...")
-        vocab_size = 10
-        config = _create_test_config()
-
-        model = Transformer(
-            vocab_size=vocab_size,
-            model_config=config.model,
-            vision_config=config.vision,
-            ltm_config=config.ltm)
-        x = np.random.randint(
-            0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
-        y = np.random.randint(
-            0, vocab_size, (config.evolution.batch_size, config.evolution.seq_len))
-        mask = np.triu(np.ones((config.evolution.seq_len,
-                                config.evolution.seq_len)), k=1).astype(bool)
-
-        policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer = Adam(config.optimizer)
+        model, x, y, mask, policy_loss_fn, optimizer = self._setup_test()
 
         initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
 
@@ -74,10 +79,11 @@ class TestTrainingIntegration(unittest.TestCase):
         optimizer.step(params_with_grads)
 
         updated_state = model.get_state()
-
-        weights_updated = any(not np.allclose(initial_state[k], updated_state[k]) for k in initial_state)
-
-        self.assertTrue(weights_updated, "Weights were not updated after a training step.")
+        weights_updated = any(
+            not np.allclose(initial_state[k], updated_state[k])
+            for k in initial_state)
+        self.assertTrue(weights_updated,
+                        "Weights were not updated after a training step.")
         logging.info("Training Integration test PASSED.")
 
 

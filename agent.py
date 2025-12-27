@@ -29,9 +29,38 @@ class Agent:
     def __init__(self, base_model: Transformer, agent_id=None):
         self.agent_id = agent_id or str(uuid.uuid4())
         self.model = copy.deepcopy(base_model)
-        self.ltm_optimizer = Adam(self.model.ltm_config.optimizer) if self.model.long_term_memory else None
+        if self.model.long_term_memory:
+            self.ltm_optimizer = Adam(self.model.ltm_config.optimizer)
+        else:
+            self.ltm_optimizer = None
         self.loss_fn = SoftmaxCrossEntropy()
         self.metrics = AgentMetrics()
+
+    def _forward_pass(self, x_batch, y_batch, image_batch):
+        forward_pass_input = ForwardPassInput(x=x_batch, images=image_batch, ltm_state=0)
+        logits, values, _ = self.model.forward(forward_pass_input)
+        logits_for_loss = logits[:, 1:, :] if self.model.long_term_memory else logits
+        self.loss_fn.forward(logits_for_loss, y_batch)
+        return logits, values
+
+    def _backward_pass(self, logits):
+        dlogits_from_loss = self.loss_fn.backward()
+        if self.model.long_term_memory:
+            batch_size, _, vocab_size = logits.shape
+            padding = np.zeros((batch_size, 1, vocab_size), dtype=dlogits_from_loss.dtype)
+            dlogits = np.concatenate([padding, dlogits_from_loss], axis=1)
+        else:
+            dlogits = dlogits_from_loss
+        return dlogits
+
+    def _update_ltm(self):
+        ltm_params = self.model.long_term_memory.get_trainable_params()
+        if any(p[1] is not None for p in ltm_params.values()):
+            flat_grads = np.concatenate([p[1].ravel() for p in ltm_params.values() if p[1] is not None])
+            surprise = np.linalg.norm(flat_grads) if flat_grads.size > 0 else 0.0
+            self.metrics.total_surprise += surprise
+            if surprise > self.model.ltm_surprise_threshold:
+                self.ltm_optimizer.step(ltm_params)
 
     def experience(self, x_batch: np.ndarray, y_batch: np.ndarray, image_batch: np.ndarray):
         """
@@ -43,36 +72,12 @@ class Agent:
         self.model.train()
         self.model.zero_grad()
 
-        forward_pass_input = ForwardPassInput(x=x_batch, images=image_batch, ltm_state=0)
-        logits, values, _ = self.model.forward(forward_pass_input)
-
-        # Slice logits to match target length if LTM is used, as LTM prepends a context token
-        if self.model.long_term_memory:
-            logits_for_loss = logits[:, 1:, :]
-        else:
-            logits_for_loss = logits
-
-        _ = self.loss_fn.forward(logits_for_loss, y_batch)
-        dlogits_from_loss = self.loss_fn.backward()
-
-        # Pad dlogits if LTM was used, to match the original logit shape
-        if self.model.long_term_memory:
-            batch_size, _, vocab_size = logits.shape
-            padding = np.zeros((batch_size, 1, vocab_size), dtype=dlogits_from_loss.dtype)
-            dlogits = np.concatenate([padding, dlogits_from_loss], axis=1)
-        else:
-            dlogits = dlogits_from_loss
-
+        logits, values = self._forward_pass(x_batch, y_batch, image_batch)
+        dlogits = self._backward_pass(logits)
         dvalues = np.ones_like(values)
         self.model.backward(dlogits, dvalues)
 
-        ltm_params = self.model.long_term_memory.get_trainable_params()
-        if any(p[1] is not None for p in ltm_params.values()):
-            flat_grads = np.concatenate([p[1].ravel() for p in ltm_params.values() if p[1] is not None])
-            surprise = np.linalg.norm(flat_grads) if flat_grads.size > 0 else 0.0
-            self.metrics.total_surprise += surprise
-            if surprise > self.model.ltm_surprise_threshold:
-                self.ltm_optimizer.step(ltm_params)
+        self._update_ltm()
 
         self.metrics.value_score_sum += np.mean(values)
         self.metrics.experience_count += 1

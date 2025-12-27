@@ -80,13 +80,17 @@ def select_model_interactively() -> str | None:
         logging.error("No models found in the '%s' directory.", models_dir)
         return None
 
-    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+    available_models = [
+        d for d in os.listdir(models_dir)
+        if os.path.isdir(os.path.join(models_dir, d))
+    ]
 
     if not available_models:
         logging.error("No valid model directories found in '%s'.", models_dir)
         return None
     if len(available_models) == 1:
-        logging.info("Automatically selecting the only available model: %s", available_models[0])
+        logging.info("Automatically selecting the only available model: %s",
+                     available_models[0])
         return available_models[0]
 
     logging.info("Available models:")
@@ -146,11 +150,14 @@ def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
     return None, None
 
 
-def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None, Config | None]:
+def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None,
+                                     Config | None]:
     """Initializes the environment, including logging, args, and model selection."""
     setup_logging()
-    parser = argparse.ArgumentParser(description="Interact with a trained Transformer model.")
-    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
+    parser = argparse.ArgumentParser(
+        description="Interact with a trained Transformer model.")
+    parser.add_argument('--model-name', type=str,
+                        help="The name of the model to use.")
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()
@@ -160,7 +167,8 @@ def initialize_environment() -> Tuple[Transformer | None, Tokenizer | None, Conf
     model_dir = os.path.join('models', model_name)
     config_path = os.path.join(model_dir, 'config.json')
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+        raise FileNotFoundError(
+            f"Config file not found for model '{model_name}' at {config_path}")
 
     config = Config.from_json(config_path)
     set_backend(config.hardware.device)
@@ -255,9 +263,12 @@ def main():
         if model and tokenizer and config:
             run_agent_loop(model, tokenizer, config)
     except FileNotFoundError as e:
-        logging.error("Error: %s. Ensure the model name is correct and the model files exist.", e)
+        logging.error(
+            "Error: %s. Ensure the model name is correct and the model files exist.", e)
     except (IOError, OSError) as e:
-        logging.error("An file system error occurred: %s", e, exc_info=True)
+        logging.error("A file system error occurred: %s", e, exc_info=True)
+    except KeyboardInterrupt:
+        logging.info("\nProcess interrupted by user. Exiting.")
     except Exception as e:
         logging.error("An unexpected error occurred: %s", e, exc_info=True)
 

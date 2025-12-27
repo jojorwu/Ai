@@ -14,7 +14,8 @@ class VisionEncoder:
         self.d_model = d_model
         self.patch_size = patch_size
         self.num_channels = num_channels
-        self.projection = Linear(patch_size * patch_size * num_channels, d_model)
+        projection_input_dim = patch_size * patch_size * num_channels
+        self.projection = Linear(projection_input_dim, d_model)
 
     def forward(self, images: np.ndarray) -> np.ndarray:
         """

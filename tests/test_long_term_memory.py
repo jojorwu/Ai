@@ -1,13 +1,19 @@
 """
 Unit tests for the LongTermMemory module.
 """
+import sys
+import os
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 import unittest
 
 import numpy as np
 
-from nn_components.long_term_memory import LongTermMemory
 from gradient_check import check_gradient, numerical_gradient
+from nn_components.long_term_memory import LongTermMemory
 
 
 class TestLongTermMemory(unittest.TestCase):

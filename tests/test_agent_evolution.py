@@ -83,26 +83,33 @@ class TestAgentEvolution(unittest.TestCase):
             with self.subTest(scenario=scenario_name):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
-                def mock_generate(model_self, inputs, details=details,
-                                  agent_manager=agent_manager):
-                    agent_id = next(agent.agent_id for agent in agent_manager.agents
-                                    if agent.model is model_self)
-                    response_chunk = np.array(details['agents_setup'][agent_id]['response'])
-                    yield response_chunk, 0.5
+                def create_mock_generate(d, am):
+                    def mock_generate(model_self, inputs):
+                        agent_id = next(
+                            agent.agent_id for agent in am.agents
+                            if agent.model is model_self)
+                        response_chunk = np.array(
+                            d['agents_setup'][agent_id]['response'])
+                        yield response_chunk, 0.5
+                    return mock_generate
 
-                def mock_critique_response(_, __, ___, response, details=details):
-                    if (details['agents_setup']['agent_0']['response'][0]
-                            == tokenizer.char_to_idx['<ASK_FOR_HELP>']):
-                        return details['agents_setup']['agent_1']['critique_score']
+                def create_mock_critique(d):
+                    def mock_critique_response(_, __, ___, response):
+                        if (d['agents_setup']['agent_0']['response'][0] ==
+                                tokenizer.char_to_idx['<ASK_FOR_HELP>']):
+                            return d['agents_setup']['agent_1']['critique_score']
+                        for setup in d['agents_setup'].values():
+                            if np.array_equal(setup['response'], response):
+                                return setup['critique_score']
+                        return 0.0
+                    return mock_critique_response
 
-                    for setup in details['agents_setup'].values():
-                        if np.array_equal(setup['response'], response):
-                            return setup['critique_score']
-                    return 0.0
+                mock_generate_func = create_mock_generate(details, agent_manager)
+                mock_critique_func = create_mock_critique(details)
 
                 for agent in agent_manager.agents:
-                    agent.model.generate = types.MethodType(mock_generate, agent.model)
-                    agent.critique_response = types.MethodType(mock_critique_response, agent)
+                    agent.model.generate = types.MethodType(mock_generate_func, agent.model)
+                    agent.critique_response = types.MethodType(mock_critique_func, agent)
 
                 best_agents = agent_manager.collaborative_evaluation(
                     evaluation_data=[([1, 2, 3], None)],

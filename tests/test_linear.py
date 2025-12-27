@@ -1,13 +1,19 @@
 """
 Tests for the Linear layer.
 """
+import sys
+import os
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 import unittest
 
 import numpy as np
 
-from nn_components.linear import Linear
 from gradient_check import check_gradient, numerical_gradient
+from nn_components.linear import Linear
 
 
 class TestLinear(unittest.TestCase):
@@ -28,8 +34,8 @@ class TestLinear(unittest.TestCase):
 
         _ = layer.forward(x)
         dx = layer.backward(dout)
-        dw = layer.dweights
-        db = layer.dbias
+        dw = layer.cache.dweights
+        db = layer.cache.dbias
 
         dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
         check_gradient(self, dx, dx_num, "dx")

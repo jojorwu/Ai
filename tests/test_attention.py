@@ -1,13 +1,19 @@
 """
 Tests for the ScaledDotProductAttention layer.
 """
+import sys
+import os
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 import unittest
 
 import numpy as np
 
-from nn_components.attention import ScaledDotProductAttention
 from gradient_check import check_gradient, numerical_gradient
+from nn_components.attention import ScaledDotProductAttention
 
 
 def _create_test_data(batch_size, num_heads, seq_len, d_k, d_v):
