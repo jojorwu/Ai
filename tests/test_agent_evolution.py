@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 from agent_manager import AgentManager
-from config import Config
+from config import Config, TransformerConfig
 from model import Transformer
 from tokenizer import Tokenizer
 
@@ -45,10 +45,14 @@ class TestAgentEvolution(unittest.TestCase):
         config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
 
         tokenizer = Tokenizer(self.data_dir)
-        base_model = Transformer(vocab_size=tokenizer.vocab_size,
-                                 model_config=config.model,
-                                 vision_config=config.vision,
-                                 ltm_config=config.ltm)
+        transformer_config = TransformerConfig(
+            vocab_size=tokenizer.vocab_size,
+            model=config.model,
+            vision=config.vision,
+            ltm=config.ltm,
+            tokenizer=tokenizer
+        )
+        base_model = Transformer(transformer_config)
 
         scenarios = {
             "INDEPENDENT_SUCCESS": {
@@ -84,10 +88,12 @@ class TestAgentEvolution(unittest.TestCase):
                 agent_manager = AgentManager(base_model=base_model, num_agents=2)
 
                 def create_mock_generate(d, am):
-                    def mock_generate(model_self, inputs):
+                    def mock_generate(model_self, _):
                         agent_id = next(
-                            agent.agent_id for agent in am.agents
-                            if agent.model is model_self)
+                            (agent.agent_id for agent in am.agents
+                             if agent.model is model_self), None)
+                        if agent_id is None:
+                            return
                         response_chunk = np.array(
                             d['agents_setup'][agent_id]['response'])
                         yield response_chunk, 0.5
@@ -131,10 +137,14 @@ class TestAgentEvolution(unittest.TestCase):
         config.model.ltm_d_hidden, config.model.ltm_num_layers = 8, 1
 
         tokenizer = Tokenizer(self.data_dir)
-        base_model = Transformer(vocab_size=tokenizer.vocab_size,
-                                 model_config=config.model,
-                                 vision_config=config.vision,
-                                 ltm_config=config.ltm)
+        transformer_config = TransformerConfig(
+            vocab_size=tokenizer.vocab_size,
+            model=config.model,
+            vision=config.vision,
+            ltm=config.ltm,
+            tokenizer=tokenizer
+        )
+        base_model = Transformer(transformer_config)
         initial_ltm_state = base_model.long_term_memory.get_state()
         initial_ltm_weights = initial_ltm_state['children']['linear_0']['weights']
 

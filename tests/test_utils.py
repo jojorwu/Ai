@@ -1,7 +1,7 @@
 """
 This module contains utility functions for tests.
 """
-from config import Config
+from config import Config, TransformerConfig
 from model import Transformer
 
 
@@ -15,10 +15,11 @@ def create_test_model(vocab_size=50, ltm=True):
         config.model.ltm_d_hidden = None
         config.model.ltm_num_layers = None
 
-    model = Transformer(
+    transformer_config = TransformerConfig(
         vocab_size=vocab_size,
-        model_config=config.model,
-        vision_config=config.vision,
-        ltm_config=config.ltm
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm
     )
+    model = Transformer(transformer_config)
     return model, config

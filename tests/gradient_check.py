@@ -6,6 +6,7 @@ import logging
 from backend import np
 
 
+# pylint: disable=too-many-arguments
 def check_gradient(test_case, analytical_grad, numerical_grad, name, atol=1e-4, rtol=1e-5):
     """
     Checks if the analytical and numerical gradients are close.

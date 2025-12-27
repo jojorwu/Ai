@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from config import Config
+from config import Config, TransformerConfig
 from model import ForwardPassInput, Transformer
 from nn_components.loss import SoftmaxCrossEntropy
 from optimizer import Adam
@@ -36,10 +36,13 @@ class TestTrainingIntegration(unittest.TestCase):
         """Sets up the test data, model, and optimizer."""
         vocab_size = 10
         config = _create_test_config()
-        model = Transformer(vocab_size=vocab_size,
-                            model_config=config.model,
-                            vision_config=config.vision,
-                            ltm_config=config.ltm)
+        transformer_config = TransformerConfig(
+            vocab_size=vocab_size,
+            model=config.model,
+            vision=config.vision,
+            ltm=config.ltm
+        )
+        model = Transformer(transformer_config)
         x = np.random.randint(
             0, vocab_size,
             (config.evolution.batch_size, config.evolution.seq_len))

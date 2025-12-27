@@ -12,8 +12,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from backend import np, set_backend
-from config import Config, DynamicParametersConfig
+from backend import set_backend
+from config import Config, DynamicParametersConfig, TransformerConfig
 from model import Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
@@ -123,7 +123,15 @@ def load_model_and_tokenizer(model_name: str, config: Config) -> Tuple[Transform
             )
 
     tokenizer = Tokenizer(model_dir)
-    model = Transformer.load_model(weights_path, tokenizer.vocab_size, config, tokenizer)
+    transformer_config = TransformerConfig(
+        vocab_size=tokenizer.vocab_size,
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm,
+        tokenizer=tokenizer
+    )
+    model = Transformer.load_model(
+        weights_path, tokenizer.vocab_size, config, tokenizer)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     model.quantize_model()
