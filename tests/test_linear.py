@@ -37,13 +37,19 @@ class TestLinear(unittest.TestCase):
         dw = layer.cache.dweights
         db = layer.cache.dbias
 
-        dx_num = numerical_gradient(lambda x_arg: layer.forward(x_arg), x, dout)
+        dx_num = numerical_gradient(layer.forward, x, dout)
         check_gradient(self, dx, dx_num, "dx")
 
-        dw_num = numerical_gradient(lambda w_arg: layer.forward(x), layer.weights, dout)
+        def forward_weights(_):
+            return layer.forward(x)
+
+        dw_num = numerical_gradient(forward_weights, layer.weights, dout)
         check_gradient(self, dw, dw_num, "dweights", atol=1e-3)
 
-        db_num = numerical_gradient(lambda b_arg: layer.forward(x), layer.bias, dout)
+        def forward_bias(_):
+            return layer.forward(x)
+
+        db_num = numerical_gradient(forward_bias, layer.bias, dout)
         check_gradient(self, db, db_num, "dbias")
 
         logging.info("All Linear gradient checks passed!")

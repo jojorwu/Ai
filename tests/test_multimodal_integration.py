@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from config import Config
+from config import Config, TransformerConfig
 from model import ForwardPassInput, Transformer
 from tokenizer import Tokenizer
 
@@ -36,13 +36,14 @@ class TestMultimodalIntegration(unittest.TestCase):
 
         cls.tokenizer = Tokenizer(cls.temp_dir)
 
-        cls.model = Transformer(
+        transformer_config = TransformerConfig(
             vocab_size=cls.tokenizer.vocab_size,
-            model_config=cls.config.model,
-            vision_config=cls.config.vision,
-            ltm_config=cls.config.ltm,
+            model=cls.config.model,
+            vision=cls.config.vision,
+            ltm=cls.config.ltm,
             tokenizer=cls.tokenizer
         )
+        cls.model = Transformer(transformer_config)
 
     @classmethod
     def tearDownClass(cls):

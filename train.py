@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass
 
 from backend import set_backend
-from config import Config
+from config import Config, TransformerConfig
 from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from nn_components.loss import SoftmaxCrossEntropy
@@ -42,7 +42,7 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     tokenizer = Tokenizer(tokenizer_path)
     multimodal_data = load_multimodal_data_from_directory(data_dir)
     if not multimodal_data:
-        raise ValueError("Failed to load any data from directory: %s", data_dir)
+        raise ValueError(f"Failed to load any data from directory: {data_dir}")
     all_text = " ".join([text for text, _ in multimodal_data])
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
     split_idx = int(len(data_tokens) * (1 - validation_split))
@@ -55,8 +55,14 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
 def initialize_components(config: Config, vocab_size: int, tokenizer):
     """Initializes the model, loss function, and optimizer."""
     logging.info("Initializing model, loss, and optimizer...")
-    model = Transformer(vocab_size=vocab_size, model_config=config.model,
-                        vision_config=config.vision, ltm_config=config.ltm, tokenizer=tokenizer)
+    transformer_config = TransformerConfig(
+        vocab_size=vocab_size,
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm,
+        tokenizer=tokenizer
+    )
+    model = Transformer(transformer_config)
     loss_fn = SoftmaxCrossEntropy()
     optimizer = Adam(config.optimizer)
     logging.info("Model, loss, and optimizer initialized.")
@@ -85,7 +91,7 @@ def _setup_environment(args):
 
     if resume_dir:
         if not os.path.isdir(resume_dir):
-            raise FileNotFoundError("Resume directory not found: %s", resume_dir)
+            raise FileNotFoundError(f"Resume directory not found: {resume_dir}")
         config_path = os.path.join(resume_dir, 'config.json')
         log_path = os.path.join(model_dir, 'training.log')
         os.makedirs(model_dir, exist_ok=True)
@@ -95,8 +101,8 @@ def _setup_environment(args):
     else:
         if os.path.exists(model_dir):
             raise FileExistsError(
-                "Model directory '%s' already exists. "
-                "Use --resume-from or choose a new name.", model_dir
+                f"Model directory '{model_dir}' already exists. "
+                "Use --resume-from or choose a new name."
             )
         os.makedirs(model_dir)
         config_path = 'config.json'
@@ -124,8 +130,8 @@ def _initialize_training_state(model, optimizer, model_dir, resume_dir):
         if os.path.exists(weights_path):
             config_path = os.path.join(resume_dir, 'config.json')
             config = Config.from_json(config_path)
-            model.load_model(weights_path, model.vocab_size, config,
-                               model.tokenizer)
+            model = Transformer.load_model(
+                weights_path, model.config.vocab_size, config, model.config.tokenizer)
             logging.info("Loaded model weights from %s", weights_path)
 
     if os.path.exists(checkpoint_path):
@@ -166,7 +172,7 @@ def _run_epoch(epoch, loop_config):
         log_parts.insert(0, f"Average Loss: {avg_loss:.4f}")
     if is_pretrain:
         log_parts.append(f"Learning Rate: {loop_config.optimizer.lr:.6f}")
-    logging.info("    - " + "\n    - ".join(log_parts))
+    logging.info("    - %s", "\n    - ".join(log_parts))
     return val_loss, current_step_delta
 
 

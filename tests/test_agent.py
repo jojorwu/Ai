@@ -16,7 +16,7 @@ class TestAgent(unittest.TestCase):
     def setUp(self):
         """Set up the test environment."""
         self.model, self.config = create_test_model(ltm=True)
-        self.agent = Agent(self.model)
+        self.agent = Agent(base_model=self.model)
 
     def test_agent_experience(self):
         """

@@ -41,6 +41,19 @@ class MultiHeadAttentionConfig(BaseModel):
     num_layers: int = 1
 
 
+class TransformerConfig(BaseModel):
+    """Configuration for the Transformer model."""
+    vocab_size: int
+    model: 'ModelConfig'
+    vision: 'VisionConfig'
+    ltm: Optional['LTMConfig'] = None
+    tokenizer: Optional[Any] = None
+
+    class Config:
+        """Pydantic config."""
+        arbitrary_types_allowed = True
+
+
 class MoEConfig(BaseModel):
     """Configuration for the Mixture of Experts layer."""
     d_model: int

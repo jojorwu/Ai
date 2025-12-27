@@ -56,7 +56,7 @@ class TestKVCache(unittest.TestCase):
         self.assertEqual(self.cache.current_pos, 4)
 
         # Verify that the retrieved data is correctly ordered
-        k_cached, v_cached = self.cache.get(0)
+        k_cached, _ = self.cache.get(0)
         self.assertEqual(k_cached.shape[-2], self.max_seq_len)
 
         # The last 12 elements should be from the original k_full

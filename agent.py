@@ -30,7 +30,7 @@ class Agent:
         self.agent_id = agent_id or str(uuid.uuid4())
         self.model = copy.deepcopy(base_model)
         if self.model.long_term_memory:
-            self.ltm_optimizer = Adam(self.model.ltm_config.optimizer)
+            self.ltm_optimizer = Adam(self.model.config.ltm.optimizer)
         else:
             self.ltm_optimizer = None
         self.loss_fn = SoftmaxCrossEntropy()
