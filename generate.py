@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from backend import set_backend
+from backend import np, set_backend
 from config import Config, DynamicParametersConfig
 from model import Transformer
 from tokenizer import Tokenizer
