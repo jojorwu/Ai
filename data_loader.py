@@ -9,7 +9,8 @@ import docx
 import PyPDF2
 from PIL import Image
 
-from backend import np
+import numpy as np
+import torch
 
 
 # pylint: disable=broad-except-in-catch
@@ -138,3 +139,20 @@ def get_batches(data, batch_size, seq_len):
             x_list.append(data[j:j + seq_len])
             y_list.append(data[j + 1:j + seq_len + 1])
         yield np.array(x_list), np.array(y_list)
+
+
+def get_batches_torch(data, batch_size, seq_len, device):
+    """
+    Generator function to yield batches of data as PyTorch tensors.
+    """
+    num_sequences = len(data) - seq_len
+    for i in range(0, num_sequences, batch_size):
+        batch_end = i + batch_size
+        x_list, y_list = [], []
+        for j in range(i, min(batch_end, num_sequences)):
+            x_list.append(data[j:j + seq_len])
+            y_list.append(data[j + 1:j + seq_len + 1])
+
+        x = torch.tensor(x_list, dtype=torch.long, device=device)
+        y = torch.tensor(y_list, dtype=torch.long, device=device)
+        yield x, y, None # Return None for images for now
