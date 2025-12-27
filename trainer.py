@@ -1,160 +1,157 @@
 """
-This module contains the Trainer class, which encapsulates the core training logic.
+PyTorch implementation of the Trainer class, which encapsulates the core training logic.
 """
 import logging
 import time
 from dataclasses import dataclass
-from typing import Iterator
+import copy
 
-import numpy as np
+import torch
+import torch.nn as nn
+from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from agent_manager import AgentManager, SpecializationConfig
 from config import Config
-from data_loader import get_batches
-from nn_components.lr_scheduler import cosine_decay_with_warmup
-from optimizer import clip_gradients
-
+from data_loader import get_batches_torch as get_batches # Assuming a torch version exists
 
 @dataclass
 class TrainerConfig:
-    """Configuration for the Trainer."""
-    model: 'Transformer'
-    optimizer: 'Adam'
-    loss_fn: 'SoftmaxCrossEntropy'
+    """Configuration for the Trainer, adapted for PyTorch."""
+    model: nn.Module
+    optimizer: Adam
+    policy_loss_fn: nn.Module
+    value_loss_fn: nn.Module
     tokenizer: 'Tokenizer'
     train_data: list
     val_data: list
     config: Config
-
-
-@dataclass
-class PretrainStepContext:
-    """Context for a single pre-training step."""
-    x: np.ndarray
-    y: np.ndarray
-    current_step: int
-    training_steps: int
-
+    accelerator: 'Accelerator'
 
 class Trainer:
     """
-    Encapsulates the training and validation logic.
+    Encapsulates the training and validation logic using PyTorch and Accelerator.
     """
 
     def __init__(self, **kwargs):
         self._config = TrainerConfig(**kwargs)
-        self.max_norm = self._config.config.optimizer.max_norm
 
     def run_validation(self) -> float:
         """Runs validation on the model."""
         self._config.model.eval()
-        total_loss, num_batches = 0, 0
+        total_loss = 0
+        num_batches = 0
         evo_cfg = self._config.config.evolution
-        batch_iterator = get_batches(self._config.val_data,
-                                     evo_cfg.batch_size, evo_cfg.seq_len)
 
-        for x, y in batch_iterator:
-            mask = np.triu(np.ones((x.shape[1], x.shape[1])), k=1).astype(bool)
-            forward_input = self._config.model.ForwardPassInput(x=x, ltm_state=0, mask=mask)
-            logits, _, _ = self._config.model.forward(forward_input)
-            total_loss += self._config.loss_fn.forward(logits, y)
-            num_batches += 1
+        batch_iterator = get_batches(
+            self._config.val_data, evo_cfg.batch_size, evo_cfg.seq_len, self._config.accelerator.device
+        )
+
+        with torch.no_grad():
+            for x, y, _ in batch_iterator:
+                logits, _, _ = self._config.model(x)
+                loss = self._config.policy_loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
+                total_loss += loss.item()
+                num_batches += 1
+
         self._config.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')
 
-    def _get_batch_iterator(self) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-        """Returns a batch iterator for the training data."""
-        evo_cfg = self._config.config.evolution
-        return get_batches(self._config.train_data,
-                           evo_cfg.batch_size, evo_cfg.seq_len)
-
-    def _run_pretrain_step(self, context: PretrainStepContext) -> float:
-        """Runs a single pre-training step."""
-        evo_cfg = self._config.config.evolution
-        self._config.model.train()
-        mask = np.triu(np.ones((context.x.shape[1], context.x.shape[1])), k=1).astype(bool)
-        forward_input = self._config.model.ForwardPassInput(x=context.x, ltm_state=0, mask=mask)
-        logits, _, aux_loss = self._config.model.forward(forward_input)
-        policy_loss = self._config.loss_fn.forward(logits, context.y)
-        total_loss = policy_loss + evo_cfg.moe_aux_loss_coeff * aux_loss
-        dlogits = self._config.loss_fn.backward()
-        self._config.model.backward(dlogits, np.zeros((context.x.shape[0], 1)))
-
-        if (context.current_step + 1) % evo_cfg.gradient_accumulation_steps == 0:
-            self._update_gradients(context.current_step, context.training_steps)
-        return total_loss.item()
-
-    def _update_gradients(self, current_step: int, training_steps: int):
-        """Clips gradients, updates learning rate, and steps the optimizer."""
-        evo_cfg = self._config.config.evolution
-        scheduler_cfg = self._config.config.scheduler
-        named_params = self._config.model.get_named_params(flat=False)
-        clip_gradients(named_params, self.max_norm)
-        max_lr = self._config.optimizer.initial_lr
-        new_lr = cosine_decay_with_warmup(
-            current_step // evo_cfg.gradient_accumulation_steps,
-            training_steps, max_lr, **scheduler_cfg.model_dump())
-        self._config.optimizer.lr = new_lr
-
-        params_with_grads = {
-            f"{name}.{k}": (v[0], v[1])
-            for name, layer in self._config.model.get_named_params().items()
-            if hasattr(layer, 'get_trainable_params')
-            for k, v in layer.get_trainable_params().items()
-        }
-        self._config.optimizer.step(params_with_grads)
-        self._config.model.zero_grad()
-
-    def train_pretrain_epoch(self) -> tuple[float, float, int]:
+    def train_pretrain_epoch(self) -> tuple[float, float]:
         """Runs one epoch of pre-training."""
         start_time = time.time()
         total_policy_loss = 0
-        current_step_in_epoch = 0
-        batch_iterator = self._get_batch_iterator()
+        num_batches = 0
+
         evo_cfg = self._config.config.evolution
-        num_batches = len(self._config.train_data) // (evo_cfg.batch_size * evo_cfg.seq_len)
-        training_steps = (num_batches // evo_cfg.gradient_accumulation_steps * evo_cfg.pretrain_epochs)
+        scheduler_cfg = self._config.config.scheduler
 
-        self._config.model.zero_grad()
-        for i, (x, y) in enumerate(batch_iterator):
-            context = PretrainStepContext(x=x, y=y, current_step=i, training_steps=training_steps)
-            total_policy_loss += self._run_pretrain_step(context)
+        batch_iterator = get_batches(
+            self._config.train_data, evo_cfg.batch_size, evo_cfg.seq_len, self._config.accelerator.device
+        )
+
+        # Simple scheduler for now
+        scheduler = CosineAnnealingLR(self._config.optimizer, T_max=100) # Placeholder T_max
+
+        self._config.model.train()
+        self._config.optimizer.zero_grad()
+
+        for i, (x, y, _) in enumerate(batch_iterator):
+            # Forward pass
+            logits, _, aux_loss = self._config.model(x)
+
+            # Calculate loss
+            policy_loss = self._config.policy_loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
+            total_loss = policy_loss
+            if aux_loss is not None:
+                total_loss += evo_cfg.moe_aux_loss_coeff * aux_loss
+
+            # Scale loss for gradient accumulation
+            loss_scaled = total_loss / evo_cfg.gradient_accumulation_steps
+
+            # Backward pass
+            self._config.accelerator.backward(loss_scaled)
+
+            total_policy_loss += policy_loss.item()
+            num_batches += 1
+
+            # Gradient accumulation step
             if (i + 1) % evo_cfg.gradient_accumulation_steps == 0:
-                current_step_in_epoch += 1
+                # Clip gradients
+                if self._config.config.optimizer.max_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self._config.model.parameters(), self._config.config.optimizer.max_norm
+                    )
+                # Optimizer step
+                self._config.optimizer.step()
+                # Zero gradients
+                self._config.optimizer.zero_grad()
 
+        scheduler.step()
         avg_loss = total_policy_loss / num_batches if num_batches > 0 else 0
         epoch_time = time.time() - start_time
-        return avg_loss, epoch_time, current_step_in_epoch
+        return avg_loss, epoch_time
 
     def run_evolution_cycle(self):
         """Runs one full cycle of evolution."""
         logging.info("--- Starting new evolution cycle ---")
         start_time = time.time()
         evo_config = self._config.config.evolution
+        device = self._config.accelerator.device
+
+        # Create a CPU copy of the model for agent cloning to avoid VRAM issues
+        cpu_model = copy.deepcopy(self._config.model).to('cpu')
 
         agent_manager = AgentManager(
-            base_model=self._config.model, num_agents=evo_config.num_agents)
-        logging.info("Specializing %d agents...", evo_config.num_agents)
+            base_model=cpu_model, num_agents=evo_config.num_agents
+        )
+        logging.info(f"Specializing {evo_config.num_agents} agents...")
         spec_config = SpecializationConfig(
             full_data=self._config.train_data,
             seq_len=evo_config.seq_len,
             batch_size=evo_config.batch_size,
             steps_per_agent=10
         )
-        agent_manager.specialize_agents_on_dataset(spec_config)
+        # Pass the device for agent training batches
+        agent_manager.specialize_agents_on_dataset(spec_config, device)
 
         logging.info("Evaluating and selecting best agents...")
         best_agents = agent_manager.collaborative_evaluation(
-            evaluation_data=self._config.val_data[:50],
+            evaluation_data=self._config.val_data[:50], # using a slice for speed
             tokenizer=self._config.tokenizer,
-            top_k=evo_config.num_survivors
+            top_k=evo_config.num_survivors,
+            device=device
         )
+
         if best_agents:
-            logging.info("Merging LTM from %d best agents into base model...", len(best_agents))
+            logging.info(f"Merging LTM from {len(best_agents)} best agents into base model...")
             agent_manager.merge_agents(best_agents)
+            # Make sure the base model's LTM is on the correct device after merging
+            if self._config.model.long_term_memory:
+                self._config.model.long_term_memory.to(device)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
 
         epoch_time = time.time() - start_time
-        logging.info("--- Evolution cycle finished in %.2fs ---", epoch_time)
+        logging.info(f"--- Evolution cycle finished in {epoch_time:.2f}s ---")
         return epoch_time

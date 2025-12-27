@@ -1,58 +1,82 @@
 """
-Tests for the Linear layer.
+Tests for the PyTorch-based Linear layer.
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
 from nn_components.linear import Linear
 
 
 class TestLinear(unittest.TestCase):
     """
-    Tests for the Linear layer.
+    Tests for the PyTorch Linear layer.
     """
 
-    def test_linear_backward_gradient_check(self):
-        """Numerically checks the gradients for the `backward` method of Linear."""
-        logging.info("\nRunning Test: Gradient check for Linear layer backward pass...")
-
-        batch_size, seq_len, input_dim, output_dim = 2, 5, 10, 20
-
-        np.random.seed(42)
+    def test_forward_pass(self):
+        """Tests the forward pass of the Linear layer."""
+        input_dim, output_dim = 10, 20
         layer = Linear(input_dim, output_dim)
-        x = np.random.randn(batch_size, seq_len, input_dim)
-        dout = np.random.randn(batch_size, seq_len, output_dim)
 
-        _ = layer.forward(x)
-        dx = layer.backward(dout)
-        dw = layer.cache.dweights
-        db = layer.cache.dbias
+        # Test with a batch of vectors
+        x_batch = torch.randn(32, input_dim)
+        output = layer(x_batch)
 
-        dx_num = numerical_gradient(layer.forward, x, dout)
-        check_gradient(self, dx, dx_num, "dx")
+        self.assertEqual(output.shape, (32, output_dim))
 
-        def forward_weights(_):
-            return layer.forward(x)
+        # Test with a single vector
+        x_single = torch.randn(input_dim)
+        output_single = layer(x_single)
+        self.assertEqual(output_single.shape, (output_dim,))
 
-        dw_num = numerical_gradient(forward_weights, layer.weights, dout)
-        check_gradient(self, dw, dw_num, "dweights", atol=1e-3)
 
-        def forward_bias(_):
-            return layer.forward(x)
+    def test_backward_pass_and_gradient_computation(self):
+        """
+        Tests the backward pass to ensure gradients are computed correctly by autograd.
+        """
+        input_dim, output_dim = 10, 20
+        layer = Linear(input_dim, output_dim)
 
-        db_num = numerical_gradient(forward_bias, layer.bias, dout)
-        check_gradient(self, db, db_num, "dbias")
+        x = torch.randn(32, input_dim, requires_grad=True)
 
-        logging.info("All Linear gradient checks passed!")
+        # Forward pass
+        output = layer(x)
+
+        # Simulate a loss and backward pass
+        fake_loss = output.sum()
+        fake_loss.backward()
+
+        # Check that gradients exist for weights, bias, and input tensor
+        self.assertIsNotNone(layer.weights.grad)
+        self.assertEqual(layer.weights.grad.shape, layer.weights.shape)
+
+        self.assertIsNotNone(layer.bias.grad)
+        self.assertEqual(layer.bias.grad.shape, layer.bias.shape)
+
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+
+
+    def test_no_bias(self):
+        """Tests that the layer works correctly when bias is disabled."""
+        input_dim, output_dim = 10, 20
+        layer = Linear(input_dim, output_dim, bias=False)
+
+        self.assertIsNone(layer.bias)
+
+        x = torch.randn(32, input_dim)
+        output = layer(x)
+
+        self.assertEqual(output.shape, (32, output_dim))
+
+        # Ensure no gradient is computed for the bias
+        fake_loss = output.sum()
+        fake_loss.backward()
+        self.assertIsNone(layer.bias)
 
 
 if __name__ == "__main__":

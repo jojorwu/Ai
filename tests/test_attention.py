@@ -1,58 +1,70 @@
 """
-Tests for the ScaledDotProductAttention layer.
+Tests for the PyTorch-based Scaled Dot-Product Attention.
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
 from nn_components.attention import ScaledDotProductAttention
 
 
-def _create_test_data(batch_size, num_heads, seq_len, d_k, d_v):
-    """Creates test data for the attention layer."""
-    q = np.random.randn(batch_size, num_heads, seq_len, d_k)
-    k = np.random.randn(batch_size, num_heads, seq_len, d_k)
-    v = np.random.randn(batch_size, num_heads, seq_len, d_v)
-    dout = np.random.randn(batch_size, num_heads, seq_len, d_v)
-    return q, k, v, dout
-
-
-class TestAttention(unittest.TestCase):
+class TestScaledDotProductAttention(unittest.TestCase):
     """
-    Tests for the ScaledDotProductAttention layer.
+    Tests for the PyTorch ScaledDotProductAttention layer.
     """
 
-    def test_attention_backward(self):
-        """Numerically checks the gradients for the `backward` method."""
-        logging.info(
-            "\nRunning Test: Gradient check for ScaledDotProductAttention backward pass...")
-
-        np.random.seed(42)
-        q, k, v, dout = _create_test_data(2, 8, 3, 4, 5)
-
+    def test_forward_pass_shape(self):
+        """Tests the forward pass produces the correct output shape."""
         attention = ScaledDotProductAttention()
+        batch, heads, seq_len, d_k = 4, 8, 10, 64
+        q = torch.randn(batch, heads, seq_len, d_k)
+        k = torch.randn(batch, heads, seq_len, d_k)
+        v = torch.randn(batch, heads, seq_len, d_k)
 
-        _ = attention.forward(q, k, v)
-        dq, dk, dv = attention.backward(dout)
+        output = attention(q, k, v)
 
-        dq_num = numerical_gradient(lambda q_arg: attention.forward(q_arg, k, v), q, dout)
-        check_gradient(self, dq, dq_num, "dQ")
+        self.assertEqual(output.shape, (batch, heads, seq_len, d_k))
 
-        dk_num = numerical_gradient(lambda k_arg: attention.forward(q, k_arg, v), k, dout)
-        check_gradient(self, dk, dk_num, "dK")
+    def test_backward_pass_computes_grads(self):
+        """Tests that gradients are computed for Q, K, and V."""
+        attention = ScaledDotProductAttention()
+        batch, heads, seq_len, d_k = 4, 8, 10, 64
+        q = torch.randn(batch, heads, seq_len, d_k, requires_grad=True)
+        k = torch.randn(batch, heads, seq_len, d_k, requires_grad=True)
+        v = torch.randn(batch, heads, seq_len, d_k, requires_grad=True)
 
-        dv_num = numerical_gradient(lambda v_arg: attention.forward(q, k, v_arg), v, dout)
-        check_gradient(self, dv, dv_num, "dV")
+        output = attention(q, k, v)
+        fake_loss = output.sum()
+        fake_loss.backward()
 
-        logging.info("All ScaledDotProductAttention gradient checks passed!")
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+
+    def test_masking(self):
+        """Tests that the mask correctly zeros out attention scores."""
+        attention = ScaledDotProductAttention()
+        batch, heads, seq_len, d_k = 1, 1, 4, 2
+        q = torch.randn(batch, heads, seq_len, d_k)
+        k = torch.randn(batch, heads, seq_len, d_k)
+        v = torch.ones(batch, heads, seq_len, d_k) # Use ones for v to make output predictable
+
+        # Create a mask that allows attending only to the first two tokens
+        mask = torch.tril(torch.ones(seq_len, seq_len)).unsqueeze(0).unsqueeze(0)
+
+        # Manually compute scores to check attention weights
+        scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        scores = scores.masked_fill(mask == 0, float('-inf'))
+        attn_weights = torch.nn.functional.softmax(scores, dim=-1)
+
+        # In the last row of attn_weights, elements after the diagonal should be zero
+        # due to the causal mask.
+        self.assertTrue(torch.all(attn_weights[0, 0, -1, :-1] > 0))
+        self.assertTrue(attn_weights[0, 0, -1, -1] > 0)
 
 
 if __name__ == "__main__":

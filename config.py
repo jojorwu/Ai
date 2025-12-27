@@ -75,6 +75,7 @@ class DecoderBlockConfig(BaseModel):
     top_k_experts: Optional[int] = None
     rotary_emb: Optional[Tuple[Any, Any]] = None
     long_term_memory: Optional[Any] = None
+    load_in_4bit: bool = False
 
     class Config:
         """Pydantic config."""
@@ -180,6 +181,8 @@ class HardwareConfig(BaseModel):
     """Hardware configuration."""
     device: Literal["cpu", "gpu", "mps"] = Field(
         "cpu", description="Device for computations (cpu, gpu, mps).")
+    strategy: Literal["unified", "discrete"] = Field(
+        "discrete", description="Memory strategy for hardware.")
 
 
 class DynamicParametersConfig(BaseModel):

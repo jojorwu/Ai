@@ -1,6 +1,7 @@
-numpy
 pydantic
 PyPDF2
 python-docx
 Pillow
-cupy-cuda12x
+torch
+bitsandbytes
+accelerate

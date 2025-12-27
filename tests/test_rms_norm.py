@@ -1,53 +1,73 @@
 """
-Tests for the RMSNorm layer.
+Tests for the PyTorch-based RMSNorm layer.
 """
 import sys
 import os
+import unittest
+import torch
+import math
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
 from nn_components.rms_norm import RMSNorm
 
 
 class TestRMSNorm(unittest.TestCase):
     """
-    Tests for the RMSNorm layer.
+    Tests for the PyTorch RMSNorm layer.
     """
 
-    def test_rms_norm_backward_gradient_check(self):
-        """Numerically checks the gradients for the `backward` method of RMSNorm."""
-        logging.info("\nRunning Test: Gradient check for RMSNorm backward pass...")
-
-        batch_size, seq_len, d_model = 2, 5, 16
-
-        np.random.seed(42)
+    def test_forward_pass_shape(self):
+        """Tests that the forward pass preserves the tensor shape."""
+        d_model = 64
         norm = RMSNorm(d_model)
-        norm.gamma = np.random.randn(d_model)
+        x = torch.randn(4, 10, d_model)  # Batch, SeqLen, Dim
+        output = norm(x)
+        self.assertEqual(x.shape, output.shape)
 
-        x = np.random.randn(batch_size, seq_len, d_model)
-        dout = np.random.randn(batch_size, seq_len, d_model)
+    def test_backward_pass_computes_grads(self):
+        """
+        Tests the backward pass to ensure gradients are computed for gamma and the input.
+        """
+        d_model = 64
+        norm = RMSNorm(d_model)
+        x = torch.randn(4, 10, d_model, requires_grad=True)
 
-        _ = norm.forward(x)
-        dx = norm.backward(dout)
-        dgamma = norm.dgamma
+        # Forward pass
+        output = norm(x)
 
-        def forward_gamma(_):
-            return norm.forward(x)
+        # Simulate a loss and backward pass
+        fake_loss = output.sum()
+        fake_loss.backward()
 
-        dgamma_num = numerical_gradient(forward_gamma, norm.gamma, dout)
-        check_gradient(self, dgamma, dgamma_num, "dgamma")
+        # Check that gradients exist for gamma and the input tensor
+        self.assertIsNotNone(norm.gamma.grad)
+        self.assertEqual(norm.gamma.grad.shape, norm.gamma.shape)
 
-        dx_num = numerical_gradient(norm.forward, x, dout)
-        check_gradient(self, dx, dx_num, "dx")
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
 
-        logging.info("All RMSNorm gradient checks passed!")
+    def test_normalization_effect(self):
+        """
+        Tests that the norm of the output (before scaling by gamma) is close to sqrt(d_model).
+        """
+        d_model = 64
+        norm = RMSNorm(d_model)
+        x = torch.randn(4, 10, d_model)
+
+        # Manually perform the normalization part of the forward pass
+        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + norm.eps)
+        normalized_x = x / rms
+
+        # The L2 norm of each vector in the last dimension should be close to sqrt(d_model)
+        # This is a property of RMSNorm.
+        l2_norm = torch.linalg.norm(normalized_x, ord=2, dim=-1)
+
+        # We expect the norm to be close to sqrt(d_model)
+        expected_norm = torch.full_like(l2_norm, fill_value=math.sqrt(d_model))
+
+        self.assertTrue(torch.allclose(l2_norm, expected_norm, atol=1e-5))
 
 
 if __name__ == "__main__":

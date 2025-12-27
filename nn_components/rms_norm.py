@@ -1,50 +1,29 @@
 """
-This module implements the Root Mean Square Normalization layer.
+PyTorch implementation of Root Mean Square Normalization (RMSNorm).
 """
-import numpy as np
+import torch
+import torch.nn as nn
 
 
-class RMSNorm:
+class RMSNorm(nn.Module):
     """
-    Implementation of Root Mean Square Normalization.
+    Implements Root Mean Square Normalization, migrated to PyTorch.
     """
-    def __init__(self, d_model, epsilon=1e-5):
+    def __init__(self, d_model: int, eps: float = 1e-6):
+        super().__init__()
         self.d_model = d_model
-        self.epsilon = epsilon
-        self.gamma = np.ones(d_model)
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(d_model))
 
-        self.x = None
-        self.rms = None
-        self.dgamma = None
-
-    def get_trainable_params(self):
-        """Returns a dictionary with trainable parameters and their gradients."""
-        return {'gamma': (self.gamma, self.dgamma)}
-
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for RMSNorm.
-        y = (x / sqrt(mean(x^2) + eps)) * gamma
+        Args:
+            x: Input tensor of shape (batch_size, seq_len, d_model).
+        Returns:
+            Normalized tensor of the same shape.
         """
-        self.x = x
-        self.rms = np.sqrt(np.mean(np.square(x), axis=-1, keepdims=True) + self.epsilon)
-        normalized_x = x / self.rms
-        output = self.gamma * normalized_x
-        return output
-
-    def backward(self, dout):
-        """
-        Backward pass for RMSNorm.
-        """
-        normalized_x = self.x / self.rms
-        dgamma = np.sum(dout * normalized_x, axis=tuple(range(dout.ndim - 1)))
-
-        if self.dgamma is None:
-            self.dgamma = dgamma
-        else:
-            self.dgamma += dgamma
-
-        d_normalized_x = dout * self.gamma
-        d_rms = -np.sum(d_normalized_x * self.x, axis=-1, keepdims=True) / (self.rms**2)
-        dx = (d_normalized_x / self.rms) + (d_rms * self.x / (self.d_model * self.rms))
-        return dx
+        # Calculate the root mean square of the last dimension
+        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
+        # Normalize the input and scale by gamma
+        return (x / rms) * self.gamma

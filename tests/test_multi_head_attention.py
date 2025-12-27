@@ -1,17 +1,14 @@
 """
-Tests for the optimized MultiHeadAttention layer.
+Tests for the PyTorch-based MultiHeadAttention layer.
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-from gradient_check import check_gradient, numerical_gradient
-from backend import np
 from config import MultiHeadAttentionConfig
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rotary_embedding import precompute_rope_embeddings
@@ -19,52 +16,51 @@ from nn_components.rotary_embedding import precompute_rope_embeddings
 
 class TestMultiHeadAttention(unittest.TestCase):
     """
-    Tests for the optimized MultiHeadAttention layer with a single QKV projection.
+    Tests for the PyTorch MultiHeadAttention layer.
     """
 
-    def _setup_test(self):
-        """Sets up the test data and MultiHeadAttention layer."""
-        batch_size, seq_len, d_model, num_heads, num_kv_heads = 2, 8, 32, 4, 2
-        d_k = d_model // num_heads
-        np.random.seed(1337)
-        rope = precompute_rope_embeddings(d_k, max_seq_len=seq_len)
-        config = MultiHeadAttentionConfig(d_model=d_model,
-                                          num_heads=num_heads,
-                                          num_kv_heads=num_kv_heads,
-                                          rotary_emb=rope)
+    def test_forward_pass_shape(self):
+        """Tests that the forward pass preserves the tensor shape."""
+        d_model, num_heads, num_kv_heads = 64, 4, 2
+        config = MultiHeadAttentionConfig(d_model=d_model, num_heads=num_heads, num_kv_heads=num_kv_heads)
         mha = MultiHeadAttention(config)
-        x_input = np.random.randn(batch_size, seq_len, d_model)
-        dout = np.random.randn(batch_size, seq_len, d_model)
-        return mha, x_input, dout
 
-    def _check_gradients(self, mha, x_input, dout):
-        """Checks the gradients for the MultiHeadAttention layer."""
-        _ = mha.forward(x_input)
-        dx_analytic = mha.backward(dout)
+        x = torch.randn(4, 10, d_model)  # Batch, SeqLen, Dim
+        output = mha(x)
 
-        def model_forward(t):
-            return mha.forward(t)
+        self.assertEqual(x.shape, output.shape)
 
-        dx_numerical = numerical_gradient(model_forward, x_input, dout)
-        check_gradient(self, dx_analytic, dx_numerical, "dx")
-
-        all_params = mha.get_trainable_params()
-        for param_name, (param_val, param_grad) in all_params.items():
-            def param_forward(_):
-                return mha.forward(x_input)
-
-            grad_numerical = numerical_gradient(param_forward, param_val, dout)
-            check_gradient(self, param_grad, grad_numerical, f"d{param_name}")
-
-    def test_gqa_with_rope_backward_gradient_check(self):
+    def test_backward_pass_computes_grads(self):
         """
-        Numerically checks the gradients for the GQA backward method with RoPE
-        and a combined QKV projection.
+        Tests that gradients are computed for all parameters in the MHA layer.
         """
-        logging.info("\nRunning Test: Gradient check for optimized GQA with RoPE...")
-        mha, x_input, dout = self._setup_test()
-        self._check_gradients(mha, x_input, dout)
-        logging.info("Optimized MultiHeadAttention gradient checks passed!")
+        d_model, num_heads, num_kv_heads = 64, 4, 2
+        rope = precompute_rope_embeddings(d_model // num_heads, 10)
+        config = MultiHeadAttentionConfig(
+            d_model=d_model,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            rotary_emb=rope,
+            bias=True
+        )
+        mha = MultiHeadAttention(config)
+
+        x = torch.randn(4, 10, d_model, requires_grad=True)
+
+        # Forward pass
+        output = mha(x)
+
+        # Simulate a loss and backward pass
+        fake_loss = output.sum()
+        fake_loss.backward()
+
+        # Check that gradients exist for the projection weights and biases
+        self.assertIsNotNone(mha.qkv_proj.weights.grad)
+        self.assertIsNotNone(mha.qkv_proj.bias.grad)
+        self.assertIsNotNone(mha.wo.weights.grad)
+        self.assertIsNotNone(mha.wo.bias.grad)
+
+        self.assertIsNotNone(x.grad)
 
 
 if __name__ == "__main__":

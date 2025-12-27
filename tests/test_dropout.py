@@ -1,37 +1,56 @@
 """
-Тесты для `Dropout` слоя.
+Tests for the PyTorch-based Dropout layer.
 """
 import unittest
+import torch
 
-from backend import np
 from nn_components.dropout import Dropout
 
 
 class TestDropout(unittest.TestCase):
-    """Тестирование слоя Dropout."""
+    """
+    Tests for the PyTorch Dropout layer.
+    """
 
-    def test_dropout(self):
-        """Тестирование слоя Dropout."""
-        print("\\nRunning tests for Dropout...")
+    def test_dropout_train_mode(self):
+        """Tests that dropout is applied in training mode."""
+        probability = 0.5
+        dropout = Dropout(probability)
+        dropout.train()  # Set the module to training mode
 
-        rate = 0.5
-        dropout = Dropout(rate)
-        x = np.random.randn(10, 20)
+        # Input tensor with large values to make it unlikely that they become zero by chance
+        x = torch.ones(100, 100) * 1000
 
-        # 1. Тест в режиме обучения
-        dropout.train()
-        output_train = dropout.forward(x)
-        self.assertTrue(np.any(output_train == 0), "Test 1 FAILED: No zeros in train mode output.")
-        self.assertAlmostEqual(np.mean(output_train), np.mean(x), delta=0.2,
-                             msg="Test 1 FAILED: Mean of output is too different in train mode.")
-        print("Test 1 (Train Mode) PASSED.")
+        output = dropout(x)
 
-        # 2. Тест в режиме оценки
-        dropout.eval()
-        output_eval = dropout.forward(x)
-        self.assertTrue(np.array_equal(output_eval, x),
-                        "Test 2 FAILED: Output is not identical to input in eval mode.")
-        print("Test 2 (Eval Mode) PASSED.")
+        # Check that some elements have been zeroed out
+        self.assertTrue(torch.any(output == 0))
+
+        # Check that not ALL elements have been zeroed out (sanity check)
+        self.assertTrue(torch.any(output != 0))
+
+        # The expected value of the output should be close to the input
+        # E[output] = (1-p)*(x / (1-p)) + p*0 = x
+        # This is hard to test precisely, so we check if the non-zero elements were scaled.
+        # The scaling factor is 1 / (1 - p)
+        expected_value = 1 / (1 - probability)
+        # Check a non-zero element to see if it was scaled correctly
+        non_zero_elements = output[output != 0]
+        if len(non_zero_elements) > 0:
+            self.assertAlmostEqual(non_zero_elements[0].item(), expected_value * 1000, places=4)
+
+    def test_dropout_eval_mode(self):
+        """Tests that dropout is NOT applied in evaluation mode."""
+        probability = 0.5
+        dropout = Dropout(probability)
+        dropout.eval()  # Set the module to evaluation mode
+
+        x = torch.randn(10, 20)
+        output = dropout(x)
+
+        # In eval mode, the output should be identical to the input
+        self.assertTrue(torch.equal(output, x))
+
 
 if __name__ == "__main__":
     unittest.main()

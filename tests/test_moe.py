@@ -1,79 +1,83 @@
 """
-Unit tests for the MixtureOfExperts module.
+Tests for the PyTorch-based Mixture of Experts (MoE) layer.
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
 
 
 class TestMoE(unittest.TestCase):
-    """Tests for the MixtureOfExperts module."""
+    """
+    Tests for the PyTorch MixtureOfExperts layer.
+    """
 
-    def setUp(self):
-        """Set up a simple MoE layer for testing."""
-        self.config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
-        self.moe = MixtureOfExperts(self.config)
-        self.test_data = {
-            "batch_size": 4,
-            "seq_len": 8,
-            "input":
-            np.random.randn(4, 8, 16)
-        }
+    def test_forward_pass_shape_and_loss(self):
+        """Tests the forward pass output shape and that a scalar loss is returned."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(4, 8, 16)  # Batch, SeqLen, Dim
 
-    def test_forward_pass_shape(self):
-        """Test the output shape of the forward pass."""
-        logging.info("\nRunning Test: MoE Forward Pass Shape...")
-        output, aux_loss = self.moe.forward(self.test_data["input"])
-        self.assertEqual(output.shape, self.test_data["input"].shape)
-        self.assertIsInstance(aux_loss, float)
-        logging.info("MoE Forward Pass Shape test PASSED.")
+        output, aux_loss = moe(x)
 
-    def test_backward_pass_gradient(self):
-        """Perform a numerical gradient check for the backward pass."""
-        logging.info("\nRunning Test: MoE Backward Pass Gradient Check...")
+        self.assertEqual(output.shape, x.shape)
+        self.assertIsInstance(aux_loss, torch.Tensor)
+        self.assertEqual(aux_loss.numel(), 1)
 
-        output, _ = self.moe.forward(self.test_data["input"])
-        dout = np.ones_like(output)
-        self.moe.backward(dout)
+    def test_backward_pass_computes_grads(self):
+        """
+        Tests that gradients are computed for all parameters in the MoE layer.
+        """
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2, bias=True)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(4, 8, 16, requires_grad=True)
 
-        gate_params = self.moe.gate.get_trainable_params()
-        for param_name, (param, analytical_grad) in gate_params.items():
-            if analytical_grad is None:
-                continue
-            numerical_grad_val = numerical_gradient(
-                lambda p_arg: self.moe.forward(self.test_data["input"])[0],
-                param, dout)
-            check_gradient(self, analytical_grad, numerical_grad_val,
-                           f"gate.{param_name}")
+        # Forward pass
+        output, aux_loss = moe(x)
 
-        for i in range(self.config.num_experts):
-            expert = self.moe.experts[i]
-            for layer_name, layer_obj in expert.get_children().items():
-                expert_params = layer_obj.get_trainable_params()
-                for param_name, (param,
-                                analytical_grad) in expert_params.items():
-                    if analytical_grad is None:
-                        continue
-                    numerical_grad_val = numerical_gradient(
-                        lambda p_arg: self.moe.forward(
-                            self.test_data["input"])[0], param, dout)
-                    check_gradient(
-                        self, analytical_grad, numerical_grad_val,
-                        f"expert_{i}.{layer_name}.{param_name}")
+        # Simulate a combined loss and backward pass
+        fake_loss = output.sum() + aux_loss
+        fake_loss.backward()
 
-        logging.info("MoE Backward Pass Gradient Check PASSED.")
+        # Check gradients for the gating network
+        self.assertIsNotNone(moe.gate.weights.grad)
+        self.assertIsNotNone(moe.gate.bias.grad)
+
+        # Check gradients for at least one expert
+        self.assertTrue(any(p.grad is not None for p in moe.experts[0].parameters()))
+
+        # Check gradient for the input
+        self.assertIsNotNone(x.grad)
+
+    def test_dynamic_top_k(self):
+        """Tests that the dynamic_top_k argument overrides the default top_k."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=8, top_k=2)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(1, 1, 16) # Single token for simplicity
+
+        # --- Test with dynamic_top_k=4 ---
+        # We can't directly inspect the number of experts used, but we can check
+        # that it runs without error. A more detailed test would require modifying
+        # the forward pass to return intermediate values, which is beyond a typical unit test.
+        try:
+            output, _ = moe(x, dynamic_top_k=4)
+            self.assertEqual(output.shape, x.shape)
+        except Exception as e:
+            self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
+
+        # --- Test with dynamic_top_k=1 ---
+        try:
+            output, _ = moe(x, dynamic_top_k=1)
+            self.assertEqual(output.shape, x.shape)
+        except Exception as e:
+            self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
