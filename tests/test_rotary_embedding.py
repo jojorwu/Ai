@@ -1,49 +1,63 @@
 """
-Tests for the Rotary Positional Embedding.
+Tests for the PyTorch-based Rotary Positional Embedding (RoPE).
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
-from nn_components.rotary_embedding import (apply_rotary_pos_emb,
-                                            precompute_rope_embeddings,
-                                            rotary_backward)
+from nn_components.rotary_embedding import precompute_rope_embeddings, apply_rope_embeddings
 
 
 class TestRotaryEmbedding(unittest.TestCase):
     """
-    Tests for the Rotary Positional Embedding.
+    Tests for the PyTorch RoPE implementation.
     """
 
-    def test_rotary_embedding_backward_gradient_check(self):
-        """Numerically checks the gradients for the `rotary_backward` function."""
-        logging.info(
-            "\nRunning Test: Gradient check for Rotary Positional Embedding backward pass...")
+    def test_precompute_embeddings_shape(self):
+        """Tests the shape of the precomputed cosine and sine tensors."""
+        d_k = 64
+        max_seq_len = 128
+        cos, sin = precompute_rope_embeddings(d_k, max_seq_len)
 
-        batch_size, n_heads, seq_len, dim = 2, 4, 8, 16
+        # RoPE works on pairs, so the last dimension is d_k // 2 for complex numbers
+        self.assertEqual(cos.shape, (max_seq_len, 1, d_k // 2))
+        self.assertEqual(sin.shape, (max_seq_len, 1, d_k // 2))
 
-        np.random.seed(42)
+    def test_apply_rope_embeddings_shape(self):
+        """Tests that RoPE application preserves tensor shape."""
+        batch, heads, seq_len, d_k = 4, 8, 16, 64
+        x = torch.randn(batch, heads, seq_len, d_k)
+        cos, sin = precompute_rope_embeddings(d_k, seq_len)
 
-        cos, sin = precompute_rope_embeddings(dim, max_seq_len=seq_len)
+        x_rotated = apply_rope_embeddings(x, cos, sin)
 
-        x = np.random.randn(batch_size, n_heads, seq_len, dim)
-        dout = np.random.randn(batch_size, n_heads, seq_len, dim)
+        self.assertEqual(x_rotated.shape, x.shape)
 
-        dx_analytic = rotary_backward(dout, x, cos, sin)
+    def test_backward_pass_computes_grads(self):
+        """
+        Tests that gradients flow correctly through the RoPE application.
+        """
+        batch, heads, seq_len, d_k = 4, 8, 16, 64
+        x = torch.randn(batch, heads, seq_len, d_k, requires_grad=True)
+        cos, sin = precompute_rope_embeddings(d_k, seq_len)
 
-        dx_numerical = numerical_gradient(
-            lambda x_arg: apply_rotary_pos_emb(x_arg, cos, sin), x, dout)
+        # Forward pass
+        x_rotated = apply_rope_embeddings(x, cos, sin)
 
-        check_gradient(self, dx_analytic, dx_numerical, "dx")
-        logging.info("All Rotary Embedding gradient checks passed!")
+        # Simulate a loss and backward pass
+        fake_loss = x_rotated.sum()
+        fake_loss.backward()
+
+        # Check that gradients exist for the input tensor
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+
+        # The gradient should not be all zeros
+        self.assertFalse(torch.all(x.grad == 0))
 
 
 if __name__ == "__main__":

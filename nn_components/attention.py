@@ -1,52 +1,41 @@
 """
-Module containing the attention layer.
+PyTorch implementation of Scaled Dot-Product Attention.
 """
-from backend import np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
-class ScaledDotProductAttention:
+class ScaledDotProductAttention(nn.Module):
     """
-    Computes Scaled Dot-Product Attention with forward and backward passes.
+    Computes Scaled Dot-Product Attention, migrated to PyTorch.
     """
-
     def __init__(self):
-        self.q = None
-        self.k = None
-        self.v = None
-        self.attention_weights = None
-        self.mask = None
+        super().__init__()
 
-    def forward(self, q, k, v, mask=None):
-        """Performs the forward pass for Scaled Dot-Product Attention."""
-        self.q, self.k, self.v, self.mask = q, k, v, mask
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Forward pass for Scaled Dot-Product Attention.
 
-        matmul_qk = np.matmul(q, k.swapaxes(-2, -1))
-        d_k = k.shape[-1]
-        scaled_attention_logits = matmul_qk / np.sqrt(d_k)
+        Args:
+            q: Query tensor, shape (batch, heads, seq_len_q, d_k).
+            k: Key tensor, shape (batch, heads, seq_len_k, d_k).
+            v: Value tensor, shape (batch, heads, seq_len_v, d_v). Note: seq_len_k == seq_len_v.
+            mask: Optional mask tensor.
+
+        Returns:
+            Output tensor and attention weights.
+        """
+        d_k = q.size(-1)
+        # (batch, heads, seq_len_q, seq_len_k)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
 
         if mask is not None:
-            scaled_attention_logits += (mask * -1e9)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
 
-        max_logits = np.max(scaled_attention_logits, axis=-1, keepdims=True)
-        exp_logits = np.exp(scaled_attention_logits - max_logits)
-        sum_exp_logits = np.sum(exp_logits, axis=-1, keepdims=True)
-        self.attention_weights = exp_logits / sum_exp_logits
+        attn_weights = F.softmax(scores, dim=-1)
 
-        return np.matmul(self.attention_weights, v)
+        # (batch, heads, seq_len_q, d_v)
+        output = torch.matmul(attn_weights, v)
 
-    def backward(self, dout):
-        """Performs the backward pass for Scaled Dot-Product Attention."""
-        d_attention_weights = np.matmul(dout, self.v.swapaxes(-2, -1))
-        dv = np.matmul(self.attention_weights.swapaxes(-2, -1), dout)
-
-        s = self.attention_weights
-        sum_ds = np.sum(d_attention_weights * s, axis=-1, keepdims=True)
-        ds = s * (d_attention_weights - sum_ds)
-
-        d_k = self.k.shape[-1]
-        d_matmul_qk = ds / np.sqrt(d_k)
-
-        dq = np.matmul(d_matmul_qk, self.k)
-        dk = np.matmul(d_matmul_qk.swapaxes(-2, -1), self.q)
-
-        return dq, dk, dv
+        return output

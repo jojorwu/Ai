@@ -180,6 +180,8 @@ class HardwareConfig(BaseModel):
     """Hardware configuration."""
     device: Literal["cpu", "gpu", "mps"] = Field(
         "cpu", description="Device for computations (cpu, gpu, mps).")
+    strategy: Literal["unified", "discrete"] = Field(
+        "discrete", description="Memory strategy for hardware.")
 
 
 class DynamicParametersConfig(BaseModel):

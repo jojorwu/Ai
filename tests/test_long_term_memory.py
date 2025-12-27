@@ -1,65 +1,55 @@
 """
-Unit tests for the LongTermMemory module.
+Tests for the PyTorch-based LongTermMemory module.
 """
 import sys
 import os
+import unittest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import logging
-import unittest
-
-import numpy as np
-
-from gradient_check import check_gradient, numerical_gradient
 from nn_components.long_term_memory import LongTermMemory
 
 
 class TestLongTermMemory(unittest.TestCase):
-    """Tests for the LongTermMemory module."""
-
-    def setUp(self):
-        """Set up a simple LongTermMemory module for testing."""
-        self.d_model = 16
-        self.d_hidden = 32
-        self.num_layers = 2
-        self.ltm = LongTermMemory(self.d_model, self.d_hidden, self.num_layers)
-        self.batch_size = 4
-        self.input_data = np.random.randn(self.batch_size, 1, self.d_model)
+    """
+    Tests for the PyTorch LongTermMemory module.
+    """
 
     def test_forward_pass_shape(self):
-        """Test the output shape of the forward pass."""
-        logging.info("\nRunning Test: LTM Forward Pass Shape...")
-        output = self.ltm.forward(self.input_data)
-        self.assertEqual(output.shape, (self.batch_size, 1, self.d_model))
-        logging.info("LTM Forward Pass Shape test PASSED.")
+        """Tests that the forward pass produces the correct output shape."""
+        d_model, d_hidden, num_layers = 64, 128, 2
+        ltm = LongTermMemory(d_model, d_hidden, num_layers)
 
-    def test_backward_pass_gradient(self):
-        """Perform a numerical gradient check for the backward pass."""
-        logging.info("\nRunning Test: LTM Backward Pass Gradient Check...")
+        x = torch.randn(4, 1, d_model)  # Batch, SeqLen (1 for summary), Dim
+        output = ltm(x)
 
-        def forward_pass_for_grad_check(_):
-            return self.ltm.forward(self.input_data)
+        self.assertEqual(output.shape, x.shape)
 
-        output = self.ltm.forward(self.input_data)
-        dout = np.random.randn(*output.shape)
-        self.ltm.backward(dout)
+    def test_backward_pass_computes_grads(self):
+        """
+        Tests that gradients are computed for all parameters in the LTM.
+        """
+        d_model, d_hidden, num_layers = 64, 128, 2
+        ltm = LongTermMemory(d_model, d_hidden, num_layers)
 
-        trainable_params = self.ltm.get_trainable_params()
-        for param_name, (param, analytical_grad) in trainable_params.items():
-            if analytical_grad is None:
-                continue
+        x = torch.randn(4, 1, d_model, requires_grad=True)
 
-            numerical_grad_val = numerical_gradient(
-                forward_pass_for_grad_check,
-                param,
-                dout
-            )
+        # Forward pass
+        output = ltm(x)
 
-            check_gradient(self, analytical_grad, numerical_grad_val, param_name)
-        logging.info("LTM Backward Pass Gradient Check PASSED.")
+        # Simulate a loss and backward pass
+        fake_loss = output.sum()
+        fake_loss.backward()
+
+        # Check that gradients exist for all parameters in the network
+        for param in ltm.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertFalse(torch.all(param.grad == 0))
+
+        self.assertIsNotNone(x.grad)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

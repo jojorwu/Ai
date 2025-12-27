@@ -1,15 +1,18 @@
 """
-Integration test for the training pipeline.
+Integration test for the PyTorch-based training pipeline.
 """
-import logging
+import sys
+import os
 import unittest
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
-import numpy as np
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config, TransformerConfig
-from model import ForwardPassInput, Transformer
-from nn_components.loss import SoftmaxCrossEntropy
-from optimizer import Adam
+from model import Transformer
 
 
 def _create_test_config():
@@ -20,20 +23,21 @@ def _create_test_config():
     config.model.num_heads = 2
     config.model.num_kv_heads = 2
     config.model.d_ff = 16
-    config.model.max_seq_len = 5
-    config.evolution.batch_size = 2
-    config.evolution.seq_len = 4
+    config.model.max_seq_len = 16
+    config.model.ltm_d_hidden = 4
+    config.model.ltm_num_layers = 1
     return config
 
 
 class TestTrainingIntegration(unittest.TestCase):
     """
     Tests that a single training step updates the model's weights.
-    This is a smoke test for the entire training pipeline.
     """
 
-    def _setup_test(self):
-        """Sets up the test data, model, and optimizer."""
+    def test_single_training_step_updates_weights(self):
+        """
+        Tests that a single training step correctly updates the model's weights.
+        """
         vocab_size = 10
         config = _create_test_config()
         transformer_config = TransformerConfig(
@@ -43,51 +47,28 @@ class TestTrainingIntegration(unittest.TestCase):
             ltm=config.ltm
         )
         model = Transformer(transformer_config)
-        x = np.random.randint(
-            0, vocab_size,
-            (config.evolution.batch_size, config.evolution.seq_len))
-        y = np.random.randint(
-            0, vocab_size,
-            (config.evolution.batch_size, config.evolution.seq_len))
-        mask = np.triu(
-            np.ones((config.evolution.seq_len, config.evolution.seq_len)),
-            k=1).astype(bool)
-        policy_loss_fn = SoftmaxCrossEntropy()
-        optimizer = Adam(config.optimizer)
-        return model, x, y, mask, policy_loss_fn, optimizer
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        loss_fn = nn.CrossEntropyLoss()
 
-    def test_single_training_step(self):
-        """
-        Tests that a single, simple training step updates the model's weights.
-        """
-        logging.info("\nRunning Test: Training Integration (single step)...")
-        model, x, y, mask, policy_loss_fn, optimizer = self._setup_test()
+        # Dummy data
+        x = torch.randint(0, vocab_size, (2, 8)) # Batch, SeqLen
+        y = torch.randint(0, vocab_size, (2, 16))
 
-        initial_state = {k: np.copy(v) for k, v in model.get_state().items()}
+        # Store initial weights of one layer
+        initial_weights = model.decoder_blocks[0].mha.wo.weights.clone().detach()
 
+        # Training step
         model.train()
-        model.zero_grad()
-        forward_input = ForwardPassInput(x=x, ltm_state=0, mask=mask)
-        logits, value, _ = model.forward(forward_input)
-        _ = policy_loss_fn.forward(logits, y)
-        dlogits = policy_loss_fn.backward()
-        model.backward(dlogits, np.zeros_like(value))
+        optimizer.zero_grad()
+        logits, _, _ = model(x)
+        loss = loss_fn(logits.view(-1, vocab_size), y.view(-1))
+        loss.backward()
+        optimizer.step()
 
-        params_with_grads = {
-            f"{name}.{k}": (v[0], v[1])
-            for name, layer in model.get_named_params().items()
-            if hasattr(layer, 'get_trainable_params')
-            for k, v in layer.get_trainable_params().items()
-        }
-        optimizer.step(params_with_grads)
-
-        updated_state = model.get_state()
-        weights_updated = any(
-            not np.allclose(initial_state[k], updated_state[k])
-            for k in initial_state)
-        self.assertTrue(weights_updated,
-                        "Weights were not updated after a training step.")
-        logging.info("Training Integration test PASSED.")
+        # Check for weight updates
+        updated_weights = model.decoder_blocks[0].mha.wo.weights.clone().detach()
+        self.assertFalse(torch.equal(initial_weights, updated_weights),
+                         "Model weights were not updated after a training step.")
 
 
 if __name__ == "__main__":

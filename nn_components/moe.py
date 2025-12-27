@@ -1,110 +1,75 @@
 """
-Implementation of the Mixture of Experts (MoE) layer.
+PyTorch implementation of the Mixture of Experts (MoE) layer.
 """
-from dataclasses import dataclass
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-from backend import np
 from config import MoEConfig
 from nn_components.feed_forward import FeedForward
 from nn_components.linear import Linear
-from nn_components.utils import softmax
 
 
-@dataclass
-class MoECache:
-    """Cache for storing intermediate values for the backward pass."""
-    x_reshaped: np.ndarray = None
-    router_weights: np.ndarray = None
-    top_k_indices: np.ndarray = None
-    top_k_mask: np.ndarray = None
-    top_k_weights: np.ndarray = None
-    p_i: np.ndarray = None
-
-
-class MixtureOfExperts:
+class MixtureOfExperts(nn.Module):
     """
-    Mixture of Experts (MoE) layer, which replaces a standard FFN.
+    Mixture of Experts (MoE) layer, migrated to PyTorch.
     """
     def __init__(self, config: MoEConfig):
+        super().__init__()
         self.d_model = config.d_model
         self.num_experts = config.num_experts
         self.top_k = config.top_k
         self.gate = Linear(config.d_model, config.num_experts, bias=config.bias)
-        self.experts = [FeedForward(config.d_model, config.d_ff, bias=config.bias)
-                        for _ in range(config.num_experts)]
-        self.cache = MoECache()
+        self.experts = nn.ModuleList(
+            [FeedForward(config.d_model, config.d_ff, bias=config.bias) for _ in range(config.num_experts)]
+        )
 
-    def get_children(self):
-        """Returns child layers for parameter/gradient traversal."""
-        children = {'gate': self.gate}
-        for i, expert in enumerate(self.experts):
-            children[f'experts.{i}'] = expert
-        return children
-
-    def get_trainable_params(self):
+    def forward(self, x: torch.Tensor, dynamic_top_k: int = None):
         """
-        Compatibility method for the parameter collection system.
-        The main collection logic is handled via get_children.
-        """
-        return {}
-
-    def forward(self, x, dynamic_top_k=None):
-        """
-        Forward pass through the MoE layer.
-
-        Args:
-            x (np.ndarray): Input tensor of shape (batch_size, seq_len, d_model).
-            dynamic_top_k (int, optional): If provided, overrides the default top_k for this pass.
-
-        Returns:
-            Tuple[np.ndarray, float]: Output tensor and auxiliary loss.
+        Forward pass through the MoE layer using vectorized operations.
         """
         batch_size, seq_len, d_model = x.shape
-        self.cache.x_reshaped = x.reshape(-1, d_model)
+        x_reshaped = x.view(-1, d_model)
 
-        router_logits = self.gate.forward(self.cache.x_reshaped)
-        self.cache.router_weights = softmax(router_logits)
+        router_logits = self.gate(x_reshaped)
 
         current_top_k = dynamic_top_k if dynamic_top_k is not None else self.top_k
-        self.cache.top_k_indices = np.argsort(router_logits, axis=1)[:, -current_top_k:]
-        self.cache.top_k_mask = np.zeros_like(self.cache.router_weights)
-        np.put_along_axis(self.cache.top_k_mask, self.cache.top_k_indices, 1, axis=1)
 
-        self.cache.top_k_weights = self.cache.router_weights * self.cache.top_k_mask
-        self.cache.top_k_weights /= self.cache.top_k_weights.sum(axis=1, keepdims=True)
+        # Get top-k experts and their weights
+        top_k_weights, top_k_indices = torch.topk(router_logits, current_top_k, dim=-1)
+        top_k_weights = F.softmax(top_k_weights, dim=-1, dtype=torch.float32).to(x.dtype)
 
-        f_i = np.mean(self.cache.router_weights, axis=0)
-        self.cache.p_i = np.mean(self.cache.top_k_mask, axis=0)
-        aux_loss = self.num_experts * np.sum(f_i * self.cache.p_i)
+        # Compute auxiliary load balancing loss
+        router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+        p_i = router_probs.mean(dim=0)
 
-        final_output = np.zeros_like(self.cache.x_reshaped)
+        top_k_mask = F.one_hot(top_k_indices, num_classes=self.num_experts).float()
+        f_i = top_k_mask.sum(dim=0).sum(dim=0) / (batch_size * seq_len)
+
+        aux_loss = self.num_experts * (p_i * f_i).sum()
+
+        # Vectorized routing
+        final_output = torch.zeros_like(x_reshaped)
+
+        # Flatten the top_k indices and weights
+        flat_top_k_indices = top_k_indices.view(-1)
+        flat_top_k_weights = top_k_weights.view(-1)
+
+        # Expand x_reshaped to match the flattened top_k dimension
+        expanded_x = x_reshaped.unsqueeze(1).expand(-1, current_top_k, -1).reshape(-1, d_model)
+
+        # Use torch.zeros and scatter_add_ for an efficient gather-scatter operation
+        expert_outputs = torch.zeros_like(expanded_x)
         for i, expert in enumerate(self.experts):
-            expert_mask = (self.cache.top_k_indices == i).any(axis=1)
-            if not expert_mask.any():
-                continue
+            expert_mask = (flat_top_k_indices == i)
+            if expert_mask.any():
+                expert_inputs = expanded_x[expert_mask]
+                expert_outputs.masked_scatter_(expert_mask.unsqueeze(-1), expert(expert_inputs))
 
-            expert_weights = self.cache.top_k_weights[expert_mask, i].reshape(-1, 1)
-            final_output[expert_mask] += expert.forward(
-                self.cache.x_reshaped[expert_mask]) * expert_weights
+        # Weight the expert outputs
+        weighted_outputs = expert_outputs * flat_top_k_weights.unsqueeze(-1)
 
-        return final_output.reshape(batch_size, seq_len, d_model), aux_loss
+        # Sum the outputs for each token
+        final_output = weighted_outputs.view(-1, current_top_k, d_model).sum(dim=1)
 
-    def backward(self, dout):
-        """
-        Backward pass through the MoE layer.
-        """
-        batch_size, seq_len, d_model = dout.shape
-        dout_reshaped = dout.reshape(-1, d_model)
-
-        dx_from_experts = np.zeros_like(self.cache.x_reshaped)
-        for i, expert in enumerate(self.experts):
-            expert_mask = (self.cache.top_k_indices == i).any(axis=1)
-            if not expert_mask.any():
-                continue
-
-            expert_weights = self.cache.top_k_weights[expert_mask, i][:, np.newaxis]
-            d_expert_out = dout_reshaped[expert_mask] * expert_weights
-
-            dx_from_experts[expert_mask] += expert.backward(d_expert_out)
-
-        return dx_from_experts.reshape(batch_size, seq_len, d_model)
+        return final_output.view(batch_size, seq_len, d_model), aux_loss

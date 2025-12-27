@@ -1,80 +1,68 @@
 """
-This module implements Rotary Positional Embeddings (RoPE).
+PyTorch implementation of Rotary Positional Embeddings (RoPE).
 """
-import numpy as np
+import torch
 
 
-def precompute_rope_embeddings(dim, max_seq_len, theta=10000.0):
+def precompute_rope_embeddings(d_k: int, max_seq_len: int):
     """
-    Precomputes the Rotary Positional Embeddings (RoPE) for a given dimension and sequence length.
+    Precomputes RoPE frequencies and embeddings for a given dimension and max sequence length.
+
+    Returns a tuple of (cosines, sines) tensors.
     """
-    # Calculate frequencies for each pair of dimensions
-    inv_freq = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float32) / dim))
+    # Create the theta term for RoPE
+    theta = 1.0 / (10000 ** (torch.arange(0, d_k, 2).float() / d_k))
 
-    # Create a matrix of positions and frequencies
-    t = np.arange(max_seq_len, dtype=np.float32)
-    freqs = np.einsum('i,j->ij', t, inv_freq)
+    # Create the sequence positions
+    seq_indices = torch.arange(max_seq_len, dtype=torch.float)
 
-    # Create complex numbers of the form R * e^(i * m * theta_j)
-    emb = np.concatenate((freqs, freqs), axis=-1)
+    # Outer product to get all theta * m values
+    idx_theta = torch.outer(seq_indices, theta)
 
-    # Cache cos and sin values
-    cos_cached = np.cos(emb)[None, None, :, :]
-    sin_cached = np.sin(emb)[None, None, :, :]
-    return cos_cached, sin_cached
+    # Precompute cosines and sines
+    freqs = torch.polar(torch.ones_like(idx_theta), idx_theta)
+
+    # freqs is now a complex tensor, split into real (cos) and imag (sin)
+    # and reshape for broadcasting: (max_seq_len, 1, d_k)
+    cos = freqs.real.unsqueeze(1)
+    sin = freqs.imag.unsqueeze(1)
+
+    return cos, sin
 
 
-def apply_rotary_pos_emb(x, cos, sin):
+def apply_rope_embeddings(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, seq_offset: int = 0):
     """
-    Applies RoPE to the input tensor x.
-    x: (batch, n_heads, seq_len, dim)
+    Applies RoPE to a query or key tensor.
+
+    Args:
+        x: Input tensor (query or key) of shape (batch, heads, seq_len, d_k).
+        cos, sin: Precomputed RoPE tensors.
+        seq_offset: The starting position in the sequence for RoPE.
+
+    Returns:
+        Tensor with RoPE applied.
     """
-    # Split x into two halves
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
+    # Reshape x into complex numbers
+    # x is (batch, heads, seq_len, d_k)
+    # x_complex is (batch, heads, seq_len, d_k/2)
+    x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+
+    # Reshape cos and sin for broadcasting
+    # cos/sin are (seq_len, 1, d_k) -> (seq_len, d_k/2) after reshape
+    cos = cos[seq_offset : seq_offset + x.shape[2], :, :].squeeze(1)[:, :x_complex.shape[-1]]
+    sin = sin[seq_offset : seq_offset + x.shape[2], :, :].squeeze(1)[:, :x_complex.shape[-1]]
+
+    # Create complex rotation vector
+    # rope_embed is (seq_len, d_k/2)
+    rope_embed = torch.complex(cos, sin)
 
     # Apply rotation
-    # [x1, x2] -> [-x2, x1]
-    rotated_x = np.stack((-x2, x1), axis=-1).reshape(x.shape)
+    # x_complex is (batch, heads, seq_len, d_k/2)
+    # rope_embed is (1, 1, seq_len, d_k/2) after unsqueeze
+    x_rotated = x_complex * rope_embed.unsqueeze(0).unsqueeze(0)
 
-    # y = x * cos + rotated_x * sin
-    output = x * cos + rotated_x * sin
+    # Reshape back to real numbers
+    # x_out is (batch, heads, seq_len, d_k)
+    x_out = torch.view_as_real(x_rotated).flatten(3)
 
-    return output
-
-def rotary_backward(dout, x, cos, sin):
-    """
-    Calculates the gradients for RoPE.
-    """
-    # Forward transformation:
-    # y1 = x1 * cos1 + (-x2 * sin1)
-    # y2 = x2 * cos2 + ( x1 * sin2)
-
-    # Gradients:
-    # dL/dx1 = dL/dy1 * dy1/dx1 + dL/dy2 * dy2/dx1
-    # dy1/dx1 = cos1
-    # dy2/dx1 = sin2 (for identical cos/sin)
-    # dL/dx1 = dout1 * cos1 + dout2 * sin2
-
-    # dL/dx2 = dL/dy1 * dy1/dx2 + dL/dy2 * dy2/dx2
-    # dy1/dx2 = -sin1
-    # dy2/dx2 = cos2
-    # dL/dx2 = dout1 * (-sin1) + dout2 * cos2
-
-    dout1 = dout[..., 0::2]
-    dout2 = dout[..., 1::2]
-
-    # Gradients should use the same cos/sin as the forward pass
-    cos1 = cos[..., 0::2]
-    cos2 = cos[..., 1::2]
-    sin1 = sin[..., 0::2]
-    sin2 = sin[..., 1::2]
-
-    # dL/dx1 = dout1 * cos1 + dout2 * sin2
-    # dL/dx2 = -dout1 * sin1 + dout2 * cos2
-    dx1 = dout1 * cos1 + dout2 * sin2
-    dx2 = -dout1 * sin1 + dout2 * cos2
-
-    dx = np.stack((dx1, dx2), axis=-1).reshape(x.shape)
-
-    return dx
+    return x_out.type_as(x)
