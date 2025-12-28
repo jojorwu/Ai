@@ -50,6 +50,10 @@ class Transformer(nn.Module):
         self.value_head = self._init_value_head(config, load_in_4bit)
         self.embedding.weight = self.embedding.embedding.weight
 
+    def count_parameters(self):
+        """Counts the number of trainable parameters in the model."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def _init_ltm(self, config: TransformerConfig):
         if config.model.ltm_d_hidden and config.model.ltm_num_layers:
             return LongTermMemory(
@@ -147,7 +151,7 @@ class Transformer(nn.Module):
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
+        surprise = torch.linalg.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
         self.long_term_memory.zero_grad()
         return surprise
 
