@@ -7,8 +7,8 @@ import unittest
 import torch
 from accelerate import Accelerator, dispatch_model, init_empty_weights
 from bitsandbytes.optim import Adam8bit
-from torch import nn
 from dataclasses import dataclass
+from torch import nn
 
 from config import Config, TransformerConfig
 from model import Transformer
