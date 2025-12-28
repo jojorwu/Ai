@@ -62,14 +62,14 @@ class TestMoE(unittest.TestCase):
         try:
             output, _ = moe(x, dynamic_top_k=4)
             self.assertEqual(output.shape, x.shape)
-        except Exception as e:
+        except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
         # --- Test with dynamic_top_k=1 ---
         try:
             output, _ = moe(x, dynamic_top_k=1)
             self.assertEqual(output.shape, x.shape)
-        except Exception as e:
+        except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
 

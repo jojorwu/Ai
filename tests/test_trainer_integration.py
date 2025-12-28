@@ -35,6 +35,7 @@ def _create_test_config_and_data():
             }
 
         def encode(self, text, add_special_tokens=False):
+            """Bare-bones encode method for testing."""
             return list(text.encode('utf-8'))
 
     tokenizer = MockTokenizer()

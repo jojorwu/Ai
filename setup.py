@@ -1,3 +1,6 @@
+"""
+Setup script for the transformer-project package.
+"""
 from setuptools import setup, find_packages
 
 setup(

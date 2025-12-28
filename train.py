@@ -15,12 +15,7 @@ from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from tokenizer import Tokenizer
 from trainer import Trainer
-
-def setup_logging(log_path: str):
-    """Configures logging to file and console."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
-                        handlers=[logging.FileHandler(log_path), logging.StreamHandler()])
-    logging.getLogger().setLevel(logging.INFO)
+from utils import setup_logging
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
     """Initializes tokenizer and loads data."""
@@ -106,6 +101,7 @@ def run_training_loop(trainer, config, model, model_dir):
             break
 
 def main():
+    """Main training script."""
     parser = argparse.ArgumentParser(description="Agent-centric Transformer Training with PyTorch.")
     parser.add_argument('--model-name', type=str, required=True, help="Name for the model.")
     parser.add_argument('--resume-from', type=str, help="Resume training from an existing model.")

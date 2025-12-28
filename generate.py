@@ -18,43 +18,13 @@ from model import Transformer, GenerateInput
 from tokenizer import Tokenizer
 from tools import execute_tool
 from complexity_manager import ComplexityManager
+from utils import setup_logging, select_model_interactively, parse_tool_call
 
 @dataclass
 class AgentState:
     """Keeps track of the agent's state during a conversation."""
     conversation_history_tokens: List[int]
     complexity_manager: ComplexityManager = None
-
-def setup_logging():
-    """Configures console logging."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-def select_model_interactively() -> str | None:
-    """Lists available models and prompts the user to select one."""
-    # (Implementation is the same as before)
-    models_dir = 'models'
-    if not os.path.isdir(models_dir) or not os.listdir(models_dir):
-        logging.error("No models found in the '%s' directory.", models_dir)
-        return None
-    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-    if not available_models:
-        logging.error("No valid model directories found in '%s'.", models_dir)
-        return None
-    if len(available_models) == 1:
-        logging.info("Automatically selecting the only available model: %s", available_models[0])
-        return available_models[0]
-    logging.info("Available models:")
-    for i, model_name in enumerate(available_models):
-        logging.info("  %d: %s", i + 1, model_name)
-    while True:
-        try:
-            choice = int(input("Please select a model by number: "))
-            if 1 <= choice <= len(available_models):
-                return available_models[choice - 1]
-            logging.warning("Invalid number. Please try again.")
-        except (ValueError, KeyboardInterrupt, EOFError):
-            logging.info("\nSelection cancelled.")
-            return None
 
 def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
     """Loads the PyTorch model and tokenizer."""
@@ -80,22 +50,6 @@ def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
-
-def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
-    """Searches for and parses a tool call within <TOOL_CALL> tags."""
-    # (Implementation is the same as before)
-    pattern = r"<TOOL_CALL>(.*?)</TOOL_CALL>"
-    match = re.search(pattern, text, re.DOTALL)
-    if not match: return None, None
-    tool_call_json = match.group(1).strip()
-    try:
-        tool_call = json.loads(tool_call_json)
-        tool_name, args = tool_call.get("tool"), tool_call.get("args", {})
-        if isinstance(tool_name, str) and isinstance(args, dict):
-            return tool_name, args
-    except (json.JSONDecodeError, AttributeError):
-        pass
-    return None, None
 
 def run_agent_loop(model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
     """Runs the main agent loop."""
