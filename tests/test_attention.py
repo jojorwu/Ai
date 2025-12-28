@@ -1,14 +1,8 @@
 """
 Tests for the PyTorch-based Scaled Dot-Product Attention.
 """
-import sys
-import os
 import unittest
 import torch
-
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from nn_components.attention import ScaledDotProductAttention
 
 

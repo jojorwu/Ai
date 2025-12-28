@@ -1,14 +1,8 @@
 """
 Tests for the PyTorch-based Rotary Positional Embedding (RoPE).
 """
-import sys
-import os
 import unittest
 import torch
-
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from nn_components.rotary_embedding import precompute_rope_embeddings, apply_rope_embeddings
 
 

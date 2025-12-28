@@ -1,14 +1,8 @@
 """
 Tests for the PyTorch-based Mixture of Experts (MoE) layer.
 """
-import sys
-import os
 import unittest
 import torch
-
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
 
