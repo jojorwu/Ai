@@ -9,9 +9,22 @@ from accelerate import Accelerator, dispatch_model, init_empty_weights
 from bitsandbytes.optim import Adam8bit
 from torch import nn
 
+from dataclasses import dataclass
+
 from config import Config, TransformerConfig
 from model import Transformer
 
+
+@dataclass
+class TrainingStepArgs:
+    """Arguments for a single training step."""
+    model: nn.Module
+    optimizer: Adam8bit
+    policy_loss_fn: nn.Module
+    value_loss_fn: nn.Module
+    dummy_input: torch.Tensor
+    dummy_policy_target: torch.Tensor
+    dummy_value_target: torch.Tensor
 
 class TestQuantizationIntegration(unittest.TestCase):
     """
@@ -63,19 +76,18 @@ class TestQuantizationIntegration(unittest.TestCase):
             dummy_input, dummy_policy_target, dummy_value_target
         )
 
-    def _run_training_step(self, model, optimizer, policy_loss_fn, value_loss_fn,
-                         dummy_input, dummy_policy_target, dummy_value_target):
+    def _run_training_step(self, args: TrainingStepArgs):
         """Runs a single training step."""
-        model.train()
-        optimizer.zero_grad()
-        logits, value, aux_loss = model(dummy_input)
-        loss_policy = policy_loss_fn(
-            logits.view(-1, self.vocab_size), dummy_policy_target.view(-1)
+        args.model.train()
+        args.optimizer.zero_grad()
+        logits, value, aux_loss = args.model(args.dummy_input)
+        loss_policy = args.policy_loss_fn(
+            logits.view(-1, self.vocab_size), args.dummy_policy_target.view(-1)
         )
-        loss_value = value_loss_fn(value, dummy_value_target)
+        loss_value = args.value_loss_fn(value, args.dummy_value_target)
         total_loss = loss_policy + loss_value + (aux_loss or 0)
         self.accelerator.backward(total_loss)
-        optimizer.step()
+        args.optimizer.step()
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available, skipping 4-bit test")
     def test_4bit_model_training_step(self):
@@ -88,10 +100,16 @@ class TestQuantizationIntegration(unittest.TestCase):
 
         initial_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
 
-        self._run_training_step(
-            model, optimizer, policy_loss_fn, value_loss_fn,
-            dummy_input, dummy_policy_target, dummy_value_target
+        args = TrainingStepArgs(
+            model=model,
+            optimizer=optimizer,
+            policy_loss_fn=policy_loss_fn,
+            value_loss_fn=value_loss_fn,
+            dummy_input=dummy_input,
+            dummy_policy_target=dummy_policy_target,
+            dummy_value_target=dummy_value_target,
         )
+        self._run_training_step(args)
 
         updated_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
         weights_updated = not torch.equal(initial_weights, updated_weights)

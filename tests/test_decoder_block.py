@@ -62,8 +62,8 @@ class TestDecoderBlock(unittest.TestCase):
         self.assertIsNotNone(decoder_block.mha.wo.weights.grad)
 
         # Norm gradients
-        self.assertIsNotNone(decoder_block.norm1.gamma.grad)
-        self.assertIsNotNone(decoder_block.norm2.gamma.grad)
+        self.assertIsNotNone(decoder_block.norm['norm1'].gamma.grad)
+        self.assertIsNotNone(decoder_block.norm['norm2'].gamma.grad)
 
         # MoE/FFN gradients
         if decoder_block.use_moe:

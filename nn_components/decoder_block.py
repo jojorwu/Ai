@@ -42,8 +42,10 @@ class DecoderBlock(nn.Module):
         linear_class = Linear4bit if config.load_in_4bit else Linear
         self.mha = self._create_mha(config, linear_class)
         self.ff_layer = self._create_ff_layer(config, linear_class)
-        self.norm1 = RMSNorm(config.d_model)
-        self.norm2 = RMSNorm(config.d_model)
+        self.norm = nn.ModuleDict(
+            {'norm1': RMSNorm(config.d_model),
+             'norm2': RMSNorm(config.d_model)}
+        )
         self.dropout = nn.ModuleDict(
             {'dropout1': Dropout(config.dropout_rate),
              'dropout2': Dropout(config.dropout_rate)}
@@ -89,19 +91,19 @@ class DecoderBlock(nn.Module):
 
         # Additive memory injection before the first sub-layer
         x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
-        x_norm1 = self.norm1(x_with_mem)
+        x_norm1 = self.norm['norm1'](x_with_mem)
 
         attn_output = self.mha(
             x_norm1,
             mask=inputs.mask,
             kv_cache=inputs.kv_cache,
-            layer_idx=inputs.layer_idx
+            layer_idx=inputs.layer_idx,
         )
 
         # First residual connection
         x = inputs.x + self.dropout['dropout1'](attn_output)
 
-        x_norm2 = self.norm2(x)
+        x_norm2 = self.norm['norm2'](x)
 
         if self.use_moe:
             ffn_output, aux_loss = self.ff_layer(

@@ -70,13 +70,12 @@ class MixtureOfExperts(nn.Module):
         )
 
         flat_top_k_indices = top_k_indices.view(-1)
-        flat_top_k_weights = top_k_weights.view(-1)
         expanded_x = x_reshaped.unsqueeze(1).expand(
             -1, current_top_k, -1
         ).reshape(-1, d_model)
-
         expert_outputs = self._get_expert_outputs(expanded_x, flat_top_k_indices)
-        weighted_outputs = expert_outputs * flat_top_k_weights.unsqueeze(-1)
+
+        weighted_outputs = expert_outputs * top_k_weights.view(-1).unsqueeze(-1)
         final_output = weighted_outputs.view(
             -1, current_top_k, d_model
         ).sum(dim=1)

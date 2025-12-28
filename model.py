@@ -45,9 +45,9 @@ class Transformer(nn.Module):
         self.embedding = Embedding(config.vocab_size, config.model.d_model)
         self.long_term_memory = self._init_ltm(config)
         self.rope_cos, self.rope_sin = self._init_rope_embeddings(config)
-        self.decoder_blocks, self.final_norm, self.value_head = self._init_decoder(
-            config, load_in_4bit
-        )
+        self.decoder = self._init_decoder(config, load_in_4bit)
+        self.final_norm = RMSNorm(config.model.d_model)
+        self.value_head = self._init_value_head(config, load_in_4bit)
         self.embedding.weights = self.embedding.embedding.weight
 
     def _init_ltm(self, config: TransformerConfig):
@@ -70,13 +70,13 @@ class Transformer(nn.Module):
 
     def _init_decoder(self, config: TransformerConfig, load_in_4bit: bool):
         block_config = self._create_block_config(load_in_4bit)
-        decoder_blocks = nn.ModuleList(
+        return nn.ModuleList(
             [DecoderBlock(block_config) for _ in range(config.model.num_layers)]
         )
-        final_norm = RMSNorm(config.model.d_model)
+
+    def _init_value_head(self, config: TransformerConfig, load_in_4bit: bool):
         linear_class = Linear4bit if load_in_4bit else Linear
-        value_head = ValueHead(config.model.d_model, linear_class=linear_class)
-        return decoder_blocks, final_norm, value_head
+        return ValueHead(config.model.d_model, linear_class=linear_class)
 
     def _create_block_config(self, load_in_4bit: bool) -> DecoderBlockConfig:
         """Helper method to create the DecoderBlockConfig."""
@@ -91,7 +91,8 @@ class Transformer(nn.Module):
             long_term_memory=self.long_term_memory,
             num_experts=self.config.model.num_experts,
             top_k_experts=self.config.model.top_k_experts,
-            load_in_4bit=load_in_4bit)
+            load_in_4bit=load_in_4bit,
+        )
 
     def forward(
         self, x: torch.Tensor, ltm_state: torch.Tensor = None, dynamic_top_k: int = None
@@ -107,7 +108,7 @@ class Transformer(nn.Module):
                 )
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i, block in enumerate(self.decoder_blocks):
+        for i, block in enumerate(self.decoder):
             inputs = ForwardPassInput(
                 x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k
             )
