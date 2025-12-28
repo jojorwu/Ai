@@ -48,7 +48,7 @@ class Transformer(nn.Module):
         self.decoder = self._init_decoder(config, load_in_4bit)
         self.final_norm = RMSNorm(config.model.d_model)
         self.value_head = self._init_value_head(config, load_in_4bit)
-        self.embedding.weights = self.embedding.embedding.weight
+        self.embedding.weight = self.embedding.embedding.weight
 
     def _init_ltm(self, config: TransformerConfig):
         if config.model.ltm_d_hidden and config.model.ltm_num_layers:
@@ -117,7 +117,7 @@ class Transformer(nn.Module):
                 total_aux_loss += aux_loss
 
         h = self.final_norm(h)
-        logits = F.linear(h, self.embedding.weights)
+        logits = F.linear(h, self.embedding.weight)
         value = self.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 
