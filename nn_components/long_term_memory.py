@@ -4,8 +4,8 @@ PyTorch implementation of the Long-Term Memory (LTM) module.
 import torch
 import torch.nn as nn
 
-from nn_components.linear import Linear
 from nn_components.activations import Tanh
+from nn_components.linear import Linear
 
 
 class LongTermMemory(nn.Module):

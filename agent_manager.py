@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from typing import List
 
 import torch
+
 from agent import Agent
-from model import Transformer
 from data_loader import get_batches_torch
+from model import Transformer
+
 
 @dataclass
 class SpecializationConfig:

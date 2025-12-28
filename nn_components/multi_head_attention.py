@@ -66,7 +66,7 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, x: torch.Tensor, mask=None, kv_cache=None, layer_idx=None):
         """Forward pass of the GQA layer."""
-        batch_size, seq_len, _ = x.shape
+        seq_len = x.shape[1]
         seq_offset = kv_cache.current_pos if kv_cache is not None else 0
 
         qkv = self.qkv_proj(x)

@@ -4,6 +4,7 @@ generation parameters based on model 'surprise'.
 """
 from dataclasses import dataclass
 
+
 @dataclass
 class DynamicParametersConfig:
     """Configuration for dynamic parameter adjustment."""

@@ -1,22 +1,26 @@
 """
 PyTorch implementation of the main Transformer model.
 """
+import copy
 import math
+from dataclasses import dataclass, field
+from typing import Generator, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass, field
-from typing import Generator, Tuple
-import copy
+from bitsandbytes.nn import Linear4bit
 
-from config import TransformerConfig, DecoderBlockConfig
+from config import DecoderBlockConfig, TransformerConfig
+from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from nn_components.embedding import Embedding
 from nn_components.linear import Linear
+from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
 from nn_components.rotary_embedding import precompute_rope_embeddings
-from nn_components.activations import Tanh
-from nn_components.long_term_memory import LongTermMemory
+from nn_components.value_head import ValueHead
+
 
 @dataclass
 class GenerateInput:
@@ -50,47 +54,54 @@ class Transformer(nn.Module):
         self.embedding = Embedding(config.vocab_size, config.model.d_model)
         if config.model.ltm_d_hidden and config.model.ltm_num_layers:
             self.long_term_memory = LongTermMemory(
-                d_model=config.model.d_model, d_hidden=config.model.ltm_d_hidden,
-                num_layers=config.model.ltm_num_layers
-            )
+                d_model=config.model.d_model,
+                d_hidden=config.model.ltm_d_hidden,
+                num_layers=config.model.ltm_num_layers)
         else:
             self.long_term_memory = None
         block_config = self._create_block_config(load_in_4bit)
         self.decoder_blocks = nn.ModuleList([DecoderBlock(block_config) for _ in range(config.model.num_layers)])
         self.final_norm = RMSNorm(config.model.d_model)
         linear_class = Linear4bit if load_in_4bit else Linear
-        self.value_head_linear = linear_class(config.model.d_model, 1, bias=False)
-        self.value_head_activation = Tanh()
+        self.value_head = ValueHead(config.model.d_model, linear_class=linear_class)
         self.embedding.weights = self.embedding.embedding.weight
 
     def _create_block_config(self, load_in_4bit: bool) -> DecoderBlockConfig:
         """Helper method to create the DecoderBlockConfig."""
-        # ... (implementation is the same as before)
         return DecoderBlockConfig(
-            d_model=self.config.model.d_model, num_heads=self.config.model.num_heads,
-            d_ff=self.config.model.d_ff, dropout_rate=self.config.model.dropout_rate,
-            num_kv_heads=self.config.model.num_kv_heads, rotary_emb=(self.rope_cos, self.rope_sin),
-            num_layers=self.config.model.num_layers, long_term_memory=self.long_term_memory,
-            num_experts=self.config.model.num_experts, top_k_experts=self.config.model.top_k_experts,
-            load_in_4bit=load_in_4bit
-        )
+            d_model=self.config.model.d_model,
+            num_heads=self.config.model.num_heads,
+            d_ff=self.config.model.d_ff,
+            dropout_rate=self.config.model.dropout_rate,
+            num_kv_heads=self.config.model.num_kv_heads,
+            rotary_emb=(self.rope_cos, self.rope_sin),
+            num_layers=self.config.model.num_layers,
+            long_term_memory=self.long_term_memory,
+            num_experts=self.config.model.num_experts,
+            top_k_experts=self.config.model.top_k_experts,
+            load_in_4bit=load_in_4bit)
 
-    def forward(self, x: torch.Tensor, ltm_state: torch.Tensor = None, dynamic_top_k: int = None):
+    def forward(self, x: torch.Tensor, ltm_state: torch.Tensor = None,
+                  dynamic_top_k: int = None):
         h = self.embedding(x) * math.sqrt(self.config.model.d_model)
         if ltm_state is None:
-            ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True)) if self.long_term_memory else \
-                torch.zeros((h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype)
+            if self.long_term_memory:
+                ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True))
+            else:
+                ltm_state = torch.zeros(
+                    (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype)
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i, block in enumerate(self.decoder_blocks):
-            inputs = ForwardPassInput(x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k)
+            inputs = ForwardPassInput(
+                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k)
             h, aux_loss = block(inputs)
-            if aux_loss is not None: total_aux_loss += aux_loss
+            if aux_loss is not None:
+                total_aux_loss += aux_loss
 
         h = self.final_norm(h)
         logits = F.linear(h, self.embedding.weights)
-        value_hidden = self.value_head_linear(h[:, -1, :])
-        value = self.value_head_activation(value_hidden)
+        value = self.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 
     def _sample_from_logits(self, logits, temperature, top_k):
@@ -117,11 +128,14 @@ class Transformer(nn.Module):
         # Backward pass from the value head to calculate gradients for LTM
         value.backward(retain_graph=True)
 
-        grad_tensors = [p.grad.detach() for p in self.long_term_memory.parameters() if p.grad is not None]
+        grad_tensors = [
+            p.grad.detach() for p in self.long_term_memory.parameters() if p.grad is not None
+        ]
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.linalg.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
+        surprise = torch.linalg.norm(
+            torch.cat([t.flatten() for t in grad_tensors])).item()
 
         # Clean up gradients
         self.long_term_memory.zero_grad()
@@ -144,8 +158,11 @@ class Transformer(nn.Module):
             draft_tokens = tokens
             with torch.no_grad():
                 for _ in range(inputs.speculative_steps):
-                    draft_logits, _, _ = draft_model(draft_tokens[:, -self.config.model.max_seq_len:])
-                    next_token = self._sample_from_logits(draft_logits[:, -1, :], inputs.temperature, inputs.dynamic_top_k or inputs.top_k)
+                    draft_logits, _, _ = draft_model(
+                        draft_tokens[:, -self.config.model.max_seq_len:])
+                    next_token = self._sample_from_logits(
+                        draft_logits[:, -1, :], inputs.temperature,
+                        inputs.dynamic_top_k or inputs.top_k)
                     draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
 
             speculative_chunk = draft_tokens[:, tokens.size(1):]
@@ -163,8 +180,9 @@ class Transformer(nn.Module):
                 true_next_token_logits = true_logits[:, i, :]
                 draft_token = speculative_chunk[:, i].unsqueeze(-1)
 
-                # Resample from the true model's distribution
-                resampled_token = self._sample_from_logits(true_next_token_logits, inputs.temperature, inputs.dynamic_top_k or inputs.top_k)
+                resampled_token = self._sample_from_logits(
+                    true_next_token_logits, inputs.temperature,
+                    inputs.dynamic_top_k or inputs.top_k)
 
                 if resampled_token.item() == draft_token.item():
                     accepted_tokens.append(draft_token)
@@ -179,9 +197,11 @@ class Transformer(nn.Module):
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 total_generated += accepted_chunk.size(1)
             else:
-                # If nothing was accepted (rare), generate one token the normal way to avoid getting stuck
+                # If nothing was accepted (rare), generate one token the normal way
                 logits, _, _ = self(tokens[:, -self.config.model.max_seq_len:])
-                next_token = self._sample_from_logits(logits[:, -1, :], inputs.temperature, inputs.dynamic_top_k or inputs.top_k)
+                next_token = self._sample_from_logits(
+                    logits[:, -1, :], inputs.temperature,
+                    inputs.dynamic_top_k or inputs.top_k)
                 yield next_token, surprise
                 tokens = torch.cat((tokens, next_token), dim=1)
                 total_generated += 1

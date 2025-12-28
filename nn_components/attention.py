@@ -2,8 +2,8 @@
 PyTorch implementation of Scaled Dot-Product Attention.
 """
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+from torch.nn import functional as F
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -28,7 +28,8 @@ class ScaledDotProductAttention(nn.Module):
         """
         d_k = q.size(-1)
         # (batch, heads, seq_len_q, seq_len_k)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        scores = torch.matmul(q, k.transpose(-2, -1)) / \
+            torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
 
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))

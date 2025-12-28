@@ -19,3 +19,4 @@ env/
 
 # Log files
 *.log
+transformer_project.egg-info/

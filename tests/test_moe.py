@@ -1,13 +1,9 @@
 """
 Tests for the PyTorch-based Mixture of Experts (MoE) layer.
 """
-import sys
-import os
 import unittest
-import torch
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import torch
 
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
@@ -68,14 +64,14 @@ class TestMoE(unittest.TestCase):
         try:
             output, _ = moe(x, dynamic_top_k=4)
             self.assertEqual(output.shape, x.shape)
-        except Exception as e:
+        except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
         # --- Test with dynamic_top_k=1 ---
         try:
             output, _ = moe(x, dynamic_top_k=1)
             self.assertEqual(output.shape, x.shape)
-        except Exception as e:
+        except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
 

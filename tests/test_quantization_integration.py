@@ -1,18 +1,17 @@
 """
 Integration test to verify the end-to-end training process of a 4-bit quantized model.
 """
-import unittest
-import torch
-import torch.nn as nn
-import torch.optim as optim
 import logging
-import os
+import unittest
 
-from accelerate import Accelerator, init_empty_weights, dispatch_model
+import torch
+from accelerate import Accelerator, dispatch_model, init_empty_weights
 from bitsandbytes.optim import Adam8bit
+from torch import nn
 
 from config import Config, TransformerConfig
 from model import Transformer
+
 
 class TestQuantizationIntegration(unittest.TestCase):
     """

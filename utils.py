@@ -1,81 +1,85 @@
 """
-Utility functions for checkpointing and data batching.
+Utility functions for the Transformer application.
 """
 import json
 import logging
 import os
-
-import numpy as np
-
-
-def save_checkpoint(model, optimizer, training_state, config, filepath):
-    """Saves the state of the model, optimizer, and training."""
-    try:
-        model_state = model.get_state()
-        optimizer_state = optimizer.get_state()
-
-        np_training_state = {key: np.array(value) for key, value in training_state.items()}
-
-        checkpoint = {
-            **model_state,
-            'optimizer_m': optimizer_state['m'],
-            'optimizer_v': optimizer_state['v'],
-            'optimizer_t': np.array(optimizer_state['t']),
-            **np_training_state
-        }
-
-        config_str = json.dumps(config)
-        checkpoint['config'] = np.array([config_str], dtype=object)
-
-        np.savez(filepath, **checkpoint)
-        logging.info("Checkpoint successfully saved to %s", filepath)
-
-    except (IOError, OSError, KeyError) as e:
-        logging.error("Error saving checkpoint to %s: %s", filepath, e, exc_info=True)
+import re
+from typing import Tuple
 
 
-def load_checkpoint(model, optimizer, filepath):
-    """Loads the state of the model, optimizer, and training."""
-    if not os.path.exists(filepath):
-        logging.warning("Checkpoint file not found: %s", filepath)
+def setup_logging(log_path: str = None):
+    """
+    Configures logging to file and console.
+    If log_path is None, only logs to console.
+    """
+    handlers = [logging.StreamHandler()]
+    if log_path:
+        handlers.append(logging.FileHandler(log_path))
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=handlers
+    )
+    logging.getLogger().setLevel(logging.INFO)
+
+def select_model_interactively() -> str | None:
+    """
+    Lists available models in the 'models' directory and prompts the user to select one.
+    Returns the selected model name or None if no selection is made.
+    """
+    models_dir = 'models'
+    if not os.path.isdir(models_dir) or not os.listdir(models_dir):
+        logging.error("No models found in the '%s' directory.", models_dir)
+        return None
+
+    available_models = [
+        d for d in os.listdir(models_dir)
+        if os.path.isdir(os.path.join(models_dir, d))
+    ]
+
+    if not available_models:
+        logging.error("No valid model directories found in '%s'.", models_dir)
+        return None
+    if len(available_models) == 1:
+        logging.info("Automatically selecting the only available model: %s",
+                     available_models[0])
+        return available_models[0]
+
+    logging.info("Available models:")
+    for i, model_name in enumerate(available_models):
+        logging.info("  %d: %s", i + 1, model_name)
+
+    while True:
+        try:
+            choice = int(input("Please select a model by number: "))
+            if 1 <= choice <= len(available_models):
+                return available_models[choice - 1]
+            logging.warning("Invalid number. Please try again.")
+        except ValueError:
+            logging.warning("Invalid input. Please enter a number.")
+        except (KeyboardInterrupt, EOFError):
+            logging.info("\nSelection cancelled.")
+            return None
+
+def parse_tool_call(text: str) -> Tuple[str | None, dict | None]:
+    """
+    Searches for and parses a tool call within <TOOL_CALL> tags in the given text.
+    Returns the tool name and arguments if found, otherwise (None, None).
+    """
+    pattern = r"<TOOL_CALL>(.*?)</TOOL_CALL>"
+    match = re.search(pattern, text, re.DOTALL)
+    if not match:
         return None, None
 
+    tool_call_json = match.group(1).strip()
     try:
-        data = np.load(filepath, allow_pickle=True)
+        tool_call = json.loads(tool_call_json)
+        tool_name = tool_call.get("tool")
+        args = tool_call.get("args", {})
+        if isinstance(tool_name, str) and isinstance(args, dict):
+            return tool_name, args
+    except (json.JSONDecodeError, AttributeError) as e:
+        logging.error("Failed to parse tool call: %s\nContent: %s", e, tool_call_json)
 
-        model.set_state(data)
-
-        optimizer_state = {
-            'm': data['optimizer_m'].item(),
-            'v': data['optimizer_v'].item(),
-            't': data['optimizer_t'].item()
-        }
-        optimizer.set_state(optimizer_state)
-
-        training_state = {
-            'epoch': data.get('epoch', 0).item(),
-            'current_step': data.get('current_step', 0).item(),
-            'best_val_loss': data.get('best_val_loss', float('inf')).item(),
-            'epochs_no_improve': data.get('epochs_no_improve', 0).item()
-        }
-
-        config = json.loads(data['config'][0])
-
-        logging.info("Checkpoint successfully loaded from %s", filepath)
-        return training_state, config
-
-    except (IOError, OSError, KeyError, json.JSONDecodeError) as e:
-        logging.error("Error loading checkpoint from %s: %s", filepath, e, exc_info=True)
-        return None, None
-
-
-def zero_gradients(model):
-    """Recursively zeros out gradients for all trainable parameters in a model."""
-    for layer_obj in model.get_named_params().values():
-        if hasattr(layer_obj, 'get_trainable_params'):
-            for param_name, _ in layer_obj.get_trainable_params().items():
-                grad_attr_name = f"d{param_name}"
-                if hasattr(layer_obj, grad_attr_name):
-                    grad_val = getattr(layer_obj, grad_attr_name)
-                    if grad_val is not None:
-                        setattr(layer_obj, grad_attr_name, np.zeros_like(grad_val))
+    return None, None

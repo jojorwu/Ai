@@ -2,6 +2,7 @@
 Tests for PyTorch-based activation functions.
 """
 import unittest
+
 import torch
 
 from nn_components.activations import Tanh

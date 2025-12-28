@@ -1,14 +1,10 @@
 """
 Tests for the PyTorch-based RMSNorm layer.
 """
-import sys
-import os
-import unittest
-import torch
 import math
+import unittest
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import torch
 
 from nn_components.rms_norm import RMSNorm
 

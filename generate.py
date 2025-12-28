@@ -3,21 +3,22 @@ Main agent script for interacting with the Transformer model using PyTorch.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
-import torch
-import logging
 import argparse
+import logging
 import os
-import re
-import json
 from dataclasses import dataclass
 from typing import List
 
+import torch
 from accelerate import Accelerator
+
+from complexity_manager import ComplexityManager
 from config import Config, TransformerConfig
-from model import Transformer, GenerateInput
+from model import GenerateInput, Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
-from complexity_manager import ComplexityManager
+from utils import parse_tool_call, select_model_interactively, setup_logging
+
 
 @dataclass
 class AgentState:
@@ -25,40 +26,10 @@ class AgentState:
     conversation_history_tokens: List[int]
     complexity_manager: ComplexityManager = None
 
-def setup_logging():
-    """Configures console logging."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-def select_model_interactively() -> str | None:
-    """Lists available models and prompts the user to select one."""
-    # (Implementation is the same as before)
-    models_dir = 'models'
-    if not os.path.isdir(models_dir) or not os.listdir(models_dir):
-        logging.error("No models found in the '%s' directory.", models_dir)
-        return None
-    available_models = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-    if not available_models:
-        logging.error("No valid model directories found in '%s'.", models_dir)
-        return None
-    if len(available_models) == 1:
-        logging.info("Automatically selecting the only available model: %s", available_models[0])
-        return available_models[0]
-    logging.info("Available models:")
-    for i, model_name in enumerate(available_models):
-        logging.info("  %d: %s", i + 1, model_name)
-    while True:
-        try:
-            choice = int(input("Please select a model by number: "))
-            if 1 <= choice <= len(available_models):
-                return available_models[choice - 1]
-            logging.warning("Invalid number. Please try again.")
-        except (ValueError, KeyboardInterrupt, EOFError):
-            logging.info("\nSelection cancelled.")
-            return None
-
-def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
+def load_model_and_tokenizer(
+        model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
     """Loads the PyTorch model and tokenizer."""
-    logging.info(f"Loading model '{model_name}' (4-bit: {load_in_4bit})...")
+    logging.info("Loading model '%s' (4-bit: %s)...", model_name, load_in_4bit)
     model_dir = os.path.join('models', model_name)
     weights_path = os.path.join(model_dir, 'best_model.pt')
     if not os.path.exists(weights_path):
@@ -81,23 +52,8 @@ def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
 
-def parse_tool_call(text: str) -> tuple[str | None, dict | None]:
-    """Searches for and parses a tool call within <TOOL_CALL> tags."""
-    # (Implementation is the same as before)
-    pattern = r"<TOOL_CALL>(.*?)</TOOL_CALL>"
-    match = re.search(pattern, text, re.DOTALL)
-    if not match: return None, None
-    tool_call_json = match.group(1).strip()
-    try:
-        tool_call = json.loads(tool_call_json)
-        tool_name, args = tool_call.get("tool"), tool_call.get("args", {})
-        if isinstance(tool_name, str) and isinstance(args, dict):
-            return tool_name, args
-    except (json.JSONDecodeError, AttributeError):
-        pass
-    return None, None
-
-def run_agent_loop(model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
+def run_agent_loop(
+        model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
     """Runs the main agent loop."""
     start_text = config.generation.start_text
     logging.info(f"Initial task: {start_text}")
@@ -118,12 +74,12 @@ def run_agent_loop(model: Transformer, tokenizer: Tokenizer, config: Config, acc
         if dynamic_top_k:
              logging.info(f"Complexity: {agent_state.complexity_manager.current_complexity}, Dynamic top_k: {dynamic_top_k}")
 
-        gen_input = GenerateInput(
-            start_tokens=input_tokens, max_new_tokens=config.generation.max_len,
-            temperature=config.generation.temperature, top_k=config.generation.top_k,
-            speculative_steps=config.generation.speculative_steps,
-            dynamic_top_k=dynamic_top_k
-        )
+        gen_input = GenerateInput(start_tokens=input_tokens,
+                                  max_new_tokens=config.generation.max_len,
+                                  temperature=config.generation.temperature,
+                                  top_k=config.generation.top_k,
+                                  speculative_steps=config.generation.speculative_steps,
+                                  dynamic_top_k=dynamic_top_k)
 
         newly_generated_tokens = []
         unwrapped_model = accelerator.unwrap_model(model)
@@ -168,7 +124,8 @@ def main():
         model_dir = os.path.join('models', model_name)
         config_path = os.path.join(model_dir, 'config.json')
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+            raise FileNotFoundError(
+                f"Config file not found for model '{model_name}' at {config_path}")
 
         config = Config.from_json(config_path)
         accelerator = Accelerator()

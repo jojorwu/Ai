@@ -63,6 +63,14 @@ class MoEConfig(BaseModel):
     bias: bool = False
 
 
+class FeedForwardConfig(BaseModel):
+    """Configuration for the Feed-Forward Network layer."""
+    d_model: int
+    d_ff: int
+    bias: bool = False
+    num_layers: int = 1
+
+
 class DecoderBlockConfig(BaseModel):
     """Configuration for a single DecoderBlock."""
     d_model: int

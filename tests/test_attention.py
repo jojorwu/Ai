@@ -1,13 +1,9 @@
 """
 Tests for the PyTorch-based Scaled Dot-Product Attention.
 """
-import sys
-import os
 import unittest
-import torch
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import torch
 
 from nn_components.attention import ScaledDotProductAttention
 
@@ -47,11 +43,9 @@ class TestScaledDotProductAttention(unittest.TestCase):
 
     def test_masking(self):
         """Tests that the mask correctly zeros out attention scores."""
-        attention = ScaledDotProductAttention()
         batch, heads, seq_len, d_k = 1, 1, 4, 2
         q = torch.randn(batch, heads, seq_len, d_k)
         k = torch.randn(batch, heads, seq_len, d_k)
-        v = torch.ones(batch, heads, seq_len, d_k) # Use ones for v to make output predictable
 
         # Create a mask that allows attending only to the first two tokens
         mask = torch.tril(torch.ones(seq_len, seq_len)).unsqueeze(0).unsqueeze(0)

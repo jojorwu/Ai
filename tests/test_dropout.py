@@ -2,6 +2,7 @@
 Tests for the PyTorch-based Dropout layer.
 """
 import unittest
+
 import torch
 
 from nn_components.dropout import Dropout

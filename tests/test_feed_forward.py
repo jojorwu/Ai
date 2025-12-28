@@ -1,14 +1,11 @@
 """
 Tests for the PyTorch-based FeedForward (SwiGLU) layer.
 """
-import sys
-import os
 import unittest
+
 import torch
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+from config import FeedForwardConfig
 from nn_components.feed_forward import FeedForward
 
 
@@ -19,9 +16,9 @@ class TestFeedForward(unittest.TestCase):
 
     def test_forward_pass_shape(self):
         """Tests that the forward pass preserves the tensor shape."""
-        d_model, d_ff = 64, 128
-        ffn = FeedForward(d_model, d_ff)
-        x = torch.randn(4, 10, d_model)  # Batch, SeqLen, Dim
+        config = FeedForwardConfig(d_model=64, d_ff=128)
+        ffn = FeedForward(config)
+        x = torch.randn(4, 10, config.d_model)  # Batch, SeqLen, Dim
         output = ffn(x)
         self.assertEqual(x.shape, output.shape)
 
@@ -29,9 +26,9 @@ class TestFeedForward(unittest.TestCase):
         """
         Tests the backward pass to ensure gradients are computed for all parameters.
         """
-        d_model, d_ff = 64, 128
-        ffn = FeedForward(d_model, d_ff, bias=True)
-        x = torch.randn(4, 10, d_model, requires_grad=True)
+        config = FeedForwardConfig(d_model=64, d_ff=128, bias=True)
+        ffn = FeedForward(config)
+        x = torch.randn(4, 10, config.d_model, requires_grad=True)
 
         # Forward pass
         output = ffn(x)

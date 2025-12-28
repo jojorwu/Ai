@@ -1,12 +1,10 @@
 """
 Simple character-level tokenizer with enhanced support for special tokens.
 """
+import json
 import logging
 import os
 import re
-
-
-import json
 
 
 class Tokenizer:
