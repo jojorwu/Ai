@@ -42,11 +42,12 @@ class DecoderBlock(nn.Module):
         linear_class = Linear4bit if config.load_in_4bit else Linear
         self.mha = self._create_mha(config, linear_class)
         self.ff_layer = self._create_ff_layer(config, linear_class)
-
         self.norm1 = RMSNorm(config.d_model)
         self.norm2 = RMSNorm(config.d_model)
-        self.dropout1 = Dropout(config.dropout_rate)
-        self.dropout2 = Dropout(config.dropout_rate)
+        self.dropout = nn.ModuleDict(
+            {'dropout1': Dropout(config.dropout_rate),
+             'dropout2': Dropout(config.dropout_rate)}
+        )
 
     def _check_moe_usage(self, config):
         return (config.num_experts is not None and
@@ -98,7 +99,7 @@ class DecoderBlock(nn.Module):
         )
 
         # First residual connection
-        x = inputs.x + self.dropout1(attn_output)
+        x = inputs.x + self.dropout['dropout1'](attn_output)
 
         x_norm2 = self.norm2(x)
 
@@ -110,6 +111,6 @@ class DecoderBlock(nn.Module):
             ffn_output = self.ff_layer(x_norm2)
 
         # Second residual connection
-        x = x + self.dropout2(ffn_output)
+        x = x + self.dropout['dropout2'](ffn_output)
 
         return x, aux_loss

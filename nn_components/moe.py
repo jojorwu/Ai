@@ -33,9 +33,7 @@ class MixtureOfExperts(nn.Module):
         """Computes the auxiliary load balancing loss."""
         router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
         p_i = router_probs.mean(dim=0)
-        top_k_mask = F.one_hot(
-            top_k_indices, num_classes=self.num_experts
-        ).float()
+        top_k_mask = F.one_hot(top_k_indices, num_classes=self.num_experts).float()
         f_i = top_k_mask.sum(dim=0).sum(dim=0) / (batch_size * seq_len)
         return self.num_experts * (p_i * f_i).sum()
 

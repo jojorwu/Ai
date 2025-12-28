@@ -63,6 +63,20 @@ class TestQuantizationIntegration(unittest.TestCase):
             dummy_input, dummy_policy_target, dummy_value_target
         )
 
+    def _run_training_step(self, model, optimizer, policy_loss_fn, value_loss_fn,
+                         dummy_input, dummy_policy_target, dummy_value_target):
+        """Runs a single training step."""
+        model.train()
+        optimizer.zero_grad()
+        logits, value, aux_loss = model(dummy_input)
+        loss_policy = policy_loss_fn(
+            logits.view(-1, self.vocab_size), dummy_policy_target.view(-1)
+        )
+        loss_value = value_loss_fn(value, dummy_value_target)
+        total_loss = loss_policy + loss_value + (aux_loss or 0)
+        self.accelerator.backward(total_loss)
+        optimizer.step()
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available, skipping 4-bit test")
     def test_4bit_model_training_step(self):
         """
@@ -74,16 +88,10 @@ class TestQuantizationIntegration(unittest.TestCase):
 
         initial_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
 
-        model.train()
-        optimizer.zero_grad()
-        logits, value, aux_loss = model(dummy_input)
-        loss_policy = policy_loss_fn(
-            logits.view(-1, self.vocab_size), dummy_policy_target.view(-1)
+        self._run_training_step(
+            model, optimizer, policy_loss_fn, value_loss_fn,
+            dummy_input, dummy_policy_target, dummy_value_target
         )
-        loss_value = value_loss_fn(value, dummy_value_target)
-        total_loss = loss_policy + loss_value + (aux_loss or 0)
-        self.accelerator.backward(total_loss)
-        optimizer.step()
 
         updated_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
         weights_updated = not torch.equal(initial_weights, updated_weights)

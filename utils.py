@@ -93,6 +93,8 @@ def main_entrypoint(main_func):
             main_func()
         except FileNotFoundError as e:
             logging.error("File not found: %s", e)
+        except (ValueError, TypeError) as e:
+            logging.error("Configuration or value error: %s", e)
         except Exception as e:
             logging.error("An unexpected error occurred: %s", e, exc_info=True)
     return wrapper

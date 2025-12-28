@@ -25,7 +25,7 @@ def _create_test_config_and_data():
     config.evolution.num_agents = 2
     config.evolution.num_survivors = 1
 
-    class MockTokenizer:
+    class MockTokenizer:  # pylint: disable=too-few-public-methods
         """A mock tokenizer for testing purposes."""
         vocab_size = 50
 

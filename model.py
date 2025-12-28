@@ -225,3 +225,7 @@ class Transformer(nn.Module):
     def device(self):
         """Returns the device of the model's embedding layer."""
         return self.embedding.embedding.weight.device
+
+    def count_parameters(self):
+        """Counts the number of trainable parameters in the model."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

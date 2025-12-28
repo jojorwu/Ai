@@ -61,6 +61,19 @@ class Trainer:
         self._config.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')
 
+    def _run_training_step(self, x, y, evo_cfg):
+        """Runs a single training step."""
+        logits, _, aux_loss = self._config.model(x)
+        policy_loss = self._config.policy_loss_fn(
+            logits.view(-1, logits.size(-1)), y.view(-1)
+        )
+        total_loss = policy_loss + (
+            evo_cfg.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+        )
+        loss_scaled = total_loss / evo_cfg.gradient_accumulation_steps
+        self._config.accelerator.backward(loss_scaled)
+        return policy_loss.item()
+
     def train_pretrain_epoch(self) -> tuple[float, float]:
         """Runs one epoch of pre-training."""
         start_time = time.time()
@@ -77,16 +90,7 @@ class Trainer:
         self._config.model.train()
         self._config.optimizer.zero_grad()
         for i, (x, y, _) in enumerate(batch_iterator):
-            logits, _, aux_loss = self._config.model(x)
-            policy_loss = self._config.policy_loss_fn(
-                logits.view(-1, logits.size(-1)), y.view(-1)
-            )
-            total_loss = policy_loss + (
-                evo_cfg.moe_aux_loss_coeff * aux_loss if aux_loss else 0
-            )
-            loss_scaled = total_loss / evo_cfg.gradient_accumulation_steps
-            self._config.accelerator.backward(loss_scaled)
-            total_policy_loss += policy_loss.item()
+            total_policy_loss += self._run_training_step(x, y, evo_cfg)
             num_batches += 1
             if (i + 1) % evo_cfg.gradient_accumulation_steps == 0:
                 if self._config.config.optimizer.max_norm > 0:
