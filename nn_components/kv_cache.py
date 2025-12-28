@@ -34,7 +34,7 @@ class KVCache:
         """
         Updates the cache with new key and value tensors for a specific layer.
         """
-        batch_size, _, seq_len, _ = k.shape
+        seq_len = k.shape[2]
 
         # Calculate indices to write to, wrapping around the buffer if necessary
         indices = (torch.arange(self.current_pos, self.current_pos + seq_len) % self.config.max_seq_len)

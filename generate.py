@@ -4,10 +4,8 @@ This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
 import argparse
-import json
 import logging
 import os
-import re
 from dataclasses import dataclass
 from typing import List
 
@@ -28,9 +26,10 @@ class AgentState:
     conversation_history_tokens: List[int]
     complexity_manager: ComplexityManager = None
 
-def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
+def load_model_and_tokenizer(
+        model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
     """Loads the PyTorch model and tokenizer."""
-    logging.info(f"Loading model '{model_name}' (4-bit: {load_in_4bit})...")
+    logging.info("Loading model '%s' (4-bit: %s)...", model_name, load_in_4bit)
     model_dir = os.path.join('models', model_name)
     weights_path = os.path.join(model_dir, 'best_model.pt')
     if not os.path.exists(weights_path):
@@ -53,7 +52,8 @@ def load_model_and_tokenizer(model_name: str, config: Config, load_in_4bit: bool
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
 
-def run_agent_loop(model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
+def run_agent_loop(
+        model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
     """Runs the main agent loop."""
     start_text = config.generation.start_text
     logging.info(f"Initial task: {start_text}")
@@ -74,12 +74,12 @@ def run_agent_loop(model: Transformer, tokenizer: Tokenizer, config: Config, acc
         if dynamic_top_k:
              logging.info(f"Complexity: {agent_state.complexity_manager.current_complexity}, Dynamic top_k: {dynamic_top_k}")
 
-        gen_input = GenerateInput(
-            start_tokens=input_tokens, max_new_tokens=config.generation.max_len,
-            temperature=config.generation.temperature, top_k=config.generation.top_k,
-            speculative_steps=config.generation.speculative_steps,
-            dynamic_top_k=dynamic_top_k
-        )
+        gen_input = GenerateInput(start_tokens=input_tokens,
+                                  max_new_tokens=config.generation.max_len,
+                                  temperature=config.generation.temperature,
+                                  top_k=config.generation.top_k,
+                                  speculative_steps=config.generation.speculative_steps,
+                                  dynamic_top_k=dynamic_top_k)
 
         newly_generated_tokens = []
         unwrapped_model = accelerator.unwrap_model(model)
@@ -124,7 +124,8 @@ def main():
         model_dir = os.path.join('models', model_name)
         config_path = os.path.join(model_dir, 'config.json')
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found for model '{model_name}' at {config_path}")
+            raise FileNotFoundError(
+                f"Config file not found for model '{model_name}' at {config_path}")
 
         config = Config.from_json(config_path)
         accelerator = Accelerator()

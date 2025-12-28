@@ -66,7 +66,6 @@ class Trainer:
         num_batches = 0
 
         evo_cfg = self._config.config.evolution
-        scheduler_cfg = self._config.config.scheduler
 
         batch_iterator = get_batches(
             self._config.train_data, evo_cfg.batch_size, evo_cfg.seq_len, self._config.accelerator.device
