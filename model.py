@@ -50,10 +50,6 @@ class Transformer(nn.Module):
         self.value_head = self._init_value_head(config, load_in_4bit)
         self.embedding.weight = self.embedding.embedding.weight
 
-    def count_parameters(self):
-        """Counts the number of trainable parameters in the model."""
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
     def _init_ltm(self, config: TransformerConfig):
         if config.model.ltm_d_hidden and config.model.ltm_num_layers:
             return LongTermMemory(
