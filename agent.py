@@ -11,6 +11,7 @@ from torch.optim import Adam
 
 from model import GenerateInput, Transformer
 
+
 @dataclass
 class AgentMetrics:
     """Keeps track of an agent's performance metrics."""

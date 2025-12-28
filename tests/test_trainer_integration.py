@@ -2,15 +2,16 @@
 Integration test for the PyTorch-based Trainer class.
 """
 import unittest
+
 import torch
 import torch.nn as nn
-from torch.optim import Adam
 from accelerate import Accelerator
+from torch.optim import Adam
 
 from config import Config, TransformerConfig
 from model import Transformer
-from tokenizer import Tokenizer
-from trainer import Trainer
+from trainer import Trainer, TrainerConfig
+
 
 def _create_test_config_and_data():
     """Creates a minimal configuration and dummy data for testing the Trainer."""
@@ -34,7 +35,7 @@ def _create_test_config_and_data():
                 '<I_DONT_KNOW>': 49
             }
 
-        def encode(self, text, add_special_tokens=False):
+        def encode(self, text):
             """Bare-bones encode method for testing."""
             return list(text.encode('utf-8'))
 

@@ -2,7 +2,9 @@
 Tests for the PyTorch-based Linear layer.
 """
 import unittest
+
 import torch
+
 from nn_components.linear import Linear
 
 

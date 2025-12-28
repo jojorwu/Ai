@@ -3,22 +3,24 @@ Main agent script for interacting with the Transformer model using PyTorch.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
-import torch
-import logging
 import argparse
+import json
+import logging
 import os
 import re
-import json
 from dataclasses import dataclass
 from typing import List
 
+import torch
 from accelerate import Accelerator
+
+from complexity_manager import ComplexityManager
 from config import Config, TransformerConfig
-from model import Transformer, GenerateInput
+from model import GenerateInput, Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
-from complexity_manager import ComplexityManager
-from utils import setup_logging, select_model_interactively, parse_tool_call
+from utils import parse_tool_call, select_model_interactively, setup_logging
+
 
 @dataclass
 class AgentState:

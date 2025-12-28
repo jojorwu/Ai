@@ -2,8 +2,11 @@
 Tests for the PyTorch-based Rotary Positional Embedding (RoPE).
 """
 import unittest
+
 import torch
-from nn_components.rotary_embedding import precompute_rope_embeddings, apply_rope_embeddings
+
+from nn_components.rotary_embedding import (apply_rope_embeddings,
+                                            precompute_rope_embeddings)
 
 
 class TestRotaryEmbedding(unittest.TestCase):

@@ -2,10 +2,10 @@
 PyTorch implementation of the Mixture of Experts (MoE) layer.
 """
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+from torch.nn import functional as F
 
-from config import MoEConfig
+from config import FeedForwardConfig, MoEConfig
 from nn_components.feed_forward import FeedForward
 from nn_components.linear import Linear
 
@@ -20,8 +20,13 @@ class MixtureOfExperts(nn.Module):
         self.num_experts = config.num_experts
         self.top_k = config.top_k
         self.gate = linear_class(config.d_model, config.num_experts, bias=config.bias)
+        ffn_config = FeedForwardConfig(
+            d_model=config.d_model,
+            d_ff=config.d_ff,
+            bias=config.bias
+        )
         self.experts = nn.ModuleList(
-            [FeedForward(config.d_model, config.d_ff, bias=config.bias, linear_class=linear_class) for _ in range(config.num_experts)]
+            [FeedForward(ffn_config, linear_class=linear_class) for _ in range(config.num_experts)]
         )
 
     def forward(self, x: torch.Tensor, dynamic_top_k: int = None):

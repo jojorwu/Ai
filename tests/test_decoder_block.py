@@ -2,7 +2,9 @@
 Tests for the PyTorch-based Transformer DecoderBlock.
 """
 import unittest
+
 import torch
+
 from config import DecoderBlockConfig
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 

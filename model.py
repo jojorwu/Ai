@@ -1,22 +1,24 @@
 """
 PyTorch implementation of the main Transformer model.
 """
+import copy
 import math
+from dataclasses import dataclass, field
+from typing import Generator, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass, field
-from typing import Generator, Tuple
-import copy
 
-from config import TransformerConfig, DecoderBlockConfig
+from config import DecoderBlockConfig, TransformerConfig
+from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from nn_components.embedding import Embedding
 from nn_components.linear import Linear
+from nn_components.long_term_memory import LongTermMemory
 from nn_components.rms_norm import RMSNorm
 from nn_components.rotary_embedding import precompute_rope_embeddings
-from nn_components.activations import Tanh
-from nn_components.long_term_memory import LongTermMemory
+
 
 @dataclass
 class GenerateInput:

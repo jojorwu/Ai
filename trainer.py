@@ -1,10 +1,10 @@
 """
 PyTorch implementation of the Trainer class, which encapsulates the core training logic.
 """
+import copy
 import logging
 import time
 from dataclasses import dataclass
-import copy
 
 import torch
 import torch.nn as nn
@@ -13,7 +13,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from agent_manager import AgentManager, SpecializationConfig
 from config import Config
-from data_loader import get_batches_torch as get_batches # Assuming a torch version exists
+from data_loader import \
+    get_batches_torch as get_batches  # Assuming a torch version exists
+
 
 @dataclass
 class TrainerConfig:

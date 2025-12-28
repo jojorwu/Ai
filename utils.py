@@ -7,6 +7,7 @@ import os
 import re
 from typing import Tuple
 
+
 def setup_logging(log_path: str = None):
     """
     Configures logging to file and console.

@@ -5,10 +5,11 @@ import argparse
 import logging
 import os
 import shutil
+
 import torch
 import torch.nn as nn
-from torch.optim import Adam
 from accelerate import Accelerator
+from torch.optim import Adam
 
 from config import Config, TransformerConfig
 from data_loader import load_multimodal_data_from_directory
@@ -16,6 +17,7 @@ from model import Transformer
 from tokenizer import Tokenizer
 from trainer import Trainer
 from utils import setup_logging
+
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
     """Initializes tokenizer and loads data."""

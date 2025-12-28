@@ -6,11 +6,10 @@ import os
 from typing import List, Optional, Tuple
 
 import docx
-import PyPDF2
-from PIL import Image
-
 import numpy as np
+import PyPDF2
 import torch
+from PIL import Image
 
 
 # pylint: disable=broad-except-in-catch

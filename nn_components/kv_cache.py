@@ -1,8 +1,10 @@
 """
 PyTorch implementation of the K-V Cache for efficient Transformer generation.
 """
-import torch
 from dataclasses import dataclass
+
+import torch
+
 
 @dataclass
 class KVCacheConfig:

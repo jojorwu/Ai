@@ -2,7 +2,9 @@
 Tests for the PyTorch-based Mixture of Experts (MoE) layer.
 """
 import unittest
+
 import torch
+
 from config import MoEConfig
 from nn_components.moe import MixtureOfExperts
 

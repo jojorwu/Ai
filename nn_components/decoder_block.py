@@ -1,18 +1,20 @@
 """
 PyTorch implementation of a single Transformer Decoder Block.
 """
-import torch
-import torch.nn as nn
 from dataclasses import dataclass
 
-from config import DecoderBlockConfig
+import torch
+import torch.nn as nn
+from bitsandbytes.nn import Linear4bit
+
+from config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
+                    MultiHeadAttentionConfig)
 from nn_components.dropout import Dropout
 from nn_components.feed_forward import FeedForward
+from nn_components.linear import Linear
 from nn_components.moe import MixtureOfExperts
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rms_norm import RMSNorm
-from nn_components.linear import Linear
-from bitsandbytes.nn import Linear4bit
 
 
 @dataclass
@@ -25,9 +27,6 @@ class ForwardPassInput:
     images: torch.Tensor = None
     layer_idx: int = None
     dynamic_top_k: int = None
-
-
-from config import DecoderBlockConfig, MultiHeadAttentionConfig, MoEConfig
 
 
 class DecoderBlock(nn.Module):
@@ -56,16 +55,21 @@ class DecoderBlock(nn.Module):
                         config.num_experts > 0)
 
         if self.use_moe:
-            moe_config = MoEConfig(
+            moe_config = MoEConfig(d_model=config.d_model,
+                                   d_ff=config.d_ff,
+                                   num_experts=config.num_experts,
+                                   top_k=config.top_k_experts,
+                                   bias=False)
+            self.moe_layer = MixtureOfExperts(
+                moe_config, linear_class=linear_class)
+        else:
+            ffn_config = FeedForwardConfig(
                 d_model=config.d_model,
                 d_ff=config.d_ff,
-                num_experts=config.num_experts,
-                top_k=config.top_k_experts,
-                bias=False # Typically no bias in MoE experts
+                bias=False,
+                num_layers=config.num_layers
             )
-            self.moe_layer = MixtureOfExperts(moe_config, linear_class=linear_class)
-        else:
-            self.ffn = FeedForward(config.d_model, config.d_ff, bias=False, num_layers=config.num_layers, linear_class=linear_class)
+            self.ffn = FeedForward(ffn_config, linear_class=linear_class)
 
         self.norm1 = RMSNorm(config.d_model)
         self.norm2 = RMSNorm(config.d_model)

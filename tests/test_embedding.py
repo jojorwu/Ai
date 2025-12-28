@@ -2,7 +2,9 @@
 Tests for the PyTorch-based Embedding layer.
 """
 import unittest
+
 import torch
+
 from nn_components.embedding import Embedding
 
 
