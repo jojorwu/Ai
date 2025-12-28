@@ -67,10 +67,10 @@ class TestDecoderBlock(unittest.TestCase):
 
         # MoE/FFN gradients
         if decoder_block.use_moe:
-            self.assertIsNotNone(decoder_block.moe_layer.gate.weights.grad)
-            self.assertTrue(any(p.grad is not None for p in decoder_block.moe_layer.experts[0].parameters()))
+            self.assertIsNotNone(decoder_block.ff_layer.gate.weights.grad)
+            self.assertTrue(any(p.grad is not None for p in decoder_block.ff_layer.experts[0].parameters()))
         else:
-            self.assertIsNotNone(decoder_block.ffn.w1.weights.grad)
+            self.assertIsNotNone(decoder_block.ff_layer.w1.weights.grad)
 
         self.assertIsNotNone(x.grad)
 

@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.optim import Adam
 
 from model import GenerateInput, Transformer

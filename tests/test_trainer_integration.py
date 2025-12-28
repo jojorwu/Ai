@@ -4,13 +4,13 @@ Integration test for the PyTorch-based Trainer class.
 import unittest
 
 import torch
-import torch.nn as nn
+from torch import nn
 from accelerate import Accelerator
 from torch.optim import Adam
 
 from config import Config, TransformerConfig
 from model import Transformer
-from trainer import Trainer, TrainerConfig
+from trainer import Trainer
 
 
 def _create_test_config_and_data():

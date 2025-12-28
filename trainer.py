@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
@@ -36,27 +36,34 @@ class Trainer:
     """
 
     def __init__(self, **kwargs):
-        self._config = TrainerConfig(**kwargs)
+        self.model = kwargs['model']
+        self.optimizer = kwargs['optimizer']
+        self.policy_loss_fn = kwargs['policy_loss_fn']
+        self.value_loss_fn = kwargs['value_loss_fn']
+        self.tokenizer = kwargs['tokenizer']
+        self.train_data = kwargs['train_data']
+        self.val_data = kwargs['val_data']
+        self.config = kwargs['config']
+        self.accelerator = kwargs['accelerator']
 
     def run_validation(self) -> float:
         """Runs validation on the model."""
-        self._config.model.eval()
+        self.model.eval()
         total_loss = 0
         num_batches = 0
-        evo_cfg = self._config.config.evolution
-
+        evo_cfg = self.config.evolution
         batch_iterator = get_batches(
-            self._config.val_data, evo_cfg.batch_size, evo_cfg.seq_len, self._config.accelerator.device
+            self.val_data, evo_cfg.batch_size, evo_cfg.seq_len, self.accelerator.device
         )
-
         with torch.no_grad():
             for x, y, _ in batch_iterator:
-                logits, _, _ = self._config.model(x)
-                loss = self._config.policy_loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
+                logits, _, _ = self.model(x)
+                loss = self.policy_loss_fn(
+                    logits.view(-1, logits.size(-1)), y.view(-1)
+                )
                 total_loss += loss.item()
                 num_batches += 1
-
-        self._config.model.train()
+        self.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')
 
     def train_pretrain_epoch(self) -> tuple[float, float]:
@@ -64,50 +71,35 @@ class Trainer:
         start_time = time.time()
         total_policy_loss = 0
         num_batches = 0
-
-        evo_cfg = self._config.config.evolution
-
+        evo_cfg = self.config.evolution
         batch_iterator = get_batches(
-            self._config.train_data, evo_cfg.batch_size, evo_cfg.seq_len, self._config.accelerator.device
+            self.train_data,
+            evo_cfg.batch_size,
+            evo_cfg.seq_len,
+            self.accelerator.device,
         )
-
-        # Simple scheduler for now
-        scheduler = CosineAnnealingLR(self._config.optimizer, T_max=100) # Placeholder T_max
-
-        self._config.model.train()
-        self._config.optimizer.zero_grad()
-
+        scheduler = CosineAnnealingLR(self.optimizer, T_max=100)
+        self.model.train()
+        self.optimizer.zero_grad()
         for i, (x, y, _) in enumerate(batch_iterator):
-            # Forward pass
-            logits, _, aux_loss = self._config.model(x)
-
-            # Calculate loss
-            policy_loss = self._config.policy_loss_fn(logits.view(-1, logits.size(-1)), y.view(-1))
-            total_loss = policy_loss
-            if aux_loss is not None:
-                total_loss += evo_cfg.moe_aux_loss_coeff * aux_loss
-
-            # Scale loss for gradient accumulation
+            logits, _, aux_loss = self.model(x)
+            policy_loss = self.policy_loss_fn(
+                logits.view(-1, logits.size(-1)), y.view(-1)
+            )
+            total_loss = policy_loss + (
+                evo_cfg.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+            )
             loss_scaled = total_loss / evo_cfg.gradient_accumulation_steps
-
-            # Backward pass
-            self._config.accelerator.backward(loss_scaled)
-
+            self.accelerator.backward(loss_scaled)
             total_policy_loss += policy_loss.item()
             num_batches += 1
-
-            # Gradient accumulation step
             if (i + 1) % evo_cfg.gradient_accumulation_steps == 0:
-                # Clip gradients
-                if self._config.config.optimizer.max_norm > 0:
+                if self.config.optimizer.max_norm > 0:
                     torch.nn.utils.clip_grad_norm_(
-                        self._config.model.parameters(), self._config.config.optimizer.max_norm
+                        self.model.parameters(), self.config.optimizer.max_norm
                     )
-                # Optimizer step
-                self._config.optimizer.step()
-                # Zero gradients
-                self._config.optimizer.zero_grad()
-
+                self.optimizer.step()
+                self.optimizer.zero_grad()
         scheduler.step()
         avg_loss = total_policy_loss / num_batches if num_batches > 0 else 0
         epoch_time = time.time() - start_time
@@ -117,42 +109,36 @@ class Trainer:
         """Runs one full cycle of evolution."""
         logging.info("--- Starting new evolution cycle ---")
         start_time = time.time()
-        evo_config = self._config.config.evolution
-        device = self._config.accelerator.device
-
-        # Create a CPU copy of the model for agent cloning to avoid VRAM issues
-        cpu_model = copy.deepcopy(self._config.model).to('cpu')
-
+        evo_config = self.config.evolution
+        device = self.accelerator.device
+        cpu_model = copy.deepcopy(self.model).to('cpu')
         agent_manager = AgentManager(
             base_model=cpu_model, num_agents=evo_config.num_agents
         )
-        logging.info(f"Specializing {evo_config.num_agents} agents...")
+        logging.info("Specializing %d agents...", evo_config.num_agents)
         spec_config = SpecializationConfig(
-            full_data=self._config.train_data,
+            full_data=self.train_data,
             seq_len=evo_config.seq_len,
             batch_size=evo_config.batch_size,
-            steps_per_agent=10
+            steps_per_agent=10,
         )
-        # Pass the device for agent training batches
         agent_manager.specialize_agents_on_dataset(spec_config, device)
-
         logging.info("Evaluating and selecting best agents...")
         best_agents = agent_manager.collaborative_evaluation(
-            evaluation_data=self._config.val_data[:50], # using a slice for speed
-            tokenizer=self._config.tokenizer,
+            evaluation_data=self.val_data[:50],
+            tokenizer=self.tokenizer,
             top_k=evo_config.num_survivors,
-            device=device
         )
-
         if best_agents:
-            logging.info(f"Merging LTM from {len(best_agents)} best agents into base model...")
+            logging.info(
+                "Merging LTM from %d best agents into base model...",
+                len(best_agents)
+            )
             agent_manager.merge_agents(best_agents)
-            # Make sure the base model's LTM is on the correct device after merging
-            if self._config.model.long_term_memory:
-                self._config.model.long_term_memory.to(device)
+            if self.model.long_term_memory:
+                self.model.long_term_memory.to(device)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
-
         epoch_time = time.time() - start_time
-        logging.info(f"--- Evolution cycle finished in {epoch_time:.2f}s ---")
+        logging.info("--- Evolution cycle finished in %.2fs ---", epoch_time)
         return epoch_time

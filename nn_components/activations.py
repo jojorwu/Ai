@@ -2,7 +2,7 @@
 PyTorch implementations of activation functions.
 """
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class Tanh(nn.Module):

@@ -7,7 +7,7 @@ import os
 import shutil
 
 import torch
-import torch.nn as nn
+from torch import nn
 from accelerate import Accelerator
 from torch.optim import Adam
 
@@ -45,14 +45,19 @@ def initialize_components(config: Config, vocab_size: int, tokenizer, load_in_4b
 def setup_environment(args):
     """Sets up directories, logging, and configuration."""
     model_dir = os.path.join('models', args.model_name)
-    resume_dir = os.path.join('models', args.resume_from) if args.resume_from else None
+    resume_dir = os.path.join(
+        'models', args.resume_from
+    ) if args.resume_from else None
 
     if resume_dir:
         config_path = os.path.join(resume_dir, 'config.json')
         os.makedirs(model_dir, exist_ok=True)
         log_path = os.path.join(model_dir, 'training.log')
         setup_logging(log_path)
-        logging.info(f"Resuming training from '{args.resume_from}'. New logs in '{args.model_name}'.")
+        logging.info(
+            "Resuming training from '%s'. New logs in '%s'.",
+            args.resume_from, args.model_name
+        )
     else:
         if os.path.exists(model_dir):
             raise FileExistsError(f"Model directory '{model_dir}' already exists.")
@@ -61,7 +66,7 @@ def setup_environment(args):
         log_path = os.path.join(model_dir, 'training.log')
         setup_logging(log_path)
         shutil.copy(config_path, os.path.join(model_dir, 'config.json'))
-        logging.info(f"Starting new training run: '{args.model_name}'.")
+        logging.info("Starting new training run: '%s'.", args.model_name)
 
     config = Config.from_json(config_path)
     return config, model_dir, resume_dir
@@ -70,33 +75,49 @@ def run_training_loop(trainer, config, model, model_dir):
     """Executes the main training loop."""
     best_val_loss = float('inf')
     epochs_no_improve = 0
-    total_epochs = config.evolution.pretrain_epochs + config.evolution.evolution_epochs
+    total_epochs = (
+        config.evolution.pretrain_epochs + config.evolution.evolution_epochs
+    )
 
     for epoch in range(total_epochs):
         is_pretrain = epoch < config.evolution.pretrain_epochs
         phase = "Pre-training" if is_pretrain else "Evolution"
         phase_epoch = epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
-        total_phase_epochs = config.evolution.pretrain_epochs if is_pretrain else config.evolution.evolution_epochs
-
-        logging.info(f"\n--- {phase} Epoch {phase_epoch + 1}/{total_phase_epochs} ---")
+        total_phase_epochs = (
+            config.evolution.pretrain_epochs
+            if is_pretrain
+            else config.evolution.evolution_epochs
+        )
+        logging.info(
+            "\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, total_phase_epochs
+        )
 
         if is_pretrain:
             avg_loss, epoch_time = trainer.train_pretrain_epoch()
-            logging.info(f"    - Average Loss: {avg_loss:.4f}")
+            logging.info("    - Average Loss: %.4f", avg_loss)
         else:
             epoch_time = trainer.run_evolution_cycle()
 
         val_loss = trainer.run_validation()
-        logging.info(f"    - Validation Loss: {val_loss:.4f}, Epoch Time: {epoch_time:.2f}s")
+        logging.info(
+            "    - Validation Loss: %.4f, Epoch Time: %.2fs", val_loss, epoch_time
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(model_dir, 'best_model.pt'))
-            logging.info(f"    - New best model saved (Val Loss: {best_val_loss:.4f})")
+            torch.save(
+                model.state_dict(), os.path.join(model_dir, 'best_model.pt')
+            )
+            logging.info(
+                "    - New best model saved (Val Loss: %.4f)", best_val_loss
+            )
         else:
             epochs_no_improve += 1
-            logging.info(f"    - No improvement in validation loss for {epochs_no_improve} epochs.")
+            logging.info(
+                "    - No improvement in validation loss for %d epochs.",
+                epochs_no_improve
+            )
 
         if epochs_no_improve >= config.evolution.early_stopping_patience:
             logging.warning("Early stopping triggered.")
@@ -104,45 +125,64 @@ def run_training_loop(trainer, config, model, model_dir):
 
 def main():
     """Main training script."""
-    parser = argparse.ArgumentParser(description="Agent-centric Transformer Training with PyTorch.")
-    parser.add_argument('--model-name', type=str, required=True, help="Name for the model.")
-    parser.add_argument('--resume-from', type=str, help="Resume training from an existing model.")
-    parser.add_argument('--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
+    parser = argparse.ArgumentParser(
+        description="Agent-centric Transformer Training with PyTorch."
+    )
+    parser.add_argument(
+        '--model-name', type=str, required=True, help="Name for the model."
+    )
+    parser.add_argument(
+        '--resume-from', type=str, help="Resume training from an existing model."
+    )
+    parser.add_argument(
+        '--load-in-4bit', action='store_true', help="Load the model in 4-bit."
+    )
     args = parser.parse_args()
 
     try:
         config, model_dir, resume_dir = setup_environment(args)
         accelerator = Accelerator()
-
         tokenizer, train_data, val_data = load_and_prepare_data(
-            config.evolution.data_dir, config.evolution.data_dir, config.evolution.validation_split
+            config.evolution.data_dir,
+            config.evolution.data_dir,
+            config.evolution.validation_split,
         )
         if not resume_dir:
-            shutil.copy(os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'), model_dir)
-
-        model, policy_loss, value_loss, opt = initialize_components(config, tokenizer.vocab_size, tokenizer, args.load_in_4bit)
-
+            shutil.copy(
+                os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
+                model_dir,
+            )
+        model, policy_loss, value_loss, opt = initialize_components(
+            config, tokenizer.vocab_size, tokenizer, args.load_in_4bit
+        )
         if resume_dir:
             weights_path = os.path.join(resume_dir, 'best_model.pt')
             if os.path.exists(weights_path):
                 model.load_state_dict(torch.load(weights_path))
-                logging.info(f"Loaded model weights from {weights_path}")
-
-        model, opt, policy_loss, value_loss = accelerator.prepare(model, opt, policy_loss, value_loss)
-
-        trainer = Trainer(
-            model=model, optimizer=opt, policy_loss_fn=policy_loss, value_loss_fn=value_loss,
-            tokenizer=tokenizer, train_data=train_data, val_data=val_data, config=config,
-            accelerator=accelerator
+                logging.info("Loaded model weights from %s", weights_path)
+        model, opt, policy_loss, value_loss = accelerator.prepare(
+            model, opt, policy_loss, value_loss
         )
-
+        trainer = Trainer(
+            model=model,
+            optimizer=opt,
+            policy_loss_fn=policy_loss,
+            value_loss_fn=value_loss,
+            tokenizer=tokenizer,
+            train_data=train_data,
+            val_data=val_data,
+            config=config,
+            accelerator=accelerator,
+        )
         run_training_loop(trainer, config, model, model_dir)
-
         torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
-        logging.info(f"\nTraining complete! Final model saved to: {model_dir}")
-
+        logging.info(
+            "\nTraining complete! Final model saved to: %s", model_dir
+        )
+    except FileNotFoundError as e:
+        logging.error("File not found: %s", e)
     except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        logging.error("An unexpected error occurred: %s", e, exc_info=True)
 
 if __name__ == "__main__":
     main()

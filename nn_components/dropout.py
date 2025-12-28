@@ -1,7 +1,7 @@
 """
 PyTorch implementation of the Dropout layer.
 """
-import torch.nn as nn
+from torch import nn
 
 
 class Dropout(nn.Module):

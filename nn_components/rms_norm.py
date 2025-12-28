@@ -2,7 +2,7 @@
 PyTorch implementation of Root Mean Square Normalization (RMSNorm).
 """
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class RMSNorm(nn.Module):
