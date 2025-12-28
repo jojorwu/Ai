@@ -7,8 +7,8 @@ import os
 import shutil
 
 import torch
-from torch import nn
 from accelerate import Accelerator
+from torch import nn
 from torch.optim import Adam
 
 from config import Config, TransformerConfig
@@ -16,7 +16,7 @@ from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from tokenizer import Tokenizer
 from trainer import Trainer
-from utils import setup_logging
+from utils import main_entrypoint, setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
@@ -123,6 +123,7 @@ def run_training_loop(trainer, config, model, model_dir):
             logging.warning("Early stopping triggered.")
             break
 
+@main_entrypoint
 def main():
     """Main training script."""
     parser = argparse.ArgumentParser(
@@ -139,50 +140,45 @@ def main():
     )
     args = parser.parse_args()
 
-    try:
-        config, model_dir, resume_dir = setup_environment(args)
-        accelerator = Accelerator()
-        tokenizer, train_data, val_data = load_and_prepare_data(
-            config.evolution.data_dir,
-            config.evolution.data_dir,
-            config.evolution.validation_split,
+    config, model_dir, resume_dir = setup_environment(args)
+    accelerator = Accelerator()
+    tokenizer, train_data, val_data = load_and_prepare_data(
+        config.evolution.data_dir,
+        config.evolution.data_dir,
+        config.evolution.validation_split,
+    )
+    if not resume_dir:
+        shutil.copy(
+            os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
+            model_dir,
         )
-        if not resume_dir:
-            shutil.copy(
-                os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
-                model_dir,
-            )
-        model, policy_loss, value_loss, opt = initialize_components(
-            config, tokenizer.vocab_size, tokenizer, args.load_in_4bit
-        )
-        if resume_dir:
-            weights_path = os.path.join(resume_dir, 'best_model.pt')
-            if os.path.exists(weights_path):
-                model.load_state_dict(torch.load(weights_path))
-                logging.info("Loaded model weights from %s", weights_path)
-        model, opt, policy_loss, value_loss = accelerator.prepare(
-            model, opt, policy_loss, value_loss
-        )
-        trainer = Trainer(
-            model=model,
-            optimizer=opt,
-            policy_loss_fn=policy_loss,
-            value_loss_fn=value_loss,
-            tokenizer=tokenizer,
-            train_data=train_data,
-            val_data=val_data,
-            config=config,
-            accelerator=accelerator,
-        )
-        run_training_loop(trainer, config, model, model_dir)
-        torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
-        logging.info(
-            "\nTraining complete! Final model saved to: %s", model_dir
-        )
-    except FileNotFoundError as e:
-        logging.error("File not found: %s", e)
-    except Exception as e:
-        logging.error("An unexpected error occurred: %s", e, exc_info=True)
+    model, policy_loss, value_loss, opt = initialize_components(
+        config, tokenizer.vocab_size, tokenizer, args.load_in_4bit
+    )
+    if resume_dir:
+        weights_path = os.path.join(resume_dir, 'best_model.pt')
+        if os.path.exists(weights_path):
+            model.load_state_dict(torch.load(weights_path))
+            logging.info("Loaded model weights from %s", weights_path)
+    model, opt, policy_loss, value_loss = accelerator.prepare(
+        model, opt, policy_loss, value_loss
+    )
+    trainer = Trainer(
+        model=model,
+        optimizer=opt,
+        policy_loss_fn=policy_loss,
+        value_loss_fn=value_loss,
+        tokenizer=tokenizer,
+        train_data=train_data,
+        val_data=val_data,
+        config=config,
+        accelerator=accelerator,
+    )
+    run_training_loop(trainer, config, model, model_dir)
+    torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
+    logging.info(
+        "\nTraining complete! Final model saved to: %s", model_dir
+    )
 
 if __name__ == "__main__":
     main()

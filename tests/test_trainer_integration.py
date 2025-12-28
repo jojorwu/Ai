@@ -4,8 +4,8 @@ Integration test for the PyTorch-based Trainer class.
 import unittest
 
 import torch
-from torch import nn
 from accelerate import Accelerator
+from torch import nn
 from torch.optim import Adam
 
 from config import Config, TransformerConfig
@@ -94,10 +94,6 @@ class TestTrainerIntegration(unittest.TestCase):
 
         # --- 2. Test Evolution Cycle ---
         trainer.run_evolution_cycle()
-
-        # Simple assertion: the test completes without crashing.
-        # A more detailed test would check the LTM state.
-        self.assertTrue(True, "Evolution cycle completed without crashing.")
 
 if __name__ == "__main__":
     unittest.main()

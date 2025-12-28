@@ -12,7 +12,7 @@ import torch
 from PIL import Image
 
 
-# pylint: disable=broad-except-in-catch
+# pylint: disable=broad-except
 def _read_txt(file_path: str) -> str:
     """Extracts text from a .txt file."""
     try:

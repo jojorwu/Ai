@@ -58,7 +58,7 @@ class AgentManager:
 
     def fork_agents(self):
         """Creates (clones) a population of agents from the base model."""
-        logging.info(f"Cloning {self.num_agents} agents from the base model...")
+        logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
             agent = Agent(self.base_model, agent_id=f"agent_{i}")
             self.agents.append(agent)
@@ -76,7 +76,9 @@ class AgentManager:
             if not agent_data or len(agent_data) < spec_config.seq_len + 1:
                 logging.info("  - Skipping %s, not enough data.", agent.agent_id)
                 continue
-            logging.info("  - Specializing %s on %d items...", agent.agent_id, len(agent_data))
+            logging.info(
+                "  - Specializing %s on %d items...", agent.agent_id, len(agent_data)
+            )
             batch_generator = get_batches_torch(
                 agent_data, spec_config.batch_size, spec_config.seq_len, device
             )
@@ -111,7 +113,11 @@ class AgentManager:
         for key in avg_state:
             avg_state[key] /= len(ltm_states)
 
-        model_to_update = self.base_model.module if hasattr(self.base_model, 'module') else self.base_model
+        model_to_update = (
+            self.base_model.module
+            if hasattr(self.base_model, 'module')
+            else self.base_model
+        )
         if model_to_update.long_term_memory:
             model_to_update.long_term_memory.load_state_dict(avg_state)
             logging.info("Base model's LTM has been updated with merged weights.")
@@ -131,14 +137,20 @@ class AgentManager:
         if helper.agent_id == ctx.proposer.agent_id:
             return
 
-        context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(helper.model.device)
+        context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
+            helper.model.device
+        )
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1]:]
 
         critics = [
-            a for a in self.agents if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
+            a
+            for a in self.agents
+            if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
         ] or [ctx.proposer]
-        critique_scores = [c.critique_response(context, None, new_helper_tokens) for c in critics]
+        critique_scores = [
+            c.critique_response(context, None, new_helper_tokens) for c in critics
+        ]
         avg_critique_score = torch.mean(torch.tensor(critique_scores)).item()
 
         if avg_critique_score > self.SUCCESS_THRESHOLD:
@@ -151,9 +163,15 @@ class AgentManager:
 
     def _handle_independent_response(self, ctx: IndependentResponseContext):
         """Handles the scenario where an agent responds independently."""
-        critics = [a for a in self.agents if a.agent_id != ctx.proposer.agent_id] or [ctx.proposer]
+        critics = (
+            [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
+            or [ctx.proposer]
+        )
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1]:]
-        critique_scores = [c.critique_response(ctx.prompt_tokens, None, new_response_tokens) for c in critics]
+        critique_scores = [
+            c.critique_response(ctx.prompt_tokens, None, new_response_tokens)
+            for c in critics
+        ]
         avg_critique_score = torch.mean(torch.tensor(critique_scores)).item()
 
         if avg_critique_score > self.SUCCESS_THRESHOLD:
@@ -165,11 +183,16 @@ class AgentManager:
 
     def _finalize_evaluation(self, scores, top_k):
         """Finalizes evaluation by updating and sorting agents."""
-        for agent in self.agents: agent.update_fitness_score(scores[agent.agent_id])
-        sorted_agents = sorted(self.agents, key=lambda a: a.get_fitness_score(), reverse=True)
+        for agent in self.agents:
+            agent.update_fitness_score(scores[agent.agent_id])
+        sorted_agents = sorted(
+            self.agents, key=lambda a: a.get_fitness_score(), reverse=True
+        )
         logging.info("  - Collaborative Evaluation Fitness scores:")
         for agent in sorted_agents:
-            logging.info(f"    - {agent.agent_id}: {agent.get_fitness_score():.4f}")
+            logging.info(
+                "    - %s: %.4f", agent.agent_id, agent.get_fitness_score()
+            )
         return sorted_agents[:top_k]
 
     def _process_evaluation_prompts(self, evaluation_data, scores, tokens):

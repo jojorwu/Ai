@@ -49,7 +49,7 @@ class TransformerConfig(BaseModel):
     ltm: Optional['LTMConfig'] = None
     tokenizer: Optional[Any] = None
 
-    class Config:
+    class Config:  # pylint: disable=too-few-public-methods
         """Pydantic config."""
         arbitrary_types_allowed = True
 
@@ -85,7 +85,7 @@ class DecoderBlockConfig(BaseModel):
     long_term_memory: Optional[Any] = None
     load_in_4bit: bool = False
 
-    class Config:
+    class Config:  # pylint: disable=too-few-public-methods
         """Pydantic config."""
         arbitrary_types_allowed = True
 

@@ -17,7 +17,7 @@ from config import Config, TransformerConfig
 from model import GenerateInput, Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
-from utils import parse_tool_call, select_model_interactively, setup_logging
+from utils import main_entrypoint, parse_tool_call, select_model_interactively, setup_logging
 
 
 @dataclass
@@ -131,6 +131,7 @@ def run_agent_loop(
     else:
         logging.warning("Maximum number of iterations reached.")
 
+@main_entrypoint
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
@@ -142,29 +143,23 @@ def main():
         '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
     args = parser.parse_args()
 
-    try:
-        model_name = args.model_name or select_model_interactively()
-        if not model_name:
-            return
+    model_name = args.model_name or select_model_interactively()
+    if not model_name:
+        return
 
-        model_dir = os.path.join('models', model_name)
-        config_path = os.path.join(model_dir, 'config.json')
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(
-                f"Config file not found for model '{model_name}' at {config_path}"
-            )
-
-        config = Config.from_json(config_path)
-        accelerator = Accelerator()
-        model, tokenizer = load_model_and_tokenizer(
-            model_name, config, args.load_in_4bit, accelerator
+    model_dir = os.path.join('models', model_name)
+    config_path = os.path.join(model_dir, 'config.json')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"Config file not found for model '{model_name}' at {config_path}"
         )
-        run_agent_loop(model, tokenizer, config, accelerator)
 
-    except FileNotFoundError as e:
-        logging.error("File not found: %s", e)
-    except Exception as e:
-        logging.error("An unexpected error occurred: %s", e, exc_info=True)
+    config = Config.from_json(config_path)
+    accelerator = Accelerator()
+    model, tokenizer = load_model_and_tokenizer(
+        model_name, config, args.load_in_4bit, accelerator
+    )
+    run_agent_loop(model, tokenizer, config, accelerator)
 
 if __name__ == "__main__":
     main()

@@ -12,7 +12,6 @@ from torch.nn import functional as F
 from bitsandbytes.nn import Linear4bit
 
 from config import DecoderBlockConfig, TransformerConfig
-from nn_components.activations import Tanh
 from nn_components.decoder_block import DecoderBlock, ForwardPassInput
 from nn_components.embedding import Embedding
 from nn_components.linear import Linear

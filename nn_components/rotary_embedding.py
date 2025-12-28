@@ -30,7 +30,9 @@ def precompute_rope_embeddings(d_k: int, max_seq_len: int):
     return cos, sin
 
 
-def apply_rope_embeddings(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, seq_offset: int = 0):
+def apply_rope_embeddings(
+    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, seq_offset: int = 0
+):
     """
     Applies RoPE to a query or key tensor.
 
