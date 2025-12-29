@@ -195,7 +195,7 @@ class AgentManager:
             )
         return sorted_agents[:top_k]
 
-    def _process_evaluation_prompts(self, evaluation_data, scores, tokens):
+    def _process_evaluation_prompts(self, evaluation_data, scores, tokens, device):
         """Processes each prompt in the evaluation data."""
         prompt_len = self.base_model.config.model.max_seq_len // 2
         num_prompts = len(evaluation_data) // prompt_len
@@ -205,7 +205,7 @@ class AgentManager:
 
         for i in range(min(num_prompts, self.num_agents * 2)):
             prompt_tokens_list = evaluation_data[i * prompt_len : (i + 1) * prompt_len]
-            prompt_tensor = torch.tensor([prompt_tokens_list], device='cpu')
+            prompt_tensor = torch.tensor([prompt_tokens_list], device=device)
             self._evaluate_prompt_with_agents(prompt_tensor, scores, tokens)
 
     def _evaluate_prompt_with_agents(self, prompt_tensor, scores, tokens):
@@ -229,7 +229,7 @@ class AgentManager:
                 )
                 self._handle_independent_response(ctx)
 
-    def collaborative_evaluation(self, evaluation_data, tokenizer, top_k):
+    def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
         Evaluates agents with a nuanced, peer-review-based scoring system.
         """
@@ -238,5 +238,5 @@ class AgentManager:
             return self.agents[:top_k]
 
         scores, tokens = self._initialize_evaluation(tokenizer)
-        self._process_evaluation_prompts(evaluation_data, scores, tokens)
+        self._process_evaluation_prompts(evaluation_data, scores, tokens, device)
         return self._finalize_evaluation(scores, top_k)

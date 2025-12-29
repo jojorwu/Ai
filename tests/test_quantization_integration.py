@@ -3,11 +3,10 @@ Integration test to verify the end-to-end training process of a 4-bit quantized 
 """
 import logging
 import unittest
+from dataclasses import dataclass
 
 import torch
 from accelerate import Accelerator, dispatch_model, init_empty_weights
-from dataclasses import dataclass
-
 from bitsandbytes.optim import Adam8bit
 from torch import nn
 

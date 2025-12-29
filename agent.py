@@ -60,7 +60,7 @@ class Agent:
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.linalg.norm(torch.cat(grad_tensors)).item()
+        surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.metrics.total_surprise += surprise
 
         # Update LTM if surprise is high enough

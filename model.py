@@ -151,7 +151,7 @@ class Transformer(nn.Module):
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.linalg.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
+        surprise = torch.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
         self.long_term_memory.zero_grad()
         return surprise
 

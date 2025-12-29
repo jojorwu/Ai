@@ -128,6 +128,7 @@ class Trainer:
             evaluation_data=self._config.val_data[:50],
             tokenizer=self._config.tokenizer,
             top_k=evo_config.num_survivors,
+            device=device,
         )
         if best_agents:
             logging.info(
