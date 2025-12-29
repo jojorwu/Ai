@@ -180,14 +180,9 @@ class Agent:
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
             sampling_config=sampling_config,
+            ltm_override=self.long_term_memory,
         )
-
-        # This is tricky because the base model's generate function uses its own LTM.
-        # For now, we'll create a temporary model with the agent's LTM for generation.
-        # This is still more efficient than deep-copying the whole model.
-        temp_model = copy.deepcopy(self.base_model)
-        temp_model.layers.long_term_memory = self.long_term_memory
-        return temp_model.generate(generate_input)
+        return self.base_model.generate(generate_input)
 
     @torch.no_grad()
     def critique_response(

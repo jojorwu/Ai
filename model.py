@@ -65,10 +65,12 @@ class SpeculativeConfig:
 @dataclass
 class GenerateInput:
     """Datacaclass for storing inputs to the generate method."""
+
     start_tokens: torch.Tensor
     max_new_tokens: int
     sampling_config: SamplingConfig = field(default_factory=SamplingConfig)
     speculative_config: SpeculativeConfig = field(default_factory=SpeculativeConfig)
+    ltm_override: nn.Module | None = None
 
 
 class Transformer(nn.Module):
@@ -149,13 +151,19 @@ class Transformer(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, ltm_state: torch.Tensor = None, dynamic_top_k: int = None
+        self,
+        x: torch.Tensor,
+        ltm_state: torch.Tensor = None,
+        dynamic_top_k: int = None,
+        ltm_override: nn.Module | None = None,
     ):
         """Forward pass of the model."""
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
+        long_term_memory = ltm_override or self.layers.long_term_memory
+
         if ltm_state is None:
-            if self.layers.long_term_memory:
-                ltm_state = self.layers.long_term_memory(h.mean(dim=1, keepdim=True))
+            if long_term_memory:
+                ltm_state = long_term_memory(h.mean(dim=1, keepdim=True))
             else:
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
@@ -188,23 +196,26 @@ class Transformer(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)
         return next_token
 
-    def _calculate_surprise(self, value: torch.Tensor) -> float:
+    def _calculate_surprise(
+        self, value: torch.Tensor, ltm_override: nn.Module | None = None
+    ) -> float:
         """Calculates 'surprise' by backpropagating value and getting LTM grad norm."""
-        if not self.layers.long_term_memory or not value.requires_grad:
+        long_term_memory = ltm_override or self.layers.long_term_memory
+        if not long_term_memory or not value.requires_grad:
             return 0.0
 
-        self.layers.long_term_memory.zero_grad()
+        long_term_memory.zero_grad()
         value.backward(retain_graph=True)
         grad_tensors = [
             p.grad.detach()
-            for p in self.layers.long_term_memory.parameters()
+            for p in long_term_memory.parameters()
             if p.grad is not None
         ]
         if not grad_tensors:
             return 0.0
 
         surprise = torch.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
-        self.layers.long_term_memory.zero_grad()
+        long_term_memory.zero_grad()
         return surprise
 
     def _generate_speculative_chunk(self, draft_model, tokens, inputs):
@@ -262,9 +273,10 @@ class Transformer(nn.Module):
             # Get the true logits and value from the main model
             with torch.enable_grad():
                 true_logits, value, _ = self(
-                    draft_tokens[:, -self.config.model.max_seq_len :]
+                    draft_tokens[:, -self.config.model.max_seq_len :],
+                    ltm_override=inputs.ltm_override,
                 )
-            surprise = self._calculate_surprise(value)
+            surprise = self._calculate_surprise(value, inputs.ltm_override)
 
             # Validate the speculative chunk and get the accepted tokens
             accepted_chunk = self._validate_and_accept_chunk(
