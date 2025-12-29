@@ -1,7 +1,6 @@
 """
 PyTorch implementation of the AgentManager for managing the agent lifecycle.
 """
-import copy
 import logging
 import math
 from dataclasses import dataclass
@@ -180,10 +179,8 @@ class AgentManager:
         )
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
 
-        # Batch critique responses
-        batch_size = len(critics)
         full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
-            batch_size, -1
+            len(critics), -1
         )
         critic_ltms = [critic.long_term_memory for critic in critics]
         # Assuming `critique_response` can handle a batch of LTMs

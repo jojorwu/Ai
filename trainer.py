@@ -1,7 +1,6 @@
 """
 PyTorch implementation of the Trainer class, which encapsulates the core training logic.
 """
-import copy
 import logging
 import time
 from dataclasses import dataclass

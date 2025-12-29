@@ -5,11 +5,8 @@ import copy
 import uuid
 from dataclasses import dataclass, field
 
-import math
-
 import torch
 from torch import nn
-from torch.nn import functional as F
 from torch.optim import Adam
 
 from model import GenerateInput, SamplingConfig, Transformer
@@ -151,4 +148,3 @@ class Agent:
             ltm_override=self.long_term_memory,
         )
         return self.base_model.generate(generate_input)
-
