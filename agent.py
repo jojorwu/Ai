@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
-from model import GenerateInput, Transformer
+from model import GenerateInput, SamplingConfig, Transformer
 
 
 @dataclass
@@ -22,24 +22,29 @@ class AgentMetrics:
 
 class Agent:
     """
-    Represents a single "agent" with its own long-term memory (LTM),
-    adapted for PyTorch.
+    Represents a single "agent" with its own long-term memory (LTM), adapted for PyTorch.
+    The agent shares the base model's weights but has a unique LTM.
     """
 
-    def __init__(self, base_model: Transformer, agent_id=None):
+    def __init__(self, base_model: Transformer, agent_id: str | None = None):
         self.agent_id = agent_id or str(uuid.uuid4())
-        self.model = copy.deepcopy(base_model)
+        self.base_model = base_model
+        self.long_term_memory = (
+            copy.deepcopy(base_model.layers.long_term_memory)
+            if base_model.layers.long_term_memory
+            else None
+        )
 
-        if self.model.long_term_memory:
+        if self.long_term_memory:
             self.ltm_optimizer = Adam(
-                self.model.long_term_memory.parameters(),
-                lr=self.model.config.ltm.optimizer.learning_rate
+                self.long_term_memory.parameters(),
+                lr=self.base_model.config.ltm.optimizer.learning_rate,
             )
         else:
             self.ltm_optimizer = None
 
         self.policy_loss_fn = nn.CrossEntropyLoss()
-        self.value_loss_fn = nn.MSELoss() # Used to push value towards 1.0
+        self.value_loss_fn = nn.MSELoss()  # Used to push value towards 1.0
         self.metrics = AgentMetrics()
 
     def _update_ltm_and_calc_surprise(self) -> float:
@@ -47,13 +52,12 @@ class Agent:
         Calculates the gradient norm for LTM parameters ("surprise") and,
         if it exceeds a threshold, performs an optimizer step.
         """
-        if not self.model.long_term_memory:
+        if not self.long_term_memory:
             return 0.0
 
-        # Calculate surprise (L2 norm of LTM gradients)
         grad_tensors = [
             p.grad.detach().flatten()
-            for p in self.model.long_term_memory.parameters()
+            for p in self.long_term_memory.parameters()
             if p.grad is not None
         ]
 
@@ -63,8 +67,7 @@ class Agent:
         surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.metrics.total_surprise += surprise
 
-        # Update LTM if surprise is high enough
-        if surprise > self.model.config.ltm.surprise_threshold:
+        if surprise > self.base_model.config.ltm.surprise_threshold:
             self.ltm_optimizer.step()
 
         return surprise
@@ -74,20 +77,19 @@ class Agent:
         The process of an agent gaining "experience" in a batch training mode.
         This method updates the agent's LTM based on the surprise metric.
         """
-        if not self.model.long_term_memory or self.ltm_optimizer is None:
+        if not self.long_term_memory or self.ltm_optimizer is None:
             return
 
-        self.model.train()
+        self.base_model.train()
+        self.long_term_memory.train()
         self.ltm_optimizer.zero_grad()
 
-        # Forward pass
-        logits, values, aux_loss = self.model(x_batch)
+        logits, values, aux_loss = self.base_model.forward(
+            x_batch, ltm_override=self.long_term_memory
+        )
 
-        # Calculate policy loss (predicting the next token)
-        # Reshape for CrossEntropyLoss: (batch_size * seq_len, vocab_size)
         loss_policy = self.policy_loss_fn(
-            logits.view(-1, logits.size(-1)),
-            y_batch.view(-1)
+            logits.view(-1, logits.size(-1)), y_batch.view(-1)
         )
 
         # Calculate value loss (encouraging the model to predict high values)
@@ -114,7 +116,7 @@ class Agent:
 
     def get_ltm_state(self) -> dict | None:
         """Returns the state_dict of this agent's LTM."""
-        return self.model.long_term_memory.state_dict() if self.model.long_term_memory else None
+        return self.long_term_memory.state_dict() if self.long_term_memory else None
 
     def get_fitness_score(self) -> float:
         """Calculates the agent's fitness."""
@@ -131,35 +133,18 @@ class Agent:
         """
         Generates a response based on a prompt.
         """
-        self.model.eval()
+        self.base_model.eval()
+        if self.long_term_memory:
+            self.long_term_memory.eval()
+
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
+        sampling_config = SamplingConfig(temperature=0.7, top_k=50)
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
-            temperature=0.7,
-            top_k=50,
+            sampling_config=sampling_config,
+            ltm_override=self.long_term_memory,
         )
-        return self.model.generate(generate_input)
-
-    @torch.no_grad()
-    def critique_response(
-        self, prompt_tokens: torch.Tensor, response_tokens: torch.Tensor
-    ) -> float:
-        """
-        Evaluates the "usefulness" of a generated response using its Value head.
-        """
-        self.model.eval()
-
-        # Ensure both tensors are 2D (batch_size, seq_len)
-        if prompt_tokens.ndim == 1:
-            prompt_tokens = prompt_tokens.unsqueeze(0)
-        if response_tokens.ndim == 1:
-            response_tokens = response_tokens.unsqueeze(0)
-
-        full_sequence = torch.cat([prompt_tokens, response_tokens], dim=1)
-
-        # image_data is currently ignored
-        _, value, _ = self.model(full_sequence.to(self.model.device))
-        return value.item() if value is not None else 0.0
+        return self.base_model.generate(generate_input)

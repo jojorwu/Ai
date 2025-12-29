@@ -5,12 +5,9 @@ import unittest
 
 import torch
 from accelerate import Accelerator
-from torch import nn
-from torch.optim import Adam
 
-from config import Config, TransformerConfig
-from model import Transformer
-from trainer import Trainer, TrainerConfig, TrainingComponents, DataComponents
+from config import Config
+from trainer import create_trainer, DataComponents
 
 
 def _create_test_config_and_data():
@@ -59,36 +56,12 @@ class TestTrainerIntegration(unittest.TestCase):
         config, tokenizer, train_data, val_data = _create_test_config_and_data()
         accelerator = Accelerator()
 
-        transformer_config = TransformerConfig(
-            vocab_size=tokenizer.vocab_size, model=config.model, vision=config.vision,
-            ltm=config.ltm, tokenizer=tokenizer
-        )
-        model = Transformer(transformer_config)
-        optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
-        policy_loss_fn = nn.CrossEntropyLoss()
-        value_loss_fn = nn.MSELoss()
-
-        model, optimizer, policy_loss_fn, value_loss_fn = accelerator.prepare(
-            model, optimizer, policy_loss_fn, value_loss_fn
-        )
-        training_components = TrainingComponents(
-            model=model,
-            optimizer=optimizer,
-            policy_loss_fn=policy_loss_fn,
-            value_loss_fn=value_loss_fn,
-        )
         data_components = DataComponents(
             tokenizer=tokenizer, train_data=train_data, val_data=val_data
         )
-        trainer_config = TrainerConfig(
-            components=training_components,
-            data=data_components,
-            config=config,
-            accelerator=accelerator,
-        )
-        trainer = Trainer(trainer_config)
-
-        unwrapped_model = model.module if hasattr(model, 'module') else model
+        trainer = create_trainer(config, data_components, accelerator)
+        model = trainer.get_model()
+        unwrapped_model = model.module if hasattr(model, "module") else model
 
         # --- 1. Test Pre-training ---
         initial_weights_pre = unwrapped_model.layers.decoder[0].mha.wo.weights.clone().detach()

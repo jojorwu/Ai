@@ -8,14 +8,11 @@ import shutil
 
 import torch
 from accelerate import Accelerator
-from torch import nn
-from torch.optim import Adam
 
-from config import Config, TransformerConfig
+from config import Config
 from data_loader import load_multimodal_data_from_directory
-from model import Transformer
 from tokenizer import Tokenizer
-from trainer import Trainer, TrainerConfig, TrainingComponents, DataComponents
+from trainer import create_trainer, DataComponents
 from utils import main_entrypoint, setup_logging
 
 
@@ -30,17 +27,6 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     split_idx = int(len(data_tokens) * (1 - validation_split))
     return tokenizer, data_tokens[:split_idx], data_tokens[split_idx:]
 
-def initialize_components(config: Config, vocab_size: int, tokenizer, load_in_4bit: bool):
-    """Initializes the PyTorch model, loss functions, and optimizer."""
-    transformer_config = TransformerConfig(
-        vocab_size=vocab_size, model=config.model, vision=config.vision,
-        ltm=config.ltm, tokenizer=tokenizer
-    )
-    model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
-    policy_loss_fn = nn.CrossEntropyLoss()
-    value_loss_fn = nn.MSELoss()
-    optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
-    return model, policy_loss_fn, value_loss_fn, optimizer
 
 def setup_environment(args):
     """Sets up directories, logging, and configuration."""
@@ -71,13 +57,14 @@ def setup_environment(args):
     config = Config.from_json(config_path)
     return config, model_dir, resume_dir
 
-def run_training_loop(trainer, config, model, model_dir):
+def run_training_loop(trainer, config, model_dir):
     """Executes the main training loop."""
     best_val_loss = float('inf')
     epochs_no_improve = 0
     total_epochs = (
         config.evolution.pretrain_epochs + config.evolution.evolution_epochs
     )
+    model = trainer.get_model()
 
     for epoch in range(total_epochs):
         is_pretrain = epoch < config.evolution.pretrain_epochs
@@ -152,34 +139,22 @@ def main():
             os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
             model_dir,
         )
-    model, policy_loss, value_loss, opt = initialize_components(
-        config, tokenizer.vocab_size, tokenizer, args.load_in_4bit
+
+    data_components = DataComponents(
+        tokenizer=tokenizer, train_data=train_data, val_data=val_data
     )
+    trainer = create_trainer(
+        config, data_components, accelerator, args.load_in_4bit
+    )
+    model = trainer.get_model()
+
     if resume_dir:
         weights_path = os.path.join(resume_dir, 'best_model.pt')
         if os.path.exists(weights_path):
             model.load_state_dict(torch.load(weights_path))
             logging.info("Loaded model weights from %s", weights_path)
-    model, opt, policy_loss, value_loss = accelerator.prepare(
-        model, opt, policy_loss, value_loss
-    )
-    training_components = TrainingComponents(
-        model=model,
-        optimizer=opt,
-        policy_loss_fn=policy_loss,
-        value_loss_fn=value_loss,
-    )
-    data_components = DataComponents(
-        tokenizer=tokenizer, train_data=train_data, val_data=val_data
-    )
-    trainer_config = TrainerConfig(
-        components=training_components,
-        data=data_components,
-        config=config,
-        accelerator=accelerator,
-    )
-    trainer = Trainer(trainer_config)
-    run_training_loop(trainer, config, model, model_dir)
+
+    run_training_loop(trainer, config, model_dir)
     torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
     logging.info(
         "\nTraining complete! Final model saved to: %s", model_dir

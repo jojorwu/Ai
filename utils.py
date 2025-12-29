@@ -88,6 +88,7 @@ def main_entrypoint(main_func):
     """
     Decorator to wrap main functions with common exception handling.
     """
+
     def wrapper():
         try:
             main_func()
@@ -95,6 +96,10 @@ def main_entrypoint(main_func):
             logging.error("File not found: %s", e)
         except (ValueError, TypeError) as e:
             logging.error("Configuration or value error: %s", e)
+        except KeyboardInterrupt:
+            logging.info("\nExecution interrupted by user.")
         except Exception as e:
             logging.error("An unexpected error occurred: %s", e, exc_info=True)
+            raise
+
     return wrapper

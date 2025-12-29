@@ -1,7 +1,6 @@
 """
 PyTorch implementation of the Trainer class, which encapsulates the core training logic.
 """
-import copy
 import logging
 import time
 from dataclasses import dataclass
@@ -12,9 +11,48 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from agent_manager import AgentManager, SpecializationConfig
-from config import Config
+from config import Config, TransformerConfig
 from data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
+from model import Transformer
+
+
+def create_trainer(
+    config: Config,
+    data_components: "DataComponents",
+    accelerator: "Accelerator",
+    load_in_4bit: bool = False,
+) -> "Trainer":
+    """Initializes and returns a Trainer instance."""
+    transformer_config = TransformerConfig(
+        vocab_size=data_components.tokenizer.vocab_size,
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm,
+        tokenizer=data_components.tokenizer,
+    )
+    model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+    optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
+    policy_loss_fn = nn.CrossEntropyLoss()
+    value_loss_fn = nn.MSELoss()
+
+    model, optimizer, policy_loss_fn, value_loss_fn = accelerator.prepare(
+        model, optimizer, policy_loss_fn, value_loss_fn
+    )
+
+    training_components = TrainingComponents(
+        model=model,
+        optimizer=optimizer,
+        policy_loss_fn=policy_loss_fn,
+        value_loss_fn=value_loss_fn,
+    )
+    trainer_config = TrainerConfig(
+        components=training_components,
+        data=data_components,
+        config=config,
+        accelerator=accelerator,
+    )
+    return Trainer(trainer_config)
 
 
 @dataclass
@@ -48,6 +86,10 @@ class Trainer:
 
     def __init__(self, trainer_config: TrainerConfig):
         self._config = trainer_config
+
+    def get_model(self) -> nn.Module:
+        """Returns the underlying model."""
+        return self._config.components.model
 
     def run_validation(self) -> float:
         """Runs validation on the model."""
@@ -122,9 +164,10 @@ class Trainer:
         start_time = time.time()
         evo_config = self._config.config.evolution
         device = self._config.accelerator.device
-        cpu_model = copy.deepcopy(self._config.components.model).to('cpu')
         agent_manager = AgentManager(
-            base_model=cpu_model, num_agents=evo_config.num_agents
+            base_model=self._config.components.model,
+            num_agents=evo_config.num_agents,
+            accelerator=self._config.accelerator,
         )
         logging.info("Specializing %d agents...", evo_config.num_agents)
         spec_config = SpecializationConfig(
@@ -147,8 +190,8 @@ class Trainer:
                 len(best_agents),
             )
             agent_manager.merge_agents(best_agents)
-            if self._config.components.model.long_term_memory:
-                self._config.components.model.long_term_memory.to(device)
+            if self._config.components.model.layers.long_term_memory:
+                self._config.components.model.layers.long_term_memory.to(device)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
         epoch_time = time.time() - start_time
