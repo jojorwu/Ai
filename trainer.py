@@ -165,9 +165,8 @@ class Trainer:
         start_time = time.time()
         evo_config = self._config.config.evolution
         device = self._config.accelerator.device
-        cpu_model = copy.deepcopy(self._config.components.model).to('cpu')
         agent_manager = AgentManager(
-            base_model=cpu_model, num_agents=evo_config.num_agents
+            base_model=self._config.components.model, num_agents=evo_config.num_agents
         )
         logging.info("Specializing %d agents...", evo_config.num_agents)
         spec_config = SpecializationConfig(

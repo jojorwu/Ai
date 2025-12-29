@@ -5,11 +5,14 @@ import copy
 import uuid
 from dataclasses import dataclass, field
 
+import math
+
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.optim import Adam
 
-from model import GenerateInput, SamplingConfig, Transformer
+from model import ForwardPassInput, GenerateInput, SamplingConfig, Transformer
 
 
 @dataclass
@@ -22,38 +25,76 @@ class AgentMetrics:
 
 class Agent:
     """
-    Represents a single "agent" with its own long-term memory (LTM),
-    adapted for PyTorch.
+    Represents a single "agent" with its own long-term memory (LTM), adapted for PyTorch.
+    The agent shares the base model's weights but has a unique LTM.
     """
 
-    def __init__(self, base_model: Transformer, agent_id=None):
+    def __init__(self, base_model: Transformer, agent_id: str | None = None):
         self.agent_id = agent_id or str(uuid.uuid4())
-        self.model = copy.deepcopy(base_model)
+        self.base_model = base_model
+        self.long_term_memory = (
+            copy.deepcopy(base_model.layers.long_term_memory)
+            if base_model.layers.long_term_memory
+            else None
+        )
 
-        if self.model.layers.long_term_memory:
+        if self.long_term_memory:
             self.ltm_optimizer = Adam(
-                self.model.layers.long_term_memory.parameters(),
-                lr=self.model.config.ltm.optimizer.learning_rate,
+                self.long_term_memory.parameters(),
+                lr=self.base_model.config.ltm.optimizer.learning_rate,
             )
         else:
             self.ltm_optimizer = None
 
         self.policy_loss_fn = nn.CrossEntropyLoss()
-        self.value_loss_fn = nn.MSELoss() # Used to push value towards 1.0
+        self.value_loss_fn = nn.MSELoss()  # Used to push value towards 1.0
         self.metrics = AgentMetrics()
+
+    def forward(
+        self, x: torch.Tensor, ltm_state: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """
+        Performs a forward pass using the base model but with the agent's own LTM.
+        """
+        # If no LTM state is provided, generate it from the agent's LTM
+        if ltm_state is None and self.long_term_memory:
+            with torch.no_grad():
+                h = self.base_model.layers.embedding(x) * math.sqrt(
+                    self.base_model.config.model.d_model
+                )
+                ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True))
+
+        # We need to manually call the forward pass of the base model's layers
+        # because we are overriding the LTM state.
+        h = self.base_model.layers.embedding(x) * math.sqrt(
+            self.base_model.config.model.d_model
+        )
+        total_aux_loss = torch.tensor(0.0, device=x.device)
+        for i, block in enumerate(self.base_model.layers.decoder):
+            inputs = ForwardPassInput(x=h, ltm_state=ltm_state, layer_idx=i)
+            h, aux_loss = block(inputs)
+            if aux_loss is not None:
+                total_aux_loss += aux_loss
+
+        h = self.base_model.layers.final_norm(h)
+        logits = F.linear(
+            h, self.base_model.layers.embedding.weight
+        )  # pylint: disable=not-callable
+        value = self.base_model.layers.value_head(h[:, -1, :])
+
+        return logits, value, total_aux_loss
 
     def _update_ltm_and_calc_surprise(self) -> float:
         """
         Calculates the gradient norm for LTM parameters ("surprise") and,
         if it exceeds a threshold, performs an optimizer step.
         """
-        if not self.model.layers.long_term_memory:
+        if not self.long_term_memory:
             return 0.0
 
-        # Calculate surprise (L2 norm of LTM gradients)
         grad_tensors = [
             p.grad.detach().flatten()
-            for p in self.model.layers.long_term_memory.parameters()
+            for p in self.long_term_memory.parameters()
             if p.grad is not None
         ]
 
@@ -63,8 +104,7 @@ class Agent:
         surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.metrics.total_surprise += surprise
 
-        # Update LTM if surprise is high enough
-        if surprise > self.model.config.ltm.surprise_threshold:
+        if surprise > self.base_model.config.ltm.surprise_threshold:
             self.ltm_optimizer.step()
 
         return surprise
@@ -74,20 +114,17 @@ class Agent:
         The process of an agent gaining "experience" in a batch training mode.
         This method updates the agent's LTM based on the surprise metric.
         """
-        if not self.model.layers.long_term_memory or self.ltm_optimizer is None:
+        if not self.long_term_memory or self.ltm_optimizer is None:
             return
 
-        self.model.train()
+        self.base_model.train()
+        self.long_term_memory.train()
         self.ltm_optimizer.zero_grad()
 
-        # Forward pass
-        logits, values, aux_loss = self.model(x_batch)
+        logits, values, aux_loss = self.forward(x_batch)
 
-        # Calculate policy loss (predicting the next token)
-        # Reshape for CrossEntropyLoss: (batch_size * seq_len, vocab_size)
         loss_policy = self.policy_loss_fn(
-            logits.view(-1, logits.size(-1)),
-            y_batch.view(-1)
+            logits.view(-1, logits.size(-1)), y_batch.view(-1)
         )
 
         # Calculate value loss (encouraging the model to predict high values)
@@ -114,11 +151,7 @@ class Agent:
 
     def get_ltm_state(self) -> dict | None:
         """Returns the state_dict of this agent's LTM."""
-        return (
-            self.model.layers.long_term_memory.state_dict()
-            if self.model.layers.long_term_memory
-            else None
-        )
+        return self.long_term_memory.state_dict() if self.long_term_memory else None
 
     def get_fitness_score(self) -> float:
         """Calculates the agent's fitness."""
@@ -135,7 +168,10 @@ class Agent:
         """
         Generates a response based on a prompt.
         """
-        self.model.eval()
+        self.base_model.eval()
+        if self.long_term_memory:
+            self.long_term_memory.eval()
+
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
@@ -145,7 +181,13 @@ class Agent:
             max_new_tokens=max_new_tokens,
             sampling_config=sampling_config,
         )
-        return self.model.generate(generate_input)
+
+        # This is tricky because the base model's generate function uses its own LTM.
+        # For now, we'll create a temporary model with the agent's LTM for generation.
+        # This is still more efficient than deep-copying the whole model.
+        temp_model = copy.deepcopy(self.base_model)
+        temp_model.layers.long_term_memory = self.long_term_memory
+        return temp_model.generate(generate_input)
 
     @torch.no_grad()
     def critique_response(
@@ -154,9 +196,10 @@ class Agent:
         """
         Evaluates the "usefulness" of a generated response using its Value head.
         """
-        self.model.eval()
+        self.base_model.eval()
+        if self.long_term_memory:
+            self.long_term_memory.eval()
 
-        # Ensure both tensors are 2D (batch_size, seq_len)
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
         if response_tokens.ndim == 1:
@@ -164,6 +207,5 @@ class Agent:
 
         full_sequence = torch.cat([prompt_tokens, response_tokens], dim=1)
 
-        # image_data is currently ignored
-        _, value, _ = self.model(full_sequence.to(self.model.device))
+        _, value, _ = self.forward(full_sequence.to(self.base_model.device))
         return value.item() if value is not None else 0.0

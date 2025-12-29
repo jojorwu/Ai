@@ -115,11 +115,11 @@ class AgentManager:
 
         model_to_update = (
             self.base_model.module
-            if hasattr(self.base_model, 'module')
+            if hasattr(self.base_model, "module")
             else self.base_model
         )
-        if model_to_update.long_term_memory:
-            model_to_update.long_term_memory.load_state_dict(avg_state)
+        if model_to_update.layers.long_term_memory:
+            model_to_update.layers.long_term_memory.load_state_dict(avg_state)
             logging.info("Base model's LTM has been updated with merged weights.")
 
     def _initialize_evaluation(self, tokenizer):
@@ -138,10 +138,10 @@ class AgentManager:
             return
 
         context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
-            helper.model.device
+            helper.base_model.device
         )
         helper_response = helper.generate_response(context)
-        new_helper_tokens = helper_response[:, context.shape[1]:]
+        new_helper_tokens = helper_response[:, context.shape[1] :]
 
         critics = [
             a
