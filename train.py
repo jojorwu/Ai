@@ -8,14 +8,11 @@ import shutil
 
 import torch
 from accelerate import Accelerator
-from torch import nn
-from torch.optim import Adam
 
-from config import Config, TransformerConfig
+from config import Config
 from data_loader import load_multimodal_data_from_directory
-from model import Transformer
 from tokenizer import Tokenizer
-from trainer import create_trainer
+from trainer import create_trainer, DataComponents
 from utils import main_entrypoint, setup_logging
 
 
@@ -143,8 +140,11 @@ def main():
             model_dir,
         )
 
+    data_components = DataComponents(
+        tokenizer=tokenizer, train_data=train_data, val_data=val_data
+    )
     trainer = create_trainer(
-        config, train_data, val_data, tokenizer, accelerator, args.load_in_4bit
+        config, data_components, accelerator, args.load_in_4bit
     )
     model = trainer.get_model()
 

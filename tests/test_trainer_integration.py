@@ -7,7 +7,7 @@ import torch
 from accelerate import Accelerator
 
 from config import Config
-from trainer import create_trainer
+from trainer import create_trainer, DataComponents
 
 
 def _create_test_config_and_data():
@@ -56,9 +56,10 @@ class TestTrainerIntegration(unittest.TestCase):
         config, tokenizer, train_data, val_data = _create_test_config_and_data()
         accelerator = Accelerator()
 
-        trainer = create_trainer(
-            config, train_data, val_data, tokenizer, accelerator
+        data_components = DataComponents(
+            tokenizer=tokenizer, train_data=train_data, val_data=val_data
         )
+        trainer = create_trainer(config, data_components, accelerator)
         model = trainer.get_model()
         unwrapped_model = model.module if hasattr(model, "module") else model
 

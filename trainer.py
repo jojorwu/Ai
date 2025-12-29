@@ -20,19 +20,17 @@ from model import Transformer
 
 def create_trainer(
     config: Config,
-    train_data: list,
-    val_data: list,
-    tokenizer: "Tokenizer",
+    data_components: "DataComponents",
     accelerator: "Accelerator",
     load_in_4bit: bool = False,
 ) -> "Trainer":
     """Initializes and returns a Trainer instance."""
     transformer_config = TransformerConfig(
-        vocab_size=tokenizer.vocab_size,
+        vocab_size=data_components.tokenizer.vocab_size,
         model=config.model,
         vision=config.vision,
         ltm=config.ltm,
-        tokenizer=tokenizer,
+        tokenizer=data_components.tokenizer,
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
@@ -48,9 +46,6 @@ def create_trainer(
         optimizer=optimizer,
         policy_loss_fn=policy_loss_fn,
         value_loss_fn=value_loss_fn,
-    )
-    data_components = DataComponents(
-        tokenizer=tokenizer, train_data=train_data, val_data=val_data
     )
     trainer_config = TrainerConfig(
         components=training_components,
@@ -195,8 +190,8 @@ class Trainer:
                 len(best_agents),
             )
             agent_manager.merge_agents(best_agents)
-            if self._config.components.model.long_term_memory:
-                self._config.components.model.long_term_memory.to(device)
+            if self._config.components.model.layers.long_term_memory:
+                self._config.components.model.layers.long_term_memory.to(device)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
         epoch_time = time.time() - start_time

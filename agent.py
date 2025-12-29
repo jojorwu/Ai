@@ -30,10 +30,10 @@ class Agent:
         self.agent_id = agent_id or str(uuid.uuid4())
         self.model = copy.deepcopy(base_model)
 
-        if self.model.long_term_memory:
+        if self.model.layers.long_term_memory:
             self.ltm_optimizer = Adam(
-                self.model.long_term_memory.parameters(),
-                lr=self.model.config.ltm.optimizer.learning_rate
+                self.model.layers.long_term_memory.parameters(),
+                lr=self.model.config.ltm.optimizer.learning_rate,
             )
         else:
             self.ltm_optimizer = None
@@ -47,13 +47,13 @@ class Agent:
         Calculates the gradient norm for LTM parameters ("surprise") and,
         if it exceeds a threshold, performs an optimizer step.
         """
-        if not self.model.long_term_memory:
+        if not self.model.layers.long_term_memory:
             return 0.0
 
         # Calculate surprise (L2 norm of LTM gradients)
         grad_tensors = [
             p.grad.detach().flatten()
-            for p in self.model.long_term_memory.parameters()
+            for p in self.model.layers.long_term_memory.parameters()
             if p.grad is not None
         ]
 
@@ -74,7 +74,7 @@ class Agent:
         The process of an agent gaining "experience" in a batch training mode.
         This method updates the agent's LTM based on the surprise metric.
         """
-        if not self.model.long_term_memory or self.ltm_optimizer is None:
+        if not self.model.layers.long_term_memory or self.ltm_optimizer is None:
             return
 
         self.model.train()
@@ -114,7 +114,11 @@ class Agent:
 
     def get_ltm_state(self) -> dict | None:
         """Returns the state_dict of this agent's LTM."""
-        return self.model.long_term_memory.state_dict() if self.model.long_term_memory else None
+        return (
+            self.model.layers.long_term_memory.state_dict()
+            if self.model.layers.long_term_memory
+            else None
+        )
 
     def get_fitness_score(self) -> float:
         """Calculates the agent's fitness."""

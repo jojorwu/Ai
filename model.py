@@ -31,20 +31,19 @@ class RopeEmbeddings:
 class ModelLayers(nn.Module):
     """Container for model layers."""
 
-    def __init__(
-        self,
-        embedding: Embedding,
-        long_term_memory: LongTermMemory,
-        decoder: nn.ModuleList,
-        final_norm: RMSNorm,
-        value_head: ValueHead,
-    ):
+    def __init__(self, layers: dict[str, nn.Module]):
         super().__init__()
-        self.embedding = embedding
-        self.long_term_memory = long_term_memory
-        self.decoder = decoder
-        self.final_norm = final_norm
-        self.value_head = value_head
+        self.embedding: Embedding = layers["embedding"]
+        self.long_term_memory: LongTermMemory = layers["long_term_memory"]
+        self.decoder: nn.ModuleList = layers["decoder"]
+        self.final_norm: RMSNorm = layers["final_norm"]
+        self.value_head: ValueHead = layers["value_head"]
+
+    def forward(self, *args, **kwargs):
+        """This method is not implemented."""
+        raise NotImplementedError(
+            "ModelLayers is a container and does not implement a forward pass."
+        )
 
 
 @dataclass
@@ -72,7 +71,6 @@ class Transformer(nn.Module):
         self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
-        self.long_term_memory = self.layers.long_term_memory
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
@@ -93,13 +91,14 @@ class Transformer(nn.Module):
             config.model.d_model, linear_class=value_head_linear_class
         )
 
-        return ModelLayers(
-            embedding=embedding,
-            long_term_memory=ltm,
-            decoder=decoder,
-            final_norm=final_norm,
-            value_head=value_head,
-        )
+        layers_dict = {
+            "embedding": embedding,
+            "long_term_memory": ltm,
+            "decoder": decoder,
+            "final_norm": final_norm,
+            "value_head": value_head,
+        }
+        return ModelLayers(layers_dict)
 
     def _init_ltm(self, config: TransformerConfig) -> LongTermMemory | None:
         if config.model.ltm.d_hidden and config.model.ltm.num_layers:
@@ -143,8 +142,8 @@ class Transformer(nn.Module):
         """Forward pass of the model."""
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         if ltm_state is None:
-            if self.long_term_memory:
-                ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True))
+            if self.layers.long_term_memory:
+                ltm_state = self.layers.long_term_memory(h.mean(dim=1, keepdim=True))
             else:
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
@@ -179,19 +178,21 @@ class Transformer(nn.Module):
 
     def _calculate_surprise(self, value: torch.Tensor) -> float:
         """Calculates 'surprise' by backpropagating value and getting LTM grad norm."""
-        if not self.long_term_memory or not value.requires_grad:
+        if not self.layers.long_term_memory or not value.requires_grad:
             return 0.0
 
-        self.long_term_memory.zero_grad()
+        self.layers.long_term_memory.zero_grad()
         value.backward(retain_graph=True)
         grad_tensors = [
-            p.grad.detach() for p in self.long_term_memory.parameters() if p.grad is not None
+            p.grad.detach()
+            for p in self.layers.long_term_memory.parameters()
+            if p.grad is not None
         ]
         if not grad_tensors:
             return 0.0
 
         surprise = torch.norm(torch.cat([t.flatten() for t in grad_tensors])).item()
-        self.long_term_memory.zero_grad()
+        self.layers.long_term_memory.zero_grad()
         return surprise
 
     def _generate_speculative_chunk(self, draft_model, tokens, inputs):
