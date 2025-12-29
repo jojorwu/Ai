@@ -3,10 +3,13 @@ PyTorch implementation of the AgentManager for managing the agent lifecycle.
 """
 import copy
 import logging
+import math
 from dataclasses import dataclass
 from typing import List
 
 import torch
+from accelerate import Accelerator
+from torch import nn
 
 from agent import Agent
 from data_loader import get_batches_torch
@@ -50,10 +53,16 @@ class AgentManager:
     REWARD_ADMIT_IGNORANCE = 1.0
     SUCCESS_THRESHOLD = 0.5
 
-    def __init__(self, base_model: Transformer, num_agents: int):
-        self.base_model = base_model
+    def __init__(
+        self,
+        base_model: Transformer,
+        num_agents: int,
+        accelerator: Accelerator,
+    ):
+        self.base_model = accelerator.unwrap_model(base_model)
         self.num_agents = num_agents
         self.agents: List[Agent] = []
+        self.accelerator = accelerator
         self.fork_agents()
 
     def fork_agents(self):
@@ -104,12 +113,13 @@ class AgentManager:
             logging.warning("None of the best agents had a valid LTM state.")
             return
 
-        avg_state = copy.deepcopy(ltm_states[0])
-        for key in avg_state:
-            avg_state[key] = torch.zeros_like(avg_state[key], device='cpu')
+        avg_state = {
+            key: torch.zeros_like(tensor, device="cpu")
+            for key, tensor in ltm_states[0].items()
+        }
         for state in ltm_states:
-            for key in avg_state:
-                avg_state[key] += state[key].to('cpu')
+            for key, tensor in state.items():
+                avg_state[key] += tensor.to("cpu")
         for key in avg_state:
             avg_state[key] /= len(ltm_states)
 
@@ -148,10 +158,10 @@ class AgentManager:
             for a in self.agents
             if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
         ] or [ctx.proposer]
-        critique_scores = [
-            c.critique_response(context, None, new_helper_tokens) for c in critics
-        ]
-        avg_critique_score = torch.mean(torch.tensor(critique_scores)).item()
+        critic_ltms = [c.long_term_memory for c in critics]
+        avg_critique_score = self._batch_critique(
+            torch.cat([context, new_helper_tokens], dim=1), critic_ltms
+        )
 
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_GOOD_HELP * avg_critique_score
@@ -167,12 +177,16 @@ class AgentManager:
             [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
             or [ctx.proposer]
         )
-        new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1]:]
-        critique_scores = [
-            c.critique_response(ctx.prompt_tokens, None, new_response_tokens)
-            for c in critics
-        ]
-        avg_critique_score = torch.mean(torch.tensor(critique_scores)).item()
+        new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
+
+        # Batch critique responses
+        batch_size = len(critics)
+        full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
+            batch_size, -1
+        )
+        critic_ltms = [critic.long_term_memory for critic in critics]
+        # Assuming `critique_response` can handle a batch of LTMs
+        avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
 
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_INDEPENDENT_SUCCESS * avg_critique_score
@@ -180,6 +194,30 @@ class AgentManager:
         else:
             penalty = self.PENALTY_INDEPENDENT_FAILURE * (1 - avg_critique_score)
             ctx.scores[ctx.proposer.agent_id] += penalty
+
+    def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
+        """Performs a batched critique of a response."""
+        batch_size = len(critic_ltms)
+        ltm_states = []
+        with torch.no_grad():
+            h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
+                self.base_model.config.model.d_model
+            )
+            for ltm in critic_ltms:
+                if ltm:
+                    ltm_states.append(ltm(h.mean(dim=1, keepdim=True)))
+                else:
+                    ltm_states.append(
+                        torch.zeros(
+                            (1, 1, h.size(2)), device=h.device, dtype=h.dtype
+                        )
+                    )
+        ltm_states = torch.cat(ltm_states, dim=0)
+
+        _, values, _ = self.base_model.forward(
+            full_sequence, ltm_state=ltm_states
+        )
+        return values.mean().item()
 
     def _finalize_evaluation(self, scores, top_k):
         """Finalizes evaluation by updating and sorting agents."""

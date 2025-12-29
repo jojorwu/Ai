@@ -166,7 +166,9 @@ class Trainer:
         evo_config = self._config.config.evolution
         device = self._config.accelerator.device
         agent_manager = AgentManager(
-            base_model=self._config.components.model, num_agents=evo_config.num_agents
+            base_model=self._config.components.model,
+            num_agents=evo_config.num_agents,
+            accelerator=self._config.accelerator,
         )
         logging.info("Specializing %d agents...", evo_config.num_agents)
         spec_config = SpecializationConfig(
