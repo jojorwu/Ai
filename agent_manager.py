@@ -195,7 +195,6 @@ class AgentManager:
 
     def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
         """Performs a batched critique of a response."""
-        batch_size = len(critic_ltms)
         ltm_states = []
         with torch.no_grad():
             h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
