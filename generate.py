@@ -14,7 +14,7 @@ from accelerate import Accelerator
 
 from complexity_manager import ComplexityManager
 from config import Config, TransformerConfig
-from model import GenerateInput, Transformer
+from model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
 from utils import main_entrypoint, parse_tool_call, select_model_interactively, setup_logging
@@ -77,13 +77,20 @@ def _generate_model_response(model, accelerator, agent_state, config):
             agent_state.complexity_manager.current_complexity, dynamic_top_k
         )
 
+    sampling_config = SamplingConfig(
+        temperature=config.generation.temperature,
+        top_k=config.generation.top_k,
+        dynamic_top_k=dynamic_top_k,
+    )
+    speculative_config = SpeculativeConfig(
+        speculative_steps=config.generation.speculative_steps
+    )
+
     gen_input = GenerateInput(
         start_tokens=input_tokens,
         max_new_tokens=config.generation.max_len,
-        temperature=config.generation.temperature,
-        top_k=config.generation.top_k,
-        speculative_steps=config.generation.speculative_steps,
-        dynamic_top_k=dynamic_top_k
+        sampling_config=sampling_config,
+        speculative_config=speculative_config,
     )
 
     newly_generated_tokens = []
