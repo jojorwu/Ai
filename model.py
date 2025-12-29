@@ -3,7 +3,7 @@ PyTorch implementation of the main Transformer model.
 """
 import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generator, Tuple
 
 import torch
@@ -47,16 +47,28 @@ class ModelLayers(nn.Module):
 
 
 @dataclass
-class GenerateInput:
-    """Dataclass for storing inputs to the generate method."""
-    start_tokens: torch.Tensor
-    max_new_tokens: int
+class SamplingConfig:
+    """Configuration for sampling."""
     temperature: float = 1.0
     top_k: int = 0
+    dynamic_top_k: int = None
+
+
+@dataclass
+class SpeculativeConfig:
+    """Configuration for speculative decoding."""
     speculative_steps: int = 5
     value_threshold: float = -1.0
     max_retries: int = 3
-    dynamic_top_k: int = None
+
+
+@dataclass
+class GenerateInput:
+    """Datacaclass for storing inputs to the generate method."""
+    start_tokens: torch.Tensor
+    max_new_tokens: int
+    sampling_config: SamplingConfig = field(default_factory=SamplingConfig)
+    speculative_config: SpeculativeConfig = field(default_factory=SpeculativeConfig)
 
 
 class Transformer(nn.Module):
@@ -199,17 +211,18 @@ class Transformer(nn.Module):
         """Generates a speculative chunk of tokens."""
         draft_tokens = tokens
         with torch.no_grad():
-            for _ in range(inputs.speculative_steps):
+            for _ in range(inputs.speculative_config.speculative_steps):
                 draft_logits, _, _ = draft_model(
                     draft_tokens[:, -self.config.model.max_seq_len:]
                 )
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
-                    inputs.temperature,
-                    inputs.dynamic_top_k or inputs.top_k
+                    inputs.sampling_config.temperature,
+                    inputs.sampling_config.dynamic_top_k
+                    or inputs.sampling_config.top_k,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
-        return draft_tokens[:, tokens.size(1):], draft_tokens
+        return draft_tokens[:, tokens.size(1) :], draft_tokens
 
     def _validate_and_accept_chunk(self, true_logits, speculative_chunk, inputs):
         """Validates the speculative chunk and returns the accepted tokens."""
@@ -219,8 +232,9 @@ class Transformer(nn.Module):
             draft_token = speculative_chunk[:, i].unsqueeze(-1)
             resampled_token = self._sample_from_logits(
                 true_next_token_logits,
-                inputs.temperature,
-                inputs.dynamic_top_k or inputs.top_k
+                inputs.sampling_config.temperature,
+                inputs.sampling_config.dynamic_top_k
+                or inputs.sampling_config.top_k,
             )
             if resampled_token.item() == draft_token.item():
                 accepted_tokens.append(draft_token)
@@ -256,11 +270,12 @@ class Transformer(nn.Module):
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 total_generated += accepted_chunk.size(1)
             else:
-                logits, _, _ = self(tokens[:, -self.config.model.max_seq_len:])
+                logits, _, _ = self(tokens[:, -self.config.model.max_seq_len :])
                 next_token = self._sample_from_logits(
                     logits[:, -1, :],
-                    inputs.temperature,
-                    inputs.dynamic_top_k or inputs.top_k
+                    inputs.sampling_config.temperature,
+                    inputs.sampling_config.dynamic_top_k
+                    or inputs.sampling_config.top_k,
                 )
                 yield next_token, surprise
                 tokens = torch.cat((tokens, next_token), dim=1)

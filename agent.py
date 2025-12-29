@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
-from model import GenerateInput, Transformer
+from model import GenerateInput, SamplingConfig, Transformer
 
 
 @dataclass
@@ -139,11 +139,11 @@ class Agent:
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
+        sampling_config = SamplingConfig(temperature=0.7, top_k=50)
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
-            temperature=0.7,
-            top_k=50,
+            sampling_config=sampling_config,
         )
         return self.model.generate(generate_input)
 
