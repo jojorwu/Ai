@@ -58,7 +58,7 @@ class TestRMSNorm(unittest.TestCase):
 
         # The L2 norm of each vector in the last dimension should be close to sqrt(d_model)
         # This is a property of RMSNorm.
-        l2_norm = torch.linalg.norm(normalized_x, ord=2, dim=-1)
+        l2_norm = torch.linalg.norm(normalized_x, ord=2, dim=-1)  # pylint: disable=not-callable
 
         # We expect the norm to be close to sqrt(d_model)
         expected_norm = torch.full_like(l2_norm, fill_value=math.sqrt(d_model))

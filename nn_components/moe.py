@@ -31,14 +31,16 @@ class MixtureOfExperts(nn.Module):
 
     def _compute_aux_loss(self, router_logits, top_k_indices, batch_size, seq_len):
         """Computes the auxiliary load balancing loss."""
+        # pylint: disable=too-many-locals
         router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
         p_i = router_probs.mean(dim=0)
-        top_k_mask = F.one_hot(top_k_indices, num_classes=self.num_experts).float()
+        top_k_mask = F.one_hot(top_k_indices, num_classes=self.num_experts).float()  # pylint: disable=not-callable
         f_i = top_k_mask.sum(dim=0).sum(dim=0) / (batch_size * seq_len)
         return self.num_experts * (p_i * f_i).sum()
 
     def _get_expert_outputs(self, expanded_x, flat_top_k_indices):
         """Gets the outputs from the experts."""
+        # pylint: disable=too-many-locals
         expert_outputs = torch.zeros_like(expanded_x)
         for i, expert in enumerate(self.experts):
             expert_mask = flat_top_k_indices == i
@@ -64,6 +66,7 @@ class MixtureOfExperts(nn.Module):
         """
         Forward pass through the MoE layer using vectorized operations.
         """
+        # pylint: disable=too-many-locals
         batch_size, seq_len, d_model = x.shape
         x_reshaped = x.view(-1, d_model)
         current_top_k = dynamic_top_k if dynamic_top_k is not None else self.top_k

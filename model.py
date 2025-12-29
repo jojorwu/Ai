@@ -22,6 +22,32 @@ from nn_components.value_head import ValueHead
 
 
 @dataclass
+class RopeEmbeddings:
+    """Dataclass for storing rope embeddings."""
+    cos: torch.Tensor
+    sin: torch.Tensor
+
+
+class ModelLayers(nn.Module):
+    """Container for model layers."""
+
+    def __init__(
+        self,
+        embedding: Embedding,
+        long_term_memory: LongTermMemory,
+        decoder: nn.ModuleList,
+        final_norm: RMSNorm,
+        value_head: ValueHead,
+    ):
+        super().__init__()
+        self.embedding = embedding
+        self.long_term_memory = long_term_memory
+        self.decoder = decoder
+        self.final_norm = final_norm
+        self.value_head = value_head
+
+
+@dataclass
 class GenerateInput:
     """Dataclass for storing inputs to the generate method."""
     start_tokens: torch.Tensor
@@ -33,6 +59,7 @@ class GenerateInput:
     max_retries: int = 3
     dynamic_top_k: int = None
 
+
 class Transformer(nn.Module):
     """
     Full GPT-style (decoder-only) Transformer model, migrated to PyTorch.
@@ -42,33 +69,39 @@ class Transformer(nn.Module):
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
         super().__init__()
         self.config = config
-        self.rope_cos, self.rope_sin = self._init_rope_embeddings(config)
+        self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
-        self.long_term_memory = self.layers["long_term_memory"]
+        self.long_term_memory = self.layers.long_term_memory
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> nn.ModuleDict:
+    def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> ModelLayers:
         """Initializes all layers of the model."""
         ltm = self._init_ltm(config)
         decoder_config = self._create_block_config(config, ltm, load_in_4bit)
         value_head_linear_class = Linear4bit if load_in_4bit else Linear
 
-        return nn.ModuleDict({
-            "embedding": Embedding(config.vocab_size, config.model.d_model),
-            "long_term_memory": ltm,
-            "decoder": nn.ModuleList([
-                DecoderBlock(decoder_config) for _ in range(config.model.num_layers)
-            ]),
-            "final_norm": RMSNorm(config.model.d_model),
-            "value_head": ValueHead(config.model.d_model, linear_class=value_head_linear_class),
-        })
+        embedding = Embedding(config.vocab_size, config.model.d_model)
+        decoder = nn.ModuleList(
+            [DecoderBlock(decoder_config) for _ in range(config.model.num_layers)]
+        )
+        final_norm = RMSNorm(config.model.d_model)
+        value_head = ValueHead(
+            config.model.d_model, linear_class=value_head_linear_class
+        )
 
+        return ModelLayers(
+            embedding=embedding,
+            long_term_memory=ltm,
+            decoder=decoder,
+            final_norm=final_norm,
+            value_head=value_head,
+        )
 
-    def _init_ltm(self, config: TransformerConfig):
+    def _init_ltm(self, config: TransformerConfig) -> LongTermMemory | None:
         if config.model.ltm.d_hidden and config.model.ltm.num_layers:
             return LongTermMemory(
                 d_model=config.model.d_model,
@@ -77,14 +110,14 @@ class Transformer(nn.Module):
             )
         return None
 
-    def _init_rope_embeddings(self, config: TransformerConfig):
+    def _init_rope_embeddings(self, config: TransformerConfig) -> RopeEmbeddings:
         d_k = config.model.d_model // config.model.num_heads
         rope_cos, rope_sin = precompute_rope_embeddings(
             d_k, config.model.max_seq_len
         )
         self.register_buffer("rope_cos_buf", rope_cos)
         self.register_buffer("rope_sin_buf", rope_sin)
-        return self.rope_cos_buf, self.rope_sin_buf
+        return RopeEmbeddings(cos=self.rope_cos_buf, sin=self.rope_sin_buf)
 
     def _create_block_config(
         self, config: TransformerConfig, ltm: nn.Module, load_in_4bit: bool
@@ -96,7 +129,7 @@ class Transformer(nn.Module):
             d_ff=config.model.d_ff,
             dropout_rate=config.model.dropout_rate,
             num_kv_heads=config.model.num_kv_heads,
-            rotary_emb=(self.rope_cos, self.rope_sin),
+            rotary_emb=(self.rope_embeddings.cos, self.rope_embeddings.sin),
             num_layers=config.model.num_layers,
             long_term_memory=ltm,
             num_experts=config.model.num_experts,
@@ -127,7 +160,7 @@ class Transformer(nn.Module):
                 total_aux_loss += aux_loss
 
         h = self.layers.final_norm(h)
-        logits = F.linear(h, self.layers.embedding.weight)
+        logits = F.linear(h, self.layers.embedding.weight)  # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 

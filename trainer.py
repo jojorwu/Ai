@@ -12,9 +12,53 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from agent_manager import AgentManager, SpecializationConfig
-from config import Config
+from config import Config, TransformerConfig
 from data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
+from model import Transformer
+
+
+def create_trainer(
+    config: Config,
+    train_data: list,
+    val_data: list,
+    tokenizer: "Tokenizer",
+    accelerator: "Accelerator",
+    load_in_4bit: bool = False,
+) -> "Trainer":
+    """Initializes and returns a Trainer instance."""
+    transformer_config = TransformerConfig(
+        vocab_size=tokenizer.vocab_size,
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm,
+        tokenizer=tokenizer,
+    )
+    model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+    optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
+    policy_loss_fn = nn.CrossEntropyLoss()
+    value_loss_fn = nn.MSELoss()
+
+    model, optimizer, policy_loss_fn, value_loss_fn = accelerator.prepare(
+        model, optimizer, policy_loss_fn, value_loss_fn
+    )
+
+    training_components = TrainingComponents(
+        model=model,
+        optimizer=optimizer,
+        policy_loss_fn=policy_loss_fn,
+        value_loss_fn=value_loss_fn,
+    )
+    data_components = DataComponents(
+        tokenizer=tokenizer, train_data=train_data, val_data=val_data
+    )
+    trainer_config = TrainerConfig(
+        components=training_components,
+        data=data_components,
+        config=config,
+        accelerator=accelerator,
+    )
+    return Trainer(trainer_config)
 
 
 @dataclass
@@ -48,6 +92,10 @@ class Trainer:
 
     def __init__(self, trainer_config: TrainerConfig):
         self._config = trainer_config
+
+    def get_model(self) -> nn.Module:
+        """Returns the underlying model."""
+        return self._config.components.model
 
     def run_validation(self) -> float:
         """Runs validation on the model."""

@@ -39,4 +39,4 @@ class Linear(nn.Module):
 
     def forward(self, x):
         """Forward pass."""
-        return F.linear(x, self.weights, self.bias)
+        return F.linear(x, self.weights, self.bias)  # pylint: disable=not-callable
