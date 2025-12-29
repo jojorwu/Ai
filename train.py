@@ -15,7 +15,7 @@ from config import Config, TransformerConfig
 from data_loader import load_multimodal_data_from_directory
 from model import Transformer
 from tokenizer import Tokenizer
-from trainer import Trainer
+from trainer import Trainer, TrainerConfig, TrainingComponents, DataComponents
 from utils import main_entrypoint, setup_logging
 
 
@@ -163,17 +163,22 @@ def main():
     model, opt, policy_loss, value_loss = accelerator.prepare(
         model, opt, policy_loss, value_loss
     )
-    trainer = Trainer(
+    training_components = TrainingComponents(
         model=model,
         optimizer=opt,
         policy_loss_fn=policy_loss,
         value_loss_fn=value_loss,
-        tokenizer=tokenizer,
-        train_data=train_data,
-        val_data=val_data,
+    )
+    data_components = DataComponents(
+        tokenizer=tokenizer, train_data=train_data, val_data=val_data
+    )
+    trainer_config = TrainerConfig(
+        components=training_components,
+        data=data_components,
         config=config,
         accelerator=accelerator,
     )
+    trainer = Trainer(trainer_config)
     run_training_loop(trainer, config, model, model_dir)
     torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
     logging.info(

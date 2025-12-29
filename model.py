@@ -42,24 +42,38 @@ class Transformer(nn.Module):
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
         super().__init__()
         self.config = config
-        self.embedding = Embedding(config.vocab_size, config.model.d_model)
-        self.long_term_memory = self._init_ltm(config)
         self.rope_cos, self.rope_sin = self._init_rope_embeddings(config)
-        self.decoder = self._init_decoder(config, load_in_4bit)
-        self.final_norm = RMSNorm(config.model.d_model)
-        self.value_head = self._init_value_head(config, load_in_4bit)
-        self.embedding.weight = self.embedding.embedding.weight
+        self.layers = self._init_layers(config, load_in_4bit)
+        self.layers.embedding.weight = self.layers.embedding.embedding.weight
+        self.long_term_memory = self.layers["long_term_memory"]
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
+    def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> nn.ModuleDict:
+        """Initializes all layers of the model."""
+        ltm = self._init_ltm(config)
+        decoder_config = self._create_block_config(config, ltm, load_in_4bit)
+        value_head_linear_class = Linear4bit if load_in_4bit else Linear
+
+        return nn.ModuleDict({
+            "embedding": Embedding(config.vocab_size, config.model.d_model),
+            "long_term_memory": ltm,
+            "decoder": nn.ModuleList([
+                DecoderBlock(decoder_config) for _ in range(config.model.num_layers)
+            ]),
+            "final_norm": RMSNorm(config.model.d_model),
+            "value_head": ValueHead(config.model.d_model, linear_class=value_head_linear_class),
+        })
+
+
     def _init_ltm(self, config: TransformerConfig):
-        if config.model.ltm_d_hidden and config.model.ltm_num_layers:
+        if config.model.ltm.d_hidden and config.model.ltm.num_layers:
             return LongTermMemory(
                 d_model=config.model.d_model,
-                d_hidden=config.model.ltm_d_hidden,
-                num_layers=config.model.ltm_num_layers
+                d_hidden=config.model.ltm.d_hidden,
+                num_layers=config.model.ltm.num_layers
             )
         return None
 
@@ -72,29 +86,21 @@ class Transformer(nn.Module):
         self.register_buffer("rope_sin_buf", rope_sin)
         return self.rope_cos_buf, self.rope_sin_buf
 
-    def _init_decoder(self, config: TransformerConfig, load_in_4bit: bool):
-        block_config = self._create_block_config(load_in_4bit)
-        return nn.ModuleList(
-            [DecoderBlock(block_config) for _ in range(config.model.num_layers)]
-        )
-
-    def _init_value_head(self, config: TransformerConfig, load_in_4bit: bool):
-        linear_class = Linear4bit if load_in_4bit else Linear
-        return ValueHead(config.model.d_model, linear_class=linear_class)
-
-    def _create_block_config(self, load_in_4bit: bool) -> DecoderBlockConfig:
+    def _create_block_config(
+        self, config: TransformerConfig, ltm: nn.Module, load_in_4bit: bool
+    ) -> DecoderBlockConfig:
         """Helper method to create the DecoderBlockConfig."""
         return DecoderBlockConfig(
-            d_model=self.config.model.d_model,
-            num_heads=self.config.model.num_heads,
-            d_ff=self.config.model.d_ff,
-            dropout_rate=self.config.model.dropout_rate,
-            num_kv_heads=self.config.model.num_kv_heads,
+            d_model=config.model.d_model,
+            num_heads=config.model.num_heads,
+            d_ff=config.model.d_ff,
+            dropout_rate=config.model.dropout_rate,
+            num_kv_heads=config.model.num_kv_heads,
             rotary_emb=(self.rope_cos, self.rope_sin),
-            num_layers=self.config.model.num_layers,
-            long_term_memory=self.long_term_memory,
-            num_experts=self.config.model.num_experts,
-            top_k_experts=self.config.model.top_k_experts,
+            num_layers=config.model.num_layers,
+            long_term_memory=ltm,
+            num_experts=config.model.num_experts,
+            top_k_experts=config.model.top_k_experts,
             load_in_4bit=load_in_4bit,
         )
 
@@ -102,7 +108,7 @@ class Transformer(nn.Module):
         self, x: torch.Tensor, ltm_state: torch.Tensor = None, dynamic_top_k: int = None
     ):
         """Forward pass of the model."""
-        h = self.embedding(x) * math.sqrt(self.config.model.d_model)
+        h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         if ltm_state is None:
             if self.long_term_memory:
                 ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True))
@@ -112,7 +118,7 @@ class Transformer(nn.Module):
                 )
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i, block in enumerate(self.decoder):
+        for i, block in enumerate(self.layers.decoder):
             inputs = ForwardPassInput(
                 x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k
             )
@@ -120,9 +126,9 @@ class Transformer(nn.Module):
             if aux_loss is not None:
                 total_aux_loss += aux_loss
 
-        h = self.final_norm(h)
-        logits = F.linear(h, self.embedding.weight)
-        value = self.value_head(h[:, -1, :])
+        h = self.layers.final_norm(h)
+        logits = F.linear(h, self.layers.embedding.weight)
+        value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 
     def _sample_from_logits(self, logits, temperature, top_k):
@@ -229,4 +235,4 @@ class Transformer(nn.Module):
     @property
     def device(self):
         """Returns the device of the model's embedding layer."""
-        return self.embedding.embedding.weight.device
+        return self.layers.embedding.embedding.weight.device

@@ -7,6 +7,13 @@ from typing import Any, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
+class LTMArchitectureConfig(BaseModel):
+    """Configuration specific to the LTM architecture."""
+    d_hidden: Optional[int] = Field(
+        None, description="Dimensionality of the hidden layer in LTM.")
+    num_layers: Optional[int] = Field(None,
+                                          description="Number of layers in LTM.")
+
 class ModelConfig(BaseModel):
     """Configuration for the Transformer model architecture."""
     d_model: int = Field(...,
@@ -21,10 +28,10 @@ class ModelConfig(BaseModel):
     d_ff: int = Field(..., description="Dimensionality in Feed-Forward layers.")
     max_seq_len: int = Field(..., description="Maximum sequence length.")
     dropout_rate: float = Field(..., description="Dropout probability.")
-    ltm_d_hidden: Optional[int] = Field(
-        None, description="Dimensionality of the hidden layer in LTM.")
-    ltm_num_layers: Optional[int] = Field(None,
-                                          description="Number of layers in LTM.")
+    ltm: LTMArchitectureConfig = Field(
+        default_factory=LTMArchitectureConfig,
+        description="Configuration for the Long-Term Memory module."
+    )
     num_experts: Optional[int] = Field(
         None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(

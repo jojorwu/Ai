@@ -49,22 +49,28 @@ class MixtureOfExperts(nn.Module):
                 )
         return expert_outputs
 
+    def _route_tokens(self, x_reshaped: torch.Tensor, current_top_k: int):
+        """Computes routing for tokens and returns weights and indices."""
+        router_logits = self.gate(x_reshaped)
+        top_k_weights, top_k_indices = torch.topk(
+            router_logits, current_top_k, dim=-1
+        )
+        top_k_weights = F.softmax(
+            top_k_weights, dim=-1, dtype=torch.float32
+        ).to(x_reshaped.dtype)
+        return router_logits, top_k_weights, top_k_indices
+
     def forward(self, x: torch.Tensor, dynamic_top_k: int = None):
         """
         Forward pass through the MoE layer using vectorized operations.
         """
         batch_size, seq_len, d_model = x.shape
         x_reshaped = x.view(-1, d_model)
-        router_logits = self.gate(x_reshaped)
         current_top_k = dynamic_top_k if dynamic_top_k is not None else self.top_k
 
-        top_k_weights, top_k_indices = torch.topk(
-            router_logits, current_top_k, dim=-1
+        router_logits, top_k_weights, top_k_indices = self._route_tokens(
+            x_reshaped, current_top_k
         )
-        top_k_weights = F.softmax(
-            top_k_weights, dim=-1, dtype=torch.float32
-        ).to(x.dtype)
-
         aux_loss = self._compute_aux_loss(
             router_logits, top_k_indices, batch_size, seq_len
         )
@@ -75,9 +81,17 @@ class MixtureOfExperts(nn.Module):
         ).reshape(-1, d_model)
         expert_outputs = self._get_expert_outputs(expanded_x, flat_top_k_indices)
 
+        final_output = self._combine_expert_outputs(
+            expert_outputs, top_k_weights, current_top_k, d_model
+        )
+        return final_output.view(batch_size, seq_len, d_model), aux_loss
+
+    def _combine_expert_outputs(
+        self, expert_outputs, top_k_weights, current_top_k, d_model
+    ):
+        """Combines the outputs of the experts."""
         weighted_outputs = expert_outputs * top_k_weights.view(-1).unsqueeze(-1)
         final_output = weighted_outputs.view(
             -1, current_top_k, d_model
         ).sum(dim=1)
-
-        return final_output.view(batch_size, seq_len, d_model), aux_loss
+        return final_output
