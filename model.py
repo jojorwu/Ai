@@ -115,15 +115,17 @@ class Transformer(nn.Module):
         return ModelLayers(layers_dict)
 
     def _init_ltm(self, config: TransformerConfig) -> LongTermMemory | None:
+        """Initializes the Long-Term Memory (LTM) module if configured."""
         if config.model.ltm.d_hidden and config.model.ltm.num_layers:
             return LongTermMemory(
                 d_model=config.model.d_model,
                 d_hidden=config.model.ltm.d_hidden,
-                num_layers=config.model.ltm.num_layers
+                num_layers=config.model.ltm.num_layers,
             )
         return None
 
     def _init_rope_embeddings(self, config: TransformerConfig) -> RopeEmbeddings:
+        """Initializes and registers Rotary Positional Embeddings (RoPE)."""
         d_k = config.model.d_model // config.model.num_heads
         rope_cos, rope_sin = precompute_rope_embeddings(
             d_k, config.model.max_seq_len

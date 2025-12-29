@@ -133,10 +133,11 @@ class AgentManager:
             logging.info("Base model's LTM has been updated with merged weights.")
 
     def _initialize_evaluation(self, tokenizer):
+        """Initializes scores and token IDs for the evaluation phase."""
         scores = {agent.agent_id: 0.0 for agent in self.agents}
         tokens = {
-            "ask_help": tokenizer.char_to_idx.get('<ASK_FOR_HELP>'),
-            "i_dont_know": tokenizer.char_to_idx.get('<I_DONT_KNOW>')
+            "ask_help": tokenizer.char_to_idx.get("<ASK_FOR_HELP>"),
+            "i_dont_know": tokenizer.char_to_idx.get("<I_DONT_KNOW>"),
         }
         return scores, tokens
 
@@ -220,7 +221,9 @@ class AgentManager:
         return values.mean().item()
 
     def _finalize_evaluation(self, scores, top_k):
-        """Finalizes evaluation by updating and sorting agents."""
+        """
+        Updates agent fitness scores, logs the results, and returns the top-k agents.
+        """
         for agent in self.agents:
             agent.update_fitness_score(scores[agent.agent_id])
         sorted_agents = sorted(
@@ -234,7 +237,9 @@ class AgentManager:
         return sorted_agents[:top_k]
 
     def _process_evaluation_prompts(self, evaluation_data, scores, tokens, device):
-        """Processes each prompt in the evaluation data."""
+        """
+        Iterates through evaluation data, creating prompts and triggering evaluation for each.
+        """
         prompt_len = self.base_model.config.model.max_seq_len // 2
         num_prompts = len(evaluation_data) // prompt_len
         if num_prompts == 0:
@@ -247,7 +252,11 @@ class AgentManager:
             self._evaluate_prompt_with_agents(prompt_tensor, scores, tokens)
 
     def _evaluate_prompt_with_agents(self, prompt_tensor, scores, tokens):
-        """Evaluates a single prompt with all agents."""
+        """
+        Orchestrates the evaluation of a single prompt by having each agent propose a
+        response and then scoring that response based on the agent's behavior
+        (e.g., responding independently, asking for help).
+        """
         for i, proposer in enumerate(self.agents):
             response = proposer.generate_response(prompt_tensor)
             response_list = response[0].tolist()
