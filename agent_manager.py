@@ -141,51 +141,76 @@ class AgentManager:
         return scores, tokens
 
     def _handle_collaboration_request(self, ctx: CollaborationContext):
-        """Handles the scenario where an agent asks for help."""
+        """
+        Handles the scenario where an agent asks for help.
+
+        The proposing agent gets a small reward for asking. A helper agent is
+        chosen to provide a response, and this response is then critiqued by all
+        other agents. The helper and proposer are rewarded or penalized based on
+        the critique score.
+        """
+        # Reward the agent for asking for help
         ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
+
+        # Select the next agent in the list as the helper
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
-            return
+            return  # Avoid agent helping itself in a small population
 
+        # Generate a response from the helper agent
         context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
             helper.base_model.device
         )
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1] :]
 
+        # All other agents act as critics
         critics = [
             a
             for a in self.agents
             if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
-        ] or [ctx.proposer]
+        ] or [ctx.proposer]  # If no other critics, proposer critiques
         critic_ltms = [c.long_term_memory for c in critics]
+
+        # Get the average critique score for the helper's response
+        full_critique_sequence = torch.cat([context, new_helper_tokens], dim=1)
         avg_critique_score = self._batch_critique(
-            torch.cat([context, new_helper_tokens], dim=1), critic_ltms
+            full_critique_sequence.expand(len(critics), -1), critic_ltms
         )
 
+        # Reward or penalize based on the critique
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_GOOD_HELP * avg_critique_score
             ctx.scores[helper.agent_id] += reward
-            ctx.scores[ctx.proposer.agent_id] += reward
+            ctx.scores[ctx.proposer.agent_id] += reward  # Proposer also rewarded for good question
         else:
             penalty = self.PENALTY_BAD_HELP * (1 - avg_critique_score)
             ctx.scores[helper.agent_id] += penalty
 
     def _handle_independent_response(self, ctx: IndependentResponseContext):
-        """Handles the scenario where an agent responds independently."""
+        """
+        Handles the scenario where an agent responds independently.
+
+        The response is critiqued by all other agents. The proposing agent is
+        rewarded or penalized based on the average critique score.
+        """
+        # All other agents act as critics
         critics = (
             [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
-            or [ctx.proposer]
+            or [ctx.proposer]  # If no other critics, proposer critiques itself
         )
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
 
+        # Prepare for batch critique
         full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
             len(critics), -1
         )
         critic_ltms = [critic.long_term_memory for critic in critics]
-        # Assuming `critique_response` can handle a batch of LTMs
+
+        # Get the average critique score
         avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
 
+        # Reward or penalize the proposer based on the critique
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_INDEPENDENT_SUCCESS * avg_critique_score
             ctx.scores[ctx.proposer.agent_id] += reward
@@ -194,26 +219,39 @@ class AgentManager:
             ctx.scores[ctx.proposer.agent_id] += penalty
 
     def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
-        """Performs a batched critique of a response."""
-        ltm_states = []
+        """
+        Performs a batched critique of a response using the base model.
+
+        This method leverages the base model's value head to evaluate a sequence.
+        It runs a single forward pass with a batch of LTM states from different
+        critic agents, making the process highly efficient.
+
+        Args:
+            full_sequence: The complete token sequence (prompt + response) to be evaluated.
+            critic_ltms: A list of LTM modules from the critic agents.
+
+        Returns:
+            The average value score from all critic agents.
+        """
         with torch.no_grad():
+            # Manually compute embeddings and LTM states to create a batch
             h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
                 self.base_model.config.model.d_model
             )
-            for ltm in critic_ltms:
-                if ltm:
-                    ltm_states.append(ltm(h.mean(dim=1, keepdim=True)))
-                else:
-                    ltm_states.append(
-                        torch.zeros(
-                            (1, 1, h.size(2)), device=h.device, dtype=h.dtype
-                        )
-                    )
-        ltm_states = torch.cat(ltm_states, dim=0)
 
-        _, values, _ = self.base_model.forward(
-            full_sequence, ltm_state=ltm_states
-        )
+            ltm_states = torch.zeros(
+                (len(critic_ltms), 1, h.size(2)), device=h.device, dtype=h.dtype
+            )
+            for i, ltm in enumerate(critic_ltms):
+                if ltm:
+                    # Each LTM processes its corresponding sequence embedding
+                    ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
+                    ltm_states[i] = ltm(ltm_input)
+
+            # A single forward pass with the batched LTM states
+            _, values, _ = self.base_model.forward(
+                full_sequence, ltm_state=ltm_states
+            )
         return values.mean().item()
 
     def _finalize_evaluation(self, scores, top_k):
@@ -275,6 +313,20 @@ class AgentManager:
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
         Evaluates agents with a nuanced, peer-review-based scoring system.
+
+        This method orchestrates a series of evaluations where agents propose
+        responses to prompts. Agents can respond independently, ask for help,
+        or admit ignorance. The quality of their actions is judged by their
+        peers (other agents), leading to a fitness score.
+
+        Args:
+            evaluation_data: A list of token IDs for evaluation.
+            tokenizer: The tokenizer instance.
+            top_k: The number of top-performing agents to return.
+            device: The device to run the evaluation on.
+
+        Returns:
+            A list of the top-k best performing agents.
         """
         if not self.agents or len(self.agents) < 2:
             logging.warning("Collaborative evaluation requires at least 2 agents.")

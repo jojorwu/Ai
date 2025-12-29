@@ -82,15 +82,10 @@ def _generate_model_response(model, accelerator, agent_state, config):
         top_k=config.generation.top_k,
         dynamic_top_k=dynamic_top_k,
     )
-    speculative_config = SpeculativeConfig(
-        speculative_steps=config.generation.speculative_steps
-    )
-
     gen_input = GenerateInput(
         start_tokens=input_tokens,
         max_new_tokens=config.generation.max_len,
         sampling_config=sampling_config,
-        speculative_config=speculative_config,
     )
 
     newly_generated_tokens = []
