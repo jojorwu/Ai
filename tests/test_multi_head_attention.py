@@ -18,7 +18,9 @@ class TestMultiHeadAttention(unittest.TestCase):
     def test_forward_pass_shape(self):
         """Tests that the forward pass preserves the tensor shape."""
         d_model, num_heads, num_kv_heads = 64, 4, 2
-        config = MultiHeadAttentionConfig(d_model=d_model, num_heads=num_heads, num_kv_heads=num_kv_heads)
+        config = MultiHeadAttentionConfig(
+            d_model=d_model, num_heads=num_heads, num_kv_heads=num_kv_heads
+        )
         mha = MultiHeadAttention(config)
 
         x = torch.randn(4, 10, d_model)  # Batch, SeqLen, Dim

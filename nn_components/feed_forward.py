@@ -2,8 +2,8 @@
 PyTorch implementation of the Feed-Forward Network (FFN) layer.
 """
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+from torch.nn import functional as F
 
 from config import FeedForwardConfig
 from nn_components.linear import Linear

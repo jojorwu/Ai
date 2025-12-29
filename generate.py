@@ -17,7 +17,7 @@ from config import Config, TransformerConfig
 from model import GenerateInput, Transformer
 from tokenizer import Tokenizer
 from tools import execute_tool
-from utils import parse_tool_call, select_model_interactively, setup_logging
+from utils import main_entrypoint, parse_tool_call, select_model_interactively, setup_logging
 
 
 @dataclass
@@ -27,7 +27,8 @@ class AgentState:
     complexity_manager: ComplexityManager = None
 
 def load_model_and_tokenizer(
-        model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator):
+    model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator
+):
     """Loads the PyTorch model and tokenizer."""
     logging.info("Loading model '%s' (4-bit: %s)...", model_name, load_in_4bit)
     model_dir = os.path.join('models', model_name)
@@ -43,7 +44,6 @@ def load_model_and_tokenizer(
         ltm=config.ltm, tokenizer=tokenizer
     )
 
-    # Use accelerate's utility to load a quantized model correctly
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     model.load_state_dict(torch.load(weights_path, map_location='cpu'), strict=False)
     model = accelerator.prepare(model)
@@ -52,56 +52,78 @@ def load_model_and_tokenizer(
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
 
-def run_agent_loop(
-        model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator):
-    """Runs the main agent loop."""
+def _initialize_agent_state(config, tokenizer):
+    """Initializes the agent's state."""
     start_text = config.generation.start_text
-    logging.info(f"Initial task: {start_text}")
-
-    complexity_manager = ComplexityManager(config.dynamic_parameters) if config.dynamic_parameters else None
-
-    agent_state = AgentState(
+    logging.info("Initial task: %s", start_text)
+    complexity_manager = ComplexityManager(
+        config.dynamic_parameters
+    ) if config.dynamic_parameters else None
+    return AgentState(
         conversation_history_tokens=tokenizer.encode(f"<THINK>{start_text}"),
         complexity_manager=complexity_manager
     )
 
+def _generate_model_response(model, accelerator, agent_state, config):
+    """Generates a response from the model."""
+    input_tokens = torch.tensor(
+        [agent_state.conversation_history_tokens], device=accelerator.device
+    )
+    dynamic_top_k = agent_state.complexity_manager.get_top_k(
+    ) if agent_state.complexity_manager else None
+    if dynamic_top_k:
+        logging.info(
+            "Complexity: %s, Dynamic top_k: %d",
+            agent_state.complexity_manager.current_complexity, dynamic_top_k
+        )
+
+    gen_input = GenerateInput(
+        start_tokens=input_tokens,
+        max_new_tokens=config.generation.max_len,
+        temperature=config.generation.temperature,
+        top_k=config.generation.top_k,
+        speculative_steps=config.generation.speculative_steps,
+        dynamic_top_k=dynamic_top_k
+    )
+
+    newly_generated_tokens = []
+    unwrapped_model = accelerator.unwrap_model(model)
+    for chunk, surprise in unwrapped_model.generate(gen_input):
+        newly_generated_tokens.extend(chunk[0].tolist())
+        if agent_state.complexity_manager:
+            agent_state.complexity_manager.update_surprise(surprise)
+    return newly_generated_tokens
+
+def _process_tool_call(agent_state, tokenizer):
+    """Processes a tool call if one is present in the conversation history."""
+    full_history_text = tokenizer.decode(agent_state.conversation_history_tokens)
+    tool_name, args = parse_tool_call(full_history_text)
+    if tool_name and args is not None:
+        tool_output = execute_tool(tool_name, args)
+        logging.info("Output of tool '%s':\n%s", tool_name, tool_output)
+        tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
+        agent_state.conversation_history_tokens.extend(
+            tokenizer.encode(tool_output_formatted)
+        )
+        return True
+    return False
+
+def run_agent_loop(
+    model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator
+):
+    """Runs the main agent loop."""
+    agent_state = _initialize_agent_state(config, tokenizer)
+
     for turn in range(config.generation.max_turns):
-        logging.info(f"\n--- Iteration {turn + 1} ---")
-
-        input_tokens = torch.tensor([agent_state.conversation_history_tokens], device=accelerator.device)
-
-        dynamic_top_k = agent_state.complexity_manager.get_top_k() if agent_state.complexity_manager else None
-        if dynamic_top_k:
-             logging.info(f"Complexity: {agent_state.complexity_manager.current_complexity}, Dynamic top_k: {dynamic_top_k}")
-
-        gen_input = GenerateInput(start_tokens=input_tokens,
-                                  max_new_tokens=config.generation.max_len,
-                                  temperature=config.generation.temperature,
-                                  top_k=config.generation.top_k,
-                                  speculative_steps=config.generation.speculative_steps,
-                                  dynamic_top_k=dynamic_top_k)
-
-        newly_generated_tokens = []
-        unwrapped_model = accelerator.unwrap_model(model)
-        for chunk, surprise in unwrapped_model.generate(gen_input):
-            newly_generated_tokens.extend(chunk[0].tolist())
-            if agent_state.complexity_manager:
-                agent_state.complexity_manager.update_surprise(surprise)
-
+        logging.info("\n--- Iteration %d ---", turn + 1)
+        newly_generated_tokens = _generate_model_response(
+            model, accelerator, agent_state, config
+        )
         generated_text = tokenizer.decode(newly_generated_tokens)
-        logging.info(f"Model generated:\n{generated_text}")
-
+        logging.info("Model generated:\n%s", generated_text)
         agent_state.conversation_history_tokens.extend(newly_generated_tokens)
-        full_history_text = tokenizer.decode(agent_state.conversation_history_tokens)
 
-        tool_name, args = parse_tool_call(full_history_text)
-        if tool_name and args is not None:
-            tool_output = execute_tool(tool_name, args)
-            logging.info(f"Output of tool '{tool_name}':\n{tool_output}")
-
-            tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
-            agent_state.conversation_history_tokens.extend(tokenizer.encode(tool_output_formatted))
-        else:
+        if not _process_tool_call(agent_state, tokenizer):
             logging.info("\n--- Final Answer ---")
             final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
             print(final_answer)
@@ -109,33 +131,35 @@ def run_agent_loop(
     else:
         logging.warning("Maximum number of iterations reached.")
 
+@main_entrypoint
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
-    parser = argparse.ArgumentParser(description="Interact with a PyTorch Transformer model.")
-    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
-    parser.add_argument('--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
+    parser = argparse.ArgumentParser(
+        description="Interact with a PyTorch Transformer model.")
+    parser.add_argument(
+        '--model-name', type=str, help="The name of the model to use.")
+    parser.add_argument(
+        '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
     args = parser.parse_args()
 
-    try:
-        model_name = args.model_name or select_model_interactively()
-        if not model_name: return
+    model_name = args.model_name or select_model_interactively()
+    if not model_name:
+        return
 
-        model_dir = os.path.join('models', model_name)
-        config_path = os.path.join(model_dir, 'config.json')
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(
-                f"Config file not found for model '{model_name}' at {config_path}")
+    model_dir = os.path.join('models', model_name)
+    config_path = os.path.join(model_dir, 'config.json')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"Config file not found for model '{model_name}' at {config_path}"
+        )
 
-        config = Config.from_json(config_path)
-        accelerator = Accelerator()
-
-        model, tokenizer = load_model_and_tokenizer(model_name, config, args.load_in_4bit, accelerator)
-
-        run_agent_loop(model, tokenizer, config, accelerator)
-
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+    config = Config.from_json(config_path)
+    accelerator = Accelerator()
+    model, tokenizer = load_model_and_tokenizer(
+        model_name, config, args.load_in_4bit, accelerator
+    )
+    run_agent_loop(model, tokenizer, config, accelerator)
 
 if __name__ == "__main__":
     main()

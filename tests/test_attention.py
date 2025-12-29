@@ -51,7 +51,9 @@ class TestScaledDotProductAttention(unittest.TestCase):
         mask = torch.tril(torch.ones(seq_len, seq_len)).unsqueeze(0).unsqueeze(0)
 
         # Manually compute scores to check attention weights
-        scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        scores = torch.matmul(
+            q, k.transpose(-2, -1)
+        ) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
         scores = scores.masked_fill(mask == 0, float('-inf'))
         attn_weights = torch.nn.functional.softmax(scores, dim=-1)
 

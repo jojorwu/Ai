@@ -22,12 +22,15 @@ class KVCache:
     """
     def __init__(self, config: KVCacheConfig):
         self.config = config
-        self.k_cache = torch.zeros(
-            (config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k)
+        cache_shape = (
+            config.num_layers,
+            config.batch_size,
+            config.num_kv_heads,
+            config.max_seq_len,
+            config.d_k,
         )
-        self.v_cache = torch.zeros(
-            (config.num_layers, config.batch_size, config.num_kv_heads, config.max_seq_len, config.d_k)
-        )
+        self.k_cache = torch.zeros(cache_shape)
+        self.v_cache = torch.zeros(cache_shape)
         self.current_pos = 0
 
     def update(self, k: torch.Tensor, v: torch.Tensor, layer_idx: int):
@@ -35,14 +38,12 @@ class KVCache:
         Updates the cache with new key and value tensors for a specific layer.
         """
         seq_len = k.shape[2]
-
-        # Calculate indices to write to, wrapping around the buffer if necessary
-        indices = (torch.arange(self.current_pos, self.current_pos + seq_len) % self.config.max_seq_len)
-
+        indices = torch.arange(
+            self.current_pos, self.current_pos + seq_len
+        ) % self.config.max_seq_len
         self.k_cache[layer_idx, :, :, indices, :] = k
         self.v_cache[layer_idx, :, :, indices, :] = v
-
-        if layer_idx == 0: # Only update position once per generation step
+        if layer_idx == 0:
             self.current_pos += seq_len
 
     def get(self, layer_idx: int):

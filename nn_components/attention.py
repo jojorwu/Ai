@@ -13,7 +13,10 @@ class ScaledDotProductAttention(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+        mask: torch.Tensor = None
+    ) -> torch.Tensor:
         """
         Forward pass for Scaled Dot-Product Attention.
 

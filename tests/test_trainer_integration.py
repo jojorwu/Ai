@@ -4,13 +4,13 @@ Integration test for the PyTorch-based Trainer class.
 import unittest
 
 import torch
-import torch.nn as nn
 from accelerate import Accelerator
+from torch import nn
 from torch.optim import Adam
 
 from config import Config, TransformerConfig
 from model import Transformer
-from trainer import Trainer, TrainerConfig
+from trainer import Trainer, TrainerConfig, TrainingComponents, DataComponents
 
 
 def _create_test_config_and_data():
@@ -25,7 +25,7 @@ def _create_test_config_and_data():
     config.evolution.num_agents = 2
     config.evolution.num_survivors = 1
 
-    class MockTokenizer:
+    class MockTokenizer:  # pylint: disable=too-few-public-methods
         """A mock tokenizer for testing purposes."""
         vocab_size = 50
 
@@ -71,21 +71,31 @@ class TestTrainerIntegration(unittest.TestCase):
         model, optimizer, policy_loss_fn, value_loss_fn = accelerator.prepare(
             model, optimizer, policy_loss_fn, value_loss_fn
         )
-
-        trainer = Trainer(
-            model=model, optimizer=optimizer, policy_loss_fn=policy_loss_fn,
-            value_loss_fn=value_loss_fn, tokenizer=tokenizer, train_data=train_data,
-            val_data=val_data, config=config, accelerator=accelerator
+        training_components = TrainingComponents(
+            model=model,
+            optimizer=optimizer,
+            policy_loss_fn=policy_loss_fn,
+            value_loss_fn=value_loss_fn,
         )
+        data_components = DataComponents(
+            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+        )
+        trainer_config = TrainerConfig(
+            components=training_components,
+            data=data_components,
+            config=config,
+            accelerator=accelerator,
+        )
+        trainer = Trainer(trainer_config)
 
         unwrapped_model = model.module if hasattr(model, 'module') else model
 
         # --- 1. Test Pre-training ---
-        initial_weights_pre = unwrapped_model.decoder_blocks[0].mha.wo.weights.clone().detach()
+        initial_weights_pre = unwrapped_model.layers.decoder[0].mha.wo.weights.clone().detach()
 
         trainer.train_pretrain_epoch()
 
-        updated_weights_pre = unwrapped_model.decoder_blocks[0].mha.wo.weights.clone().detach()
+        updated_weights_pre = unwrapped_model.layers.decoder[0].mha.wo.weights.clone().detach()
 
         self.assertFalse(
             torch.equal(initial_weights_pre, updated_weights_pre),
@@ -94,10 +104,6 @@ class TestTrainerIntegration(unittest.TestCase):
 
         # --- 2. Test Evolution Cycle ---
         trainer.run_evolution_cycle()
-
-        # Simple assertion: the test completes without crashing.
-        # A more detailed test would check the LTM state.
-        self.assertTrue(True, "Evolution cycle completed without crashing.")
 
 if __name__ == "__main__":
     unittest.main()

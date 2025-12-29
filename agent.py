@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.optim import Adam
 
 from model import GenerateInput, Transformer
@@ -60,7 +60,7 @@ class Agent:
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.linalg.norm(torch.cat(grad_tensors)).item()
+        surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.metrics.total_surprise += surprise
 
         # Update LTM if surprise is high enough
@@ -69,7 +69,7 @@ class Agent:
 
         return surprise
 
-    def experience(self, x_batch: torch.Tensor, y_batch: torch.Tensor, image_batch: torch.Tensor = None):
+    def experience(self, x_batch: torch.Tensor, y_batch: torch.Tensor):
         """
         The process of an agent gaining "experience" in a batch training mode.
         This method updates the agent's LTM based on the surprise metric.
@@ -81,7 +81,7 @@ class Agent:
         self.ltm_optimizer.zero_grad()
 
         # Forward pass
-        logits, values, aux_loss = self.model(x_batch) # Ignoring image_batch for now
+        logits, values, aux_loss = self.model(x_batch)
 
         # Calculate policy loss (predicting the next token)
         # Reshape for CrossEntropyLoss: (batch_size * seq_len, vocab_size)
@@ -125,8 +125,9 @@ class Agent:
         self.metrics.fitness_score = score
 
     @torch.no_grad()
-    def generate_response(self, prompt_tokens: torch.Tensor,
-                          image_data: torch.Tensor = None, max_new_tokens=50) -> torch.Tensor:
+    def generate_response(
+        self, prompt_tokens: torch.Tensor, max_new_tokens=50
+    ) -> torch.Tensor:
         """
         Generates a response based on a prompt.
         """
@@ -134,19 +135,18 @@ class Agent:
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
-        # image_data is currently ignored until VisionEncoder is migrated
-
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
             temperature=0.7,
-            top_k=50
+            top_k=50,
         )
         return self.model.generate(generate_input)
 
     @torch.no_grad()
-    def critique_response(self, prompt_tokens: torch.Tensor,
-                          image_data: torch.Tensor, response_tokens: torch.Tensor) -> float:
+    def critique_response(
+        self, prompt_tokens: torch.Tensor, response_tokens: torch.Tensor
+    ) -> float:
         """
         Evaluates the "usefulness" of a generated response using its Value head.
         """
