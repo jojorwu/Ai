@@ -12,7 +12,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
 
-from model import ForwardPassInput, GenerateInput, SamplingConfig, Transformer
+from model import GenerateInput, SamplingConfig, Transformer
 
 
 @dataclass
@@ -49,40 +49,6 @@ class Agent:
         self.policy_loss_fn = nn.CrossEntropyLoss()
         self.value_loss_fn = nn.MSELoss()  # Used to push value towards 1.0
         self.metrics = AgentMetrics()
-
-    def forward(
-        self, x: torch.Tensor, ltm_state: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        """
-        Performs a forward pass using the base model but with the agent's own LTM.
-        """
-        # If no LTM state is provided, generate it from the agent's LTM
-        if ltm_state is None and self.long_term_memory:
-            with torch.no_grad():
-                h = self.base_model.layers.embedding(x) * math.sqrt(
-                    self.base_model.config.model.d_model
-                )
-                ltm_state = self.long_term_memory(h.mean(dim=1, keepdim=True))
-
-        # We need to manually call the forward pass of the base model's layers
-        # because we are overriding the LTM state.
-        h = self.base_model.layers.embedding(x) * math.sqrt(
-            self.base_model.config.model.d_model
-        )
-        total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i, block in enumerate(self.base_model.layers.decoder):
-            inputs = ForwardPassInput(x=h, ltm_state=ltm_state, layer_idx=i)
-            h, aux_loss = block(inputs)
-            if aux_loss is not None:
-                total_aux_loss += aux_loss
-
-        h = self.base_model.layers.final_norm(h)
-        logits = F.linear(
-            h, self.base_model.layers.embedding.weight
-        )  # pylint: disable=not-callable
-        value = self.base_model.layers.value_head(h[:, -1, :])
-
-        return logits, value, total_aux_loss
 
     def _update_ltm_and_calc_surprise(self) -> float:
         """
@@ -121,7 +87,9 @@ class Agent:
         self.long_term_memory.train()
         self.ltm_optimizer.zero_grad()
 
-        logits, values, aux_loss = self.forward(x_batch)
+        logits, values, aux_loss = self.base_model.forward(
+            x_batch, ltm_override=self.long_term_memory
+        )
 
         loss_policy = self.policy_loss_fn(
             logits.view(-1, logits.size(-1)), y_batch.view(-1)
@@ -184,23 +152,3 @@ class Agent:
         )
         return self.base_model.generate(generate_input)
 
-    @torch.no_grad()
-    def critique_response(
-        self, prompt_tokens: torch.Tensor, response_tokens: torch.Tensor
-    ) -> float:
-        """
-        Evaluates the "usefulness" of a generated response using its Value head.
-        """
-        self.base_model.eval()
-        if self.long_term_memory:
-            self.long_term_memory.eval()
-
-        if prompt_tokens.ndim == 1:
-            prompt_tokens = prompt_tokens.unsqueeze(0)
-        if response_tokens.ndim == 1:
-            response_tokens = response_tokens.unsqueeze(0)
-
-        full_sequence = torch.cat([prompt_tokens, response_tokens], dim=1)
-
-        _, value, _ = self.forward(full_sequence.to(self.base_model.device))
-        return value.item() if value is not None else 0.0
