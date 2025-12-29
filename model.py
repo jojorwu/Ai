@@ -254,22 +254,30 @@ class Transformer(nn.Module):
         draft_model = copy.deepcopy(self)
 
         while total_generated < inputs.max_new_tokens:
+            # Generate a speculative chunk of tokens from the draft model
             speculative_chunk, draft_tokens = self._generate_speculative_chunk(
                 draft_model, tokens, inputs
             )
+
+            # Get the true logits and value from the main model
             with torch.enable_grad():
-                true_logits, value, _ = self(draft_tokens[:, -self.config.model.max_seq_len:])
+                true_logits, value, _ = self(
+                    draft_tokens[:, -self.config.model.max_seq_len :]
+                )
             surprise = self._calculate_surprise(value)
 
+            # Validate the speculative chunk and get the accepted tokens
             accepted_chunk = self._validate_and_accept_chunk(
                 true_logits, speculative_chunk, inputs
             )
 
             if accepted_chunk is not None:
+                # If any tokens were accepted, yield them and update the state
                 yield accepted_chunk, surprise
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 total_generated += accepted_chunk.size(1)
             else:
+                # If no tokens were accepted, fall back to standard sampling
                 logits, _, _ = self(tokens[:, -self.config.model.max_seq_len :])
                 next_token = self._sample_from_logits(
                     logits[:, -1, :],
