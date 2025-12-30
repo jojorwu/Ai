@@ -142,3 +142,29 @@ class TestTransformer(unittest.TestCase):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 8)
+
+    def test_forward_pass_handles_invalid_complexity_score(self):
+        """
+        Tests that the forward pass handles invalid complexity scores gracefully.
+        """
+        invalid_scores = [
+            None,
+            torch.tensor([]),
+            torch.tensor([float('nan')]),
+            torch.tensor([float('inf')])
+        ]
+
+        for score in invalid_scores:
+            with self.subTest(score=score):
+                with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), score)):
+                    with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                        self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+
+                        # An invalid score defaults to 0.0, which means "lowest complexity".
+                        # It should run the minimum number of layers.
+                        min_layers = self.config.model.early_exit_num_layers[0]
+                        self.assertEqual(mock_decoder_forward.call_count, min_layers)
+
+                        # It should also use the minimum number of experts.
+                        min_experts = self.config.model.dynamic_moe_k_values[0]
+                        self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, min_experts)

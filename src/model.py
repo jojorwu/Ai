@@ -2,6 +2,7 @@
 PyTorch implementation of the main Transformer model.
 """
 import copy
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Generator, Tuple
@@ -177,12 +178,11 @@ class Transformer(nn.Module):
 
         active_layers = self.config.model.num_layers
         if (
-            complexity_score is not None
-            and self.config.model.early_exit_thresholds
+            self.config.model.early_exit_thresholds
             and self.config.model.early_exit_num_layers
         ):
             # Use the max complexity in the batch to determine layer count
-            score = torch.max(complexity_score).item()
+            score = self._get_safe_complexity_score(complexity_score)
             for i, threshold in enumerate(self.config.model.early_exit_thresholds):
                 if score < threshold:
                     active_layers = self.config.model.early_exit_num_layers[i]
@@ -191,11 +191,10 @@ class Transformer(nn.Module):
                 active_layers = self.config.model.early_exit_num_layers[-1]
 
         if (
-            complexity_score is not None
-            and self.config.model.dynamic_moe_thresholds
+            self.config.model.dynamic_moe_thresholds
             and self.config.model.dynamic_moe_k_values
         ):
-            score = torch.max(complexity_score).item()
+            score = self._get_safe_complexity_score(complexity_score)
             for i, threshold in enumerate(self.config.model.dynamic_moe_thresholds):
                 if score < threshold:
                     dynamic_top_k_ltm = self.config.model.dynamic_moe_k_values[i]
@@ -221,6 +220,24 @@ class Transformer(nn.Module):
         logits = F.linear(h, self.layers.embedding.weight)  # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
+
+    def _get_safe_complexity_score(self, complexity_score: torch.Tensor | None) -> float:
+        """
+        Validates the complexity score tensor and returns a safe scalar value.
+        Logs a warning if the tensor is invalid.
+        """
+        if complexity_score is None or complexity_score.numel() == 0:
+            return 0.0
+
+        if torch.isnan(complexity_score).any() or torch.isinf(complexity_score).any():
+            logging.warning(
+                "Invalid complexity score tensor detected (NaN or Inf). "
+                "Defaulting to 0.0. Tensor: %s",
+                complexity_score,
+            )
+            return 0.0
+
+        return torch.max(complexity_score).item()
 
     def _sample_from_logits(self, logits, temperature, top_k):
         """Samples a token from logits."""
