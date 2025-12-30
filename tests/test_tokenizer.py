@@ -14,7 +14,9 @@ class TestTokenizer(unittest.TestCase):
         self.test_dir = "temp_test_vocab_dir"
         os.makedirs(self.test_dir, exist_ok=True)
         with open(os.path.join(self.test_dir, "vocab.txt"), "w", encoding="utf-8") as f:
-            f.write("hello world")
+            f.write("hello world\n")
+            f.write("hello<THINK>world</THINK>\n")
+            f.write("hello <THINK world\n")
 
     def tearDown(self):
         """Remove the temporary directory after tests."""
@@ -24,8 +26,9 @@ class TestTokenizer(unittest.TestCase):
         """Test that the vocab is correctly built from a directory of text files."""
         tokenizer = Tokenizer(source_path=self.test_dir)
 
-        # Expected characters: h, e, l, o,  , w, r, d
-        expected_chars = sorted(list(set("hello world")))
+        # Expected characters from all lines written in setUp
+        full_text = "hello world\n" + "hello<THINK>world</THINK>\n" + "hello <THINK world\n"
+        expected_chars = sorted(list(set(full_text)))
         # Get the characters from the tokenizer's vocab, excluding special tokens
         special_tokens = [
             "<PAD>", "<THINK>", "</THINK>", "<TOOL_CALL>", "</TOOL_CALL>",
@@ -35,7 +38,7 @@ class TestTokenizer(unittest.TestCase):
         vocab_chars = [char for char, idx in tokenizer.char_to_idx.items() if char not in special_tokens]
 
         self.assertEqual(sorted(vocab_chars), expected_chars)
-        self.assertEqual(len(vocab_chars), len(set("hello world")))
+        self.assertEqual(len(vocab_chars), len(set(full_text)))
 
     def test_encode_decode_is_reversible(self):
         """Test that encoding and then decoding a string returns the original string."""
@@ -45,7 +48,6 @@ class TestTokenizer(unittest.TestCase):
         decoded_text = tokenizer.decode(encoded_tokens)
         self.assertEqual(decoded_text, original_text)
 
-    @unittest.skip("Skipping broken test to be fixed later")
     def test_special_tokens_are_handled_correctly(self):
         """Test that special tokens are correctly encoded and decoded as single tokens."""
         tokenizer = Tokenizer(source_path=self.test_dir)

@@ -23,7 +23,10 @@ class Tokenizer:
         self.char_to_idx = {}
         self.idx_to_char = {}
         self.vocab_size = 0
-        self.special_token_pattern = re.compile(f"({'|'.join(map(re.escape, self.special_tokens))})")
+        # A pattern that matches any of the special tokens, sorted by length to handle overlaps
+        self.special_token_pattern = re.compile(
+            '|'.join(re.escape(token) for token in sorted(self.special_tokens, key=len, reverse=True))
+        )
 
         if os.path.isdir(source_path):
             self._build_vocab_from_dir(source_path)
@@ -81,17 +84,27 @@ class Tokenizer:
             text = f"<THINK>{text}<ANSWER>"
 
         tokens = []
-        parts = self.special_token_pattern.split(text)
+        last_idx = 0
+        # Find all special tokens and process the text around them
+        for match in self.special_token_pattern.finditer(text):
+            start, end = match.span()
+            # Add the text before the special token
+            if start > last_idx:
+                pre_text = text[last_idx:start]
+                tokens.extend(self.char_to_idx.get(char, -1) for char in pre_text)
 
-        for part in parts:
-            if not part:
-                continue
-            if part in self.special_tokens:
-                tokens.append(self.char_to_idx[part])
-            else:
-                tokens.extend([self.char_to_idx.get(char, -1)
-                               for char in part if char in self.char_to_idx])
-        return tokens
+            # Add the special token itself
+            special_token = match.group(0)
+            tokens.append(self.char_to_idx[special_token])
+            last_idx = end
+
+        # Add any remaining text after the last special token
+        if last_idx < len(text):
+            post_text = text[last_idx:]
+            tokens.extend(self.char_to_idx.get(char, -1) for char in post_text)
+
+        # Filter out any -1 tokens for characters not in vocab
+        return [token for token in tokens if token != -1]
 
     def decode(self, tokens: list[int]) -> str:
         """
