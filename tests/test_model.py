@@ -19,13 +19,15 @@ class TestTransformer(unittest.TestCase):
             vocab_size=100,
             model=ModelConfig(
                 d_model=64,
-                num_layers=2,
+                num_layers=12,
                 num_heads=4,
                 num_kv_heads=2,
                 d_ff=128,
                 max_seq_len=128,
                 dropout_rate=0.1,
-                ltm=LTMArchitectureConfig(d_hidden=32, num_layers=1)
+                ltm=LTMArchitectureConfig(d_hidden=32, num_layers=1),
+                early_exit_thresholds=[0.2, 0.6],
+                early_exit_num_layers=[2, 6],
             ),
             vision=VisionConfig(),
             ltm=None,
@@ -93,3 +95,25 @@ class TestTransformer(unittest.TestCase):
             )
             expected_chunk = verification_tokens[:, 0].unsqueeze(-1)
             self.assertTrue(torch.equal(accepted_chunk, expected_chunk))
+
+    def test_layer_skipping(self):
+        """
+        Tests that the model correctly skips layers based on the complexity score.
+        """
+        # Low complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                self.assertEqual(mock_decoder_forward.call_count, 2)
+
+        # Medium complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                self.assertEqual(mock_decoder_forward.call_count, 6)
+
+        # High complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                self.assertEqual(mock_decoder_forward.call_count, 12)

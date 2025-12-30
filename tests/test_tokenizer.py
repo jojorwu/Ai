@@ -3,10 +3,8 @@ Unit tests for the Tokenizer class.
 """
 import os
 import shutil
-import sys
 import unittest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.tokenizer import Tokenizer
 
 class TestTokenizer(unittest.TestCase):

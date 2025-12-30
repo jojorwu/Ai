@@ -8,7 +8,9 @@
         "max_seq_len": 128,
         "dropout_rate": 0.1,
         "num_experts": 8,
-        "top_k_experts": 2
+    "top_k_experts": 2,
+    "early_exit_thresholds": [0.2, 0.6],
+    "early_exit_num_layers": [2, 6, 12]
     },
     "vision": {
         "image_size": [224, 224],

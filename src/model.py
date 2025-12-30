@@ -162,17 +162,33 @@ class Transformer(nn.Module):
         """Forward pass of the model."""
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         long_term_memory = ltm_override or self.layers.long_term_memory
+        complexity_score = None
 
         if ltm_state is None:
             if long_term_memory:
-                ltm_state = long_term_memory(h.mean(dim=1, keepdim=True))
+                ltm_state, complexity_score = long_term_memory(h.mean(dim=1, keepdim=True))
             else:
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
+        active_layers = self.config.model.num_layers
+        if (
+            complexity_score is not None
+            and self.config.model.early_exit_thresholds
+            and self.config.model.early_exit_num_layers
+        ):
+            # Use the max complexity in the batch to determine layer count
+            score = torch.max(complexity_score).item()
+            for i, threshold in enumerate(self.config.model.early_exit_thresholds):
+                if score < threshold:
+                    active_layers = self.config.model.early_exit_num_layers[i]
+                    break
+
+
         total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i, block in enumerate(self.layers.decoder):
+        for i in range(active_layers):
+            block = self.layers.decoder[i]
             inputs = ForwardPassInput(
                 x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k
             )
@@ -273,12 +289,13 @@ class Transformer(nn.Module):
         Yields chunks of accepted tokens and the surprise value.
         """
         self.eval()
+        draft_model = copy.deepcopy(self)
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
 
         while total_generated < inputs.max_new_tokens:
             speculative_chunk, draft_tokens = self._generate_speculative_chunk(
-                self, tokens, inputs
+                draft_model, tokens, inputs
             )
 
             with torch.enable_grad():

@@ -26,18 +26,23 @@ class LongTermMemory(nn.Module):
             layers.append(Linear(d_hidden, d_hidden))
             layers.append(Tanh())
 
-        # Output layer
-        layers.append(Linear(d_hidden, d_model))
-
         self.network = nn.Sequential(*layers)
+        self.context_head = Linear(d_hidden, d_model)
+        self.complexity_head = nn.Sequential(
+            Linear(d_hidden, 1),
+            nn.Sigmoid()
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for the LTM.
         Args:
             x: Input tensor, typically a summary of the main sequence
                (e.g., shape (batch_size, 1, d_model)).
         Returns:
-            A memory context vector of shape (batch_size, 1, d_model).
+            A tuple containing the memory context vector and the complexity score.
         """
-        return self.network(x)
+        hidden_state = self.network(x)
+        context = self.context_head(hidden_state)
+        complexity_score = self.complexity_head(hidden_state)
+        return context, complexity_score
