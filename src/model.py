@@ -275,11 +275,10 @@ class Transformer(nn.Module):
         self.eval()
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
-        draft_model = copy.deepcopy(self)
 
         while total_generated < inputs.max_new_tokens:
             speculative_chunk, draft_tokens = self._generate_speculative_chunk(
-                draft_model, tokens, inputs
+                self, tokens, inputs
             )
 
             with torch.enable_grad():
