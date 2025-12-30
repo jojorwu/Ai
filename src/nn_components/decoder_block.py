@@ -89,9 +89,10 @@ class DecoderBlock(nn.Module):
         """Performs the forward pass of the Decoder Block."""
         aux_loss = torch.tensor(0.0, device=inputs.x.device)
 
-        # Additive memory injection before the first sub-layer
-        x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
-        x_norm1 = self.norm['norm1'](x_with_mem)
+        # Additive memory injection at the start of each block
+        x = inputs.x + inputs.ltm_state if self.ltm else inputs.x
+
+        x_norm1 = self.norm['norm1'](x)
 
         attn_output = self.mha(
             x_norm1,
@@ -101,7 +102,7 @@ class DecoderBlock(nn.Module):
         )
 
         # First residual connection
-        x = inputs.x + self.dropout['dropout1'](attn_output)
+        x = x + self.dropout['dropout1'](attn_output)
 
         x_norm2 = self.norm['norm2'](x)
 
