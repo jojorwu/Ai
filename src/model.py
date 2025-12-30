@@ -156,10 +156,13 @@ class Transformer(nn.Module):
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
-        dynamic_top_k: int = None,
+        dynamic_top_k: int = None, # This is passed in from generation config
         ltm_override: nn.Module | None = None,
     ):
         """Forward pass of the model."""
+        # Initialize dynamic_top_k from the LTM to None
+        dynamic_top_k_ltm = None
+
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         long_term_memory = ltm_override or self.layers.long_term_memory
         complexity_score = None
@@ -184,13 +187,31 @@ class Transformer(nn.Module):
                 if score < threshold:
                     active_layers = self.config.model.early_exit_num_layers[i]
                     break
+            else:
+                active_layers = self.config.model.early_exit_num_layers[-1]
+
+        if (
+            complexity_score is not None
+            and self.config.model.dynamic_moe_thresholds
+            and self.config.model.dynamic_moe_k_values
+        ):
+            score = torch.max(complexity_score).item()
+            for i, threshold in enumerate(self.config.model.dynamic_moe_thresholds):
+                if score < threshold:
+                    dynamic_top_k_ltm = self.config.model.dynamic_moe_k_values[i]
+                    break
+            else:
+                dynamic_top_k_ltm = self.config.model.dynamic_moe_k_values[-1]
+
+        # Override with generation config if provided
+        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
 
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
             inputs = ForwardPassInput(
-                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k
+                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k
             )
             h, aux_loss = block(inputs)
             if aux_loss is not None:

@@ -40,6 +40,10 @@ class ModelConfig(BaseModel):
         None, description="Complexity thresholds for early exit.")
     early_exit_num_layers: Optional[list[int]] = Field(
         None, description="Number of layers to use for each complexity level.")
+    dynamic_moe_thresholds: Optional[list[float]] = Field(
+        None, description="Complexity thresholds for dynamic MoE.")
+    dynamic_moe_k_values: Optional[list[int]] = Field(
+        None, description="Number of experts to use for each complexity level.")
 
 
 class MultiHeadAttentionConfig(BaseModel):

@@ -27,7 +27,9 @@ class TestTransformer(unittest.TestCase):
                 dropout_rate=0.1,
                 ltm=LTMArchitectureConfig(d_hidden=32, num_layers=1),
                 early_exit_thresholds=[0.2, 0.6],
-                early_exit_num_layers=[2, 6],
+                early_exit_num_layers=[2, 6, 12],
+                dynamic_moe_thresholds=[0.2, 0.6],
+                dynamic_moe_k_values=[2, 4, 8],
             ),
             vision=VisionConfig(),
             ltm=None,
@@ -117,3 +119,26 @@ class TestTransformer(unittest.TestCase):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock_decoder_forward.call_count, 12)
+
+    def test_dynamic_expert_allocation(self):
+        """
+        Tests that the model correctly allocates experts based on the complexity score.
+        """
+        # Low complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                # Check that the dynamic_top_k argument in the first call matches the expected value
+                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 2)
+
+        # Medium complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 4)
+
+        # High complexity
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
+                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 8)
