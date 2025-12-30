@@ -107,6 +107,55 @@ def create_image(prompt: str, path: str) -> str:
         return f"Error: An I/O error occurred while creating the image: {e}"
 
 
+# --- Shell Command Execution ---
+
+# Security: Define a whitelist of safe shell commands that the model can execute.
+# This is a critical security measure to prevent arbitrary code execution.
+SAFE_SHELL_COMMANDS = [
+    "ls",
+    "grep",
+    "echo",
+    "cat",
+    "find",
+    "wc",
+]
+
+
+def execute_shell_command(command: str) -> str:
+    """
+    Executes a shell command, but only if it is in the approved list of safe commands.
+    This is a security measure to prevent the model from executing arbitrary code.
+    """
+    # Security check: Validate the command against the whitelist.
+    command_name = command.strip().split()[0]
+    if command_name not in SAFE_SHELL_COMMANDS:
+        return (
+            f"Error: Command '{command_name}' is not allowed. "
+            f"Only the following commands are permitted: {', '.join(SAFE_SHELL_COMMANDS)}"
+        )
+
+    try:
+        # We checked the command, but we should still be careful.
+        # Use a timeout to prevent long-running commands.
+        # Note: subprocess.run is generally safer than os.system.
+        import subprocess
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10,  # 10-second timeout
+            check=False, # Do not raise exception on non-zero exit codes
+        )
+        if result.returncode == 0:
+            return result.stdout
+        return f"Error executing command. Exit code: {result.returncode}\nStderr: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "Error: Command timed out after 10 seconds."
+    except Exception as e:
+        return f"An unexpected error occurred: {e}"
+
+
 # --- Tool Registry ---
 
 AVAILABLE_TOOLS = {
@@ -114,6 +163,7 @@ AVAILABLE_TOOLS = {
     "read_file": read_file,
     "write_file": write_file,
     "create_image": create_image,
+    "execute_shell": execute_shell_command,
 }
 
 
