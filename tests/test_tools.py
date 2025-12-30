@@ -1,9 +1,14 @@
 """
 Unit tests for the tools library.
 """
+import sys
+import os
 import unittest
-from unittest.mock import MagicMock, patch
-import tools
+from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src import tools
 
 class TestTools(unittest.TestCase):
     """Tests for the tools."""

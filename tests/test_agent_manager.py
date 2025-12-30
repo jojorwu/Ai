@@ -1,15 +1,19 @@
 """
 Unit tests for the AgentManager class.
 """
+import sys
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
 from accelerate import Accelerator
 
-from agent_manager import AgentManager
-from config import Config
-from model import Transformer
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.agent_manager import AgentManager
+from src.config import Config
+from src.model import Transformer
 
 
 class TestAgentManager(unittest.TestCase):
@@ -36,7 +40,9 @@ class TestAgentManager(unittest.TestCase):
 
     def test_merge_agents_averages_ltm_weights(self):
         """Test that merge_agents correctly averages the LTM weights."""
-        manager = AgentManager(self.mock_model, num_agents=2, accelerator=self.mock_accelerator)
+        manager = AgentManager(
+            self.mock_model, num_agents=2, accelerator=self.mock_accelerator
+        )
 
         # Create mock LTM states for two agents
         ltm_state_1 = {'weight': torch.tensor([1.0, 2.0, 3.0])}
@@ -60,10 +66,12 @@ class TestAgentManager(unittest.TestCase):
 
         self.assertTrue(torch.equal(loaded_state['weight'], expected_avg_state['weight']))
 
-    @patch('agent_manager.AgentManager._batch_critique')
+    @patch('src.agent_manager.AgentManager._batch_critique')
     def test_collaborative_evaluation_independent_success(self, mock_batch_critique):
         """Test collaboration evaluation for a successful independent response."""
-        manager = AgentManager(self.mock_model, num_agents=3, accelerator=self.mock_accelerator)
+        manager = AgentManager(
+            self.mock_model, num_agents=3, accelerator=self.mock_accelerator
+        )
 
         # Mock the critique score to be high (successful)
         mock_batch_critique.return_value = 0.9  # Above SUCCESS_THRESHOLD
@@ -78,7 +86,9 @@ class TestAgentManager(unittest.TestCase):
             agent.generate_response = MagicMock(return_value=torch.tensor([[10, 20]]))
 
         # Run the evaluation
-        manager.collaborative_evaluation(evaluation_data, mock_tokenizer, top_k=3, device='cpu')
+        manager.collaborative_evaluation(
+            evaluation_data, mock_tokenizer, top_k=3, device='cpu'
+        )
 
         # Check that agents received the correct reward
         expected_reward = manager.REWARD_INDEPENDENT_SUCCESS * 0.9
@@ -86,10 +96,12 @@ class TestAgentManager(unittest.TestCase):
             # In this simple case, each agent proposes once
             self.assertAlmostEqual(agent.get_fitness_score(), expected_reward, places=5)
 
-    @patch('agent_manager.AgentManager._batch_critique')
+    @patch('src.agent_manager.AgentManager._batch_critique')
     def test_collaborative_evaluation_asks_for_help_and_succeeds(self, mock_batch_critique):
         """Test evaluation when an agent asks for help and gets a good response."""
-        manager = AgentManager(self.mock_model, num_agents=3, accelerator=self.mock_accelerator)
+        manager = AgentManager(
+            self.mock_model, num_agents=3, accelerator=self.mock_accelerator
+        )
 
         # Mock the critique score to be high (successful help)
         mock_batch_critique.return_value = 0.9
@@ -103,24 +115,30 @@ class TestAgentManager(unittest.TestCase):
             agent.generate_response = MagicMock()
 
         # Agent 0 will ask for help
-        manager.agents[0].generate_response.return_value = torch.tensor([[1]]) # <ASK_FOR_HELP>
+        manager.agents[0].generate_response.return_value = torch.tensor([[1]])
         # Agent 1 will be the helper
-        manager.agents[1].generate_response.return_value = torch.tensor([[10, 20]]) # Normal response
+        manager.agents[1].generate_response.return_value = torch.tensor([[10, 20]])
         # Agent 2 will be a critic
-        manager.agents[2].generate_response.return_value = torch.tensor([[30, 40]]) # Normal response
+        manager.agents[2].generate_response.return_value = torch.tensor([[30, 40]])
 
         # Run evaluation with just enough data for one proposal (from agent 0)
         prompt_len = self.mock_model.config.model.max_seq_len // 2
-        manager.collaborative_evaluation(evaluation_data[:prompt_len], mock_tokenizer, top_k=3, device='cpu')
+        manager.collaborative_evaluation(
+            evaluation_data[:prompt_len], mock_tokenizer, top_k=3, device='cpu'
+        )
 
         # Agent 0 is the proposer and asks for help
         proposer_score = manager.agents[0].get_fitness_score()
-        expected_proposer_score = manager.REWARD_ASKING_FOR_HELP + (manager.REWARD_GOOD_HELP * 0.9)
+        expected_proposer_score = (
+            manager.REWARD_ASKING_FOR_HELP + (manager.REWARD_GOOD_HELP * 0.9)
+        )
         self.assertAlmostEqual(proposer_score, expected_proposer_score, places=5)
 
         # Agent 1 is the helper, and also proposes for itself
         helper_score = manager.agents[1].get_fitness_score()
-        expected_helper_score = manager.REWARD_GOOD_HELP * 0.9 + manager.REWARD_INDEPENDENT_SUCCESS * 0.9
+        expected_helper_score = (
+            manager.REWARD_GOOD_HELP * 0.9 + manager.REWARD_INDEPENDENT_SUCCESS * 0.9
+        )
         self.assertAlmostEqual(helper_score, expected_helper_score, places=5)
 
         # Agent 2 also proposes for itself

@@ -3,8 +3,11 @@ Unit tests for the Tokenizer class.
 """
 import os
 import shutil
+import sys
 import unittest
-from tokenizer import Tokenizer
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from src.tokenizer import Tokenizer
 
 class TestTokenizer(unittest.TestCase):
     """Tests for the Tokenizer."""
@@ -27,7 +30,8 @@ class TestTokenizer(unittest.TestCase):
         tokenizer = Tokenizer(source_path=self.test_dir)
 
         # Expected characters from all lines written in setUp
-        full_text = "hello world\n" + "hello<THINK>world</THINK>\n" + "hello <THINK world\n"
+        full_text = ("hello world\n" + "hello<THINK>world</THINK>\n" +
+                     "hello <THINK world\n")
         expected_chars = sorted(list(set(full_text)))
         # Get the characters from the tokenizer's vocab, excluding special tokens
         special_tokens = [
@@ -35,7 +39,10 @@ class TestTokenizer(unittest.TestCase):
             "<TOOL_OUTPUT>", "</TOOL_OUTPUT>", "<ANSWER>", "</ANSWER>",
             "<IMAGE>", "<ASK_FOR_HELP>", "<I_DONT_KNOW>"
         ]
-        vocab_chars = [char for char, idx in tokenizer.char_to_idx.items() if char not in special_tokens]
+        vocab_chars = [
+            char for char, idx in tokenizer.char_to_idx.items()
+            if char not in special_tokens
+        ]
 
         self.assertEqual(sorted(vocab_chars), expected_chars)
         self.assertEqual(len(vocab_chars), len(set(full_text)))

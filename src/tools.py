@@ -5,6 +5,7 @@ Each tool should be a function with type annotations and a docstring.
 import json
 import logging
 import os
+import subprocess
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -138,7 +139,6 @@ def execute_shell_command(command: str) -> str:
         # We checked the command, but we should still be careful.
         # Use a timeout to prevent long-running commands.
         # Note: subprocess.run is generally safer than os.system.
-        import subprocess
         result = subprocess.run(
             command,
             shell=True,
@@ -152,7 +152,7 @@ def execute_shell_command(command: str) -> str:
         return f"Error executing command. Exit code: {result.returncode}\nStderr: {result.stderr}"
     except subprocess.TimeoutExpired:
         return "Error: Command timed out after 10 seconds."
-    except Exception as e:
+    except OSError as e:
         return f"An unexpected error occurred: {e}"
 
 
