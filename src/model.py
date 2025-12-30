@@ -239,42 +239,33 @@ class Transformer(nn.Module):
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
     def _validate_and_accept_chunk(self, true_logits, speculative_chunk, inputs):
-        """Validates the speculative chunk and returns the accepted tokens."""
-        batch_size, num_tokens, _ = true_logits.shape
-        # Sample verification tokens from the true logits for the entire chunk
+        """
+        Validates the speculative chunk and returns the accepted tokens.
+        NOTE: This implementation currently only supports a batch size of 1,
+        which matches the constraint of the parent `generate` method.
+        """
+        if speculative_chunk.size(0) != 1:
+            raise NotImplementedError(
+                "The current generate method does not support batch sizes > 1 for speculative decoding."
+            )
+
         verification_tokens = self._sample_from_logits(
             true_logits.view(-1, true_logits.size(-1)),
             inputs.sampling_config.temperature,
             inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
-        ).view(batch_size, num_tokens)
+        ).view(speculative_chunk.shape)
 
-        # Compare the speculative chunk with the verification tokens
-        matches = speculative_chunk == verification_tokens
-
-        # Find the first mismatch index for each item in the batch
-        first_mismatch = torch.full(
-            (batch_size,), num_tokens, dtype=torch.long, device=speculative_chunk.device
-        )
-        mismatch_found = torch.zeros(batch_size, dtype=torch.bool, device=speculative_chunk.device)
-
-        for i in range(num_tokens):
-            mismatches = ~matches[:, i] & ~mismatch_found
-            first_mismatch[mismatches] = i
-            mismatch_found |= mismatches
-            if mismatch_found.all():
+        accepted_tokens = []
+        for i in range(speculative_chunk.size(1)):
+            draft_token = speculative_chunk[0, i]
+            ver_token = verification_tokens[0, i]
+            if draft_token == ver_token:
+                accepted_tokens.append(draft_token.unsqueeze(0))
+            else:
+                accepted_tokens.append(ver_token.unsqueeze(0))
                 break
 
-        # Handle the case where all tokens match
-        if matches.all():
-            return speculative_chunk
-
-        # Construct the accepted chunk
-        accepted_tokens = speculative_chunk[:, :first_mismatch[0]]
-        # Append the first mismatched verification token
-        next_token = verification_tokens[:, first_mismatch[0]].unsqueeze(-1)
-        accepted_chunk = torch.cat([accepted_tokens, next_token], dim=1)
-
-        return accepted_chunk
+        return torch.cat(accepted_tokens, dim=0).unsqueeze(0) if accepted_tokens else None
 
     def generate(self, inputs: GenerateInput) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
