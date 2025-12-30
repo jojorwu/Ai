@@ -12,12 +12,12 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from complexity_manager import ComplexityManager
-from config import Config, TransformerConfig
-from model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
-from tokenizer import Tokenizer
-from tools import execute_tool
-from utils import main_entrypoint, parse_tool_call, select_model_interactively, setup_logging
+from src.complexity_manager import ComplexityManager
+from src.config import Config, TransformerConfig
+from src.model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
+from src.tokenizer import Tokenizer
+from src.tools import execute_tool
+from src.utils import main_entrypoint, parse_tool_call, select_model_interactively, setup_logging
 
 
 @dataclass

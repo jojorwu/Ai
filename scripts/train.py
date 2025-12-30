@@ -9,11 +9,11 @@ import shutil
 import torch
 from accelerate import Accelerator
 
-from config import Config
-from data_loader import load_multimodal_data_from_directory
-from tokenizer import Tokenizer
-from trainer import create_trainer, DataComponents
-from utils import main_entrypoint, setup_logging
+from src.config import Config
+from src.data_loader import load_multimodal_data_from_directory
+from src.tokenizer import Tokenizer
+from src.trainer import create_trainer, DataComponents
+from src.utils import main_entrypoint, setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
