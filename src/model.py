@@ -181,26 +181,23 @@ class Transformer(nn.Module):
             self.config.model.early_exit_thresholds
             and self.config.model.early_exit_num_layers
         ):
-            # Use the max complexity in the batch to determine layer count
             score = self._get_safe_complexity_score(complexity_score)
-            for i, threshold in enumerate(self.config.model.early_exit_thresholds):
-                if score < threshold:
-                    active_layers = self.config.model.early_exit_num_layers[i]
-                    break
-            else:
-                active_layers = self.config.model.early_exit_num_layers[-1]
+            active_layers = self._get_dynamic_parameter(
+                score,
+                self.config.model.early_exit_thresholds,
+                self.config.model.early_exit_num_layers,
+            )
 
         if (
             self.config.model.dynamic_moe_thresholds
             and self.config.model.dynamic_moe_k_values
         ):
             score = self._get_safe_complexity_score(complexity_score)
-            for i, threshold in enumerate(self.config.model.dynamic_moe_thresholds):
-                if score < threshold:
-                    dynamic_top_k_ltm = self.config.model.dynamic_moe_k_values[i]
-                    break
-            else:
-                dynamic_top_k_ltm = self.config.model.dynamic_moe_k_values[-1]
+            dynamic_top_k_ltm = self._get_dynamic_parameter(
+                score,
+                self.config.model.dynamic_moe_thresholds,
+                self.config.model.dynamic_moe_k_values,
+            )
 
         # Override with generation config if provided
         final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
@@ -238,6 +235,15 @@ class Transformer(nn.Module):
             return 0.0
 
         return torch.max(complexity_score).item()
+
+    def _get_dynamic_parameter(
+        self, score: float, thresholds: list[float], values: list[int]
+    ) -> int:
+        """Selects a value from a list based on a score and thresholds."""
+        for i, threshold in enumerate(thresholds):
+            if score < threshold:
+                return values[i]
+        return values[-1]
 
     def _sample_from_logits(self, logits, temperature, top_k):
         """Samples a token from logits."""
