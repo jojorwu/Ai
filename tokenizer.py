@@ -15,19 +15,15 @@ class Tokenizer:
 
     def __init__(self, source_path):
         self.special_tokens = [
-            '<THINK>', '<ANSWER>',
-            '<TOOL_CALL>', '</TOOL_CALL>',
-            '<TOOL_OUTPUT>', '</TOOL_OUTPUT>',
-            '<ASK_FOR_HELP>',
-            '<I_DONT_KNOW>',
-            '<IMAGE>'
+            "<PAD>", "<THINK>", "</THINK>", "<TOOL_CALL>", "</TOOL_CALL>",
+            "<TOOL_OUTPUT>", "</TOOL_OUTPUT>", "<ANSWER>", "</ANSWER>",
+            "<IMAGE>", "<ASK_FOR_HELP>", "<I_DONT_KNOW>"
         ]
         self.chars = []
         self.char_to_idx = {}
         self.idx_to_char = {}
         self.vocab_size = 0
-        self.special_token_pattern = re.compile(
-            f"({'|'.join(re.escape(token) for token in self.special_tokens)})")
+        self.special_token_pattern = re.compile(f"({'|'.join(map(re.escape, self.special_tokens))})")
 
         if os.path.isdir(source_path):
             self._build_vocab_from_dir(source_path)
