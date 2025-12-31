@@ -10,11 +10,10 @@ from dataclasses import dataclass
 from typing import List
 
 import torch
-from accelerate import Accelerator, dispatch_model, init_empty_weights
+from accelerate import Accelerator
 
 from src.complexity_manager import ComplexityManager
-from src.config import Config, TransformerConfig
-from src.device_manager import DeviceManager
+from src.config import Config
 from src.model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
 from src.tokenizer import Tokenizer
 from src.tools import execute_tool
@@ -120,8 +119,7 @@ def main():
     setup_logging()
     parser = argparse.ArgumentParser(
         description="Interact with a PyTorch Transformer model.")
-    parser.add_argument(
-        '--model-name', type=str, help="The name of the model to use.")
+    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
     parser.add_argument(
         '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
     parser.add_argument(

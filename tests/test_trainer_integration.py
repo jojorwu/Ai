@@ -65,11 +65,15 @@ class TestTrainerIntegration(unittest.TestCase):
         unwrapped_model = model.module if hasattr(model, "module") else model
 
         # --- 1. Test Pre-training ---
-        initial_weights_pre = unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        initial_weights_pre = (
+            unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        )
 
         trainer.train_pretrain_epoch()
 
-        updated_weights_pre = unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        updated_weights_pre = (
+            unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        )
 
         self.assertFalse(
             torch.equal(initial_weights_pre, updated_weights_pre),

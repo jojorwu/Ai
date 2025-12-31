@@ -117,7 +117,7 @@ def load_model_and_tokenizer(
     load_in_4bit: bool,
     quantized: bool,
 ):
-
+    """Loads a model and tokenizer from a given model name."""
     logging.info(
         "Loading model '%s' (4-bit: %s, quantized: %s)...",
         model_name,

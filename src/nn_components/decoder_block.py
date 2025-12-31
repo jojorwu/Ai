@@ -30,6 +30,15 @@ class ForwardPassInput:
     dynamic_top_k: int = None
 
 
+@dataclass
+class AttentionSubLayerInput:
+    """Inputs for the AttentionSubLayer."""
+    x: torch.Tensor
+    ltm_state: torch.Tensor
+    mask: torch.Tensor
+    kv_cache: 'KVCache'
+    layer_idx: int
+
 class AttentionSubLayer(nn.Module):
     """Encapsulates the Multi-Head Attention sub-layer."""
     def __init__(self, config: DecoderBlockConfig, linear_class):
@@ -50,15 +59,15 @@ class AttentionSubLayer(nn.Module):
         )
         return MultiHeadAttention(mha_config, linear_class=linear_class)
 
-    def forward(self, x, ltm_state, mask, kv_cache, layer_idx):
+    def forward(self, inputs: AttentionSubLayerInput):
         """Forward pass for the attention sub-layer."""
-        x_norm = self.norm(x)
+        x_norm = self.norm(inputs.x)
         if self.film:
-            x_norm = self.film(x_norm, ltm_state)
+            x_norm = self.film(x_norm, inputs.ltm_state)
         attn_output = self.mha(
-            x_norm, mask=mask, kv_cache=kv_cache, layer_idx=layer_idx
+            x_norm, mask=inputs.mask, kv_cache=inputs.kv_cache, layer_idx=inputs.layer_idx
         )
-        return x + self.dropout(attn_output)
+        return inputs.x + self.dropout(attn_output)
 
 class FeedForwardSubLayer(nn.Module):
     """Encapsulates the Feed-Forward Network sub-layer."""
@@ -118,9 +127,14 @@ class DecoderBlock(nn.Module):
 
     def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the Decoder Block."""
-        x = self.attention_sublayer(
-            inputs.x, inputs.ltm_state, inputs.mask, inputs.kv_cache, inputs.layer_idx
+        attn_inputs = AttentionSubLayerInput(
+            x=inputs.x,
+            ltm_state=inputs.ltm_state,
+            mask=inputs.mask,
+            kv_cache=inputs.kv_cache,
+            layer_idx=inputs.layer_idx,
         )
+        x = self.attention_sublayer(attn_inputs)
         x, aux_loss = self.ff_sublayer(
             x, inputs.ltm_state, inputs.dynamic_top_k
         )

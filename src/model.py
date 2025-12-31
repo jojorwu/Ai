@@ -155,29 +155,18 @@ class Transformer(nn.Module):
 
     def _get_dynamic_params(self, complexity_score, dynamic_top_k):
         """Gets dynamic parameters for the forward pass."""
-        active_layers = self.config.model.num_layers
-        dynamic_top_k_ltm = None
-
         score = self._get_safe_complexity_score(complexity_score)
-        if (
-            self.config.model.early_exit_thresholds
-            and self.config.model.early_exit_num_layers
-        ):
-            active_layers = self._get_dynamic_parameter(
-                score,
-                self.config.model.early_exit_thresholds,
-                self.config.model.early_exit_num_layers,
-            )
+        active_layers = self._get_dynamic_parameter(
+            score,
+            self.config.model.early_exit_thresholds,
+            self.config.model.early_exit_num_layers,
+        ) or self.config.model.num_layers
 
-        if (
-            self.config.model.dynamic_moe_thresholds
-            and self.config.model.dynamic_moe_k_values
-        ):
-            dynamic_top_k_ltm = self._get_dynamic_parameter(
-                score,
-                self.config.model.dynamic_moe_thresholds,
-                self.config.model.dynamic_moe_k_values,
-            )
+        dynamic_top_k_ltm = self._get_dynamic_parameter(
+            score,
+            self.config.model.dynamic_moe_thresholds,
+            self.config.model.dynamic_moe_k_values,
+        )
         final_dynamic_top_k = (
             dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
         )
@@ -248,6 +237,8 @@ class Transformer(nn.Module):
         self, score: float, thresholds: list[float], values: list[int]
     ) -> int:
         """Selects a value from a list based on a score and thresholds."""
+        if thresholds is None:
+            return None
         for i, threshold in enumerate(thresholds):
             if score < threshold:
                 return values[i]

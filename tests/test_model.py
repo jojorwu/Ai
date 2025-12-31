@@ -103,22 +103,20 @@ class TestTransformer(unittest.TestCase):
         Tests that the model correctly skips layers based on the complexity score.
         """
         # Low complexity
-        ltm_low_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low_complexity):
+        ltm_low = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_count, 2)
 
-        # Medium complexity
-        ltm_med_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med_complexity):
+        ltm_med = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_count, 6)
 
-        # High complexity
-        ltm_high_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high_complexity):
+        ltm_high = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_count, 12)
@@ -127,23 +125,20 @@ class TestTransformer(unittest.TestCase):
         """
         Tests that the model correctly allocates experts based on the complexity score.
         """
-        # Low complexity
-        ltm_low_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low_complexity):
+        ltm_low = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_args[0][0].dynamic_top_k, 2)
 
-        # Medium complexity
-        ltm_med_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med_complexity):
+        ltm_med = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_args[0][0].dynamic_top_k, 4)
 
-        # High complexity
-        ltm_high_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high_complexity):
+        ltm_high = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high):
             with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 self.assertEqual(mock.call_args[0][0].dynamic_top_k, 8)
