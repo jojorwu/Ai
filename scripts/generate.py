@@ -27,27 +27,65 @@ class AgentState:
     complexity_manager: ComplexityManager = None
 
 def load_model_and_tokenizer(
-    model_name: str, config: Config, load_in_4bit: bool, accelerator: Accelerator
+    model_name: str,
+    config: Config,
+    load_in_4bit: bool,
+    quantized: bool,
+    accelerator: Accelerator,
 ):
     """Loads the PyTorch model and tokenizer."""
-    logging.info("Loading model '%s' (4-bit: %s)...", model_name, load_in_4bit)
-    model_dir = os.path.join('models', model_name)
-    weights_path = os.path.join(model_dir, 'best_model.pt')
-    if not os.path.exists(weights_path):
-        weights_path = os.path.join(model_dir, 'model.pt')
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"No weights file found in {model_dir}")
-
-    tokenizer = Tokenizer(model_dir)
-    transformer_config = TransformerConfig(
-        vocab_size=tokenizer.vocab_size, model=config.model, vision=config.vision,
-        ltm=config.ltm, tokenizer=tokenizer
+    logging.info(
+        "Loading model '%s' (4-bit: %s, quantized: %s)...",
+        model_name,
+        load_in_4bit,
+        quantized,
     )
+    model_dir = os.path.join("models", model_name)
+    tokenizer = Tokenizer(model_dir)
 
+    transformer_config = TransformerConfig(
+        vocab_size=tokenizer.vocab_size,
+        model=config.model,
+        vision=config.vision,
+        ltm=config.ltm,
+        tokenizer=tokenizer,
+    )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
-    model.load_state_dict(torch.load(weights_path, map_location='cpu'), strict=False)
-    model = accelerator.prepare(model)
 
+    if quantized:
+        quantized_weights_path = os.path.join(model_dir, "quantized_model.pt")
+        if os.path.exists(quantized_weights_path):
+            logging.info("Loading pre-quantized model from %s", quantized_weights_path)
+            model = torch.quantization.quantize_dynamic(
+                model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+            model.load_state_dict(
+                torch.load(quantized_weights_path, map_location="cpu")
+            )
+        else:
+            logging.warning(
+                "No quantized model found. Loading standard model and quantizing on the fly."
+            )
+            weights_path = os.path.join(model_dir, "best_model.pt")
+            if not os.path.exists(weights_path):
+                weights_path = os.path.join(model_dir, "model.pt")
+            model.load_state_dict(
+                torch.load(weights_path, map_location="cpu"), strict=False
+            )
+            model = torch.quantization.quantize_dynamic(
+                model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+    else:
+        weights_path = os.path.join(model_dir, "best_model.pt")
+        if not os.path.exists(weights_path):
+            weights_path = os.path.join(model_dir, "model.pt")
+        if not os.path.exists(weights_path):
+            raise FileNotFoundError(f"No weights file found in {model_dir}")
+        model.load_state_dict(
+            torch.load(weights_path, map_location="cpu"), strict=False
+        )
+
+    model = accelerator.prepare(model)
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
@@ -147,6 +185,9 @@ def main():
         '--model-name', type=str, help="The name of the model to use.")
     parser.add_argument(
         '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
+    parser.add_argument(
+        '--quantized', action='store_true', help="Load a quantized model for CPU."
+    )
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()
@@ -163,7 +204,7 @@ def main():
     config = Config.from_json(config_path)
     accelerator = Accelerator()
     model, tokenizer = load_model_and_tokenizer(
-        model_name, config, args.load_in_4bit, accelerator
+        model_name, config, args.load_in_4bit, args.quantized, accelerator
     )
     run_agent_loop(model, tokenizer, config, accelerator)
 

@@ -47,8 +47,8 @@ class TestLinear(unittest.TestCase):
         fake_loss.backward()
 
         # Check that gradients exist for weights, bias, and input tensor
-        self.assertIsNotNone(layer.weights.grad)
-        self.assertEqual(layer.weights.grad.shape, layer.weights.shape)
+        self.assertIsNotNone(layer.weight.grad)
+        self.assertEqual(layer.weight.grad.shape, layer.weight.shape)
 
         self.assertIsNotNone(layer.bias.grad)
         self.assertEqual(layer.bias.grad.shape, layer.bias.shape)

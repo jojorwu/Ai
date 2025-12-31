@@ -33,7 +33,7 @@ class TestFiLMLayer(unittest.TestCase):
         fake_loss = output.sum()
         fake_loss.backward()
 
-        self.assertIsNotNone(film.projection.weights.grad)
+        self.assertIsNotNone(film.projection.weight.grad)
         self.assertIsNotNone(film.projection.bias.grad)
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(ltm_state.grad)
