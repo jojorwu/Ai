@@ -116,6 +116,7 @@ def load_model_and_tokenizer(
     config: "Config",
     load_in_4bit: bool,
     quantized: bool,
+    dispatch: bool = True,
 ):
     """Loads a model and tokenizer from a given model name."""
     logging.info(
@@ -159,8 +160,9 @@ def load_model_and_tokenizer(
             model, {torch.nn.Linear}, dtype=torch.qint8
         )
 
-    device_map = device_manager.get_device_map()
-    model = dispatch_model(model, device_map=device_map)
+    if dispatch:
+        device_map = device_manager.get_device_map()
+        model = dispatch_model(model, device_map=device_map)
 
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")

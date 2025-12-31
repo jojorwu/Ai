@@ -23,7 +23,7 @@ def quantize_model(model_path: str, config_path: str, output_path: str):
     # Load the main configuration
     config = Config.from_json(config_path)
     model, _ = load_model_and_tokenizer(
-        os.path.basename(os.path.dirname(model_path)), config, False, True
+        os.path.basename(os.path.dirname(model_path)), config, False, True, dispatch=False
     )
 
     # Save the quantized model

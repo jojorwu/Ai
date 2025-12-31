@@ -182,6 +182,7 @@ class Transformer(nn.Module):
         """Forward pass of the model."""
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         long_term_memory = ltm_override or self.layers.long_term_memory
+        complexity_score = None
         if ltm_state is None:
             if long_term_memory:
                 ltm_state, complexity_score = long_term_memory(
@@ -191,7 +192,6 @@ class Transformer(nn.Module):
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
-                complexity_score = None
 
         active_layers, final_dynamic_top_k = self._get_dynamic_params(
             complexity_score, dynamic_top_k
