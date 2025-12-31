@@ -25,7 +25,9 @@ class Tokenizer:
         self.vocab_size = 0
         # A pattern that matches any of the special tokens, sorted by length to handle overlaps
         self.special_token_pattern = re.compile(
-            '|'.join(re.escape(token) for token in sorted(self.special_tokens, key=len, reverse=True))
+            '|'.join(re.escape(token) for token in sorted(
+                self.special_tokens, key=len, reverse=True
+            ))
         )
 
         if os.path.isdir(source_path):

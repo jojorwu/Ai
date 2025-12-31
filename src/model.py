@@ -2,6 +2,7 @@
 PyTorch implementation of the main Transformer model.
 """
 import copy
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Generator, Tuple
@@ -156,25 +157,57 @@ class Transformer(nn.Module):
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
-        dynamic_top_k: int = None,
+        dynamic_top_k: int = None, # This is passed in from generation config
         ltm_override: nn.Module | None = None,
     ):
         """Forward pass of the model."""
+        # Initialize dynamic_top_k from the LTM to None
+        dynamic_top_k_ltm = None
+
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
         long_term_memory = ltm_override or self.layers.long_term_memory
+        complexity_score = None
 
         if ltm_state is None:
             if long_term_memory:
-                ltm_state = long_term_memory(h.mean(dim=1, keepdim=True))
+                ltm_state, complexity_score = long_term_memory(h.mean(dim=1, keepdim=True))
             else:
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
+        active_layers = self.config.model.num_layers
+        if (
+            self.config.model.early_exit_thresholds
+            and self.config.model.early_exit_num_layers
+        ):
+            score = self._get_safe_complexity_score(complexity_score)
+            active_layers = self._get_dynamic_parameter(
+                score,
+                self.config.model.early_exit_thresholds,
+                self.config.model.early_exit_num_layers,
+            )
+
+        if (
+            self.config.model.dynamic_moe_thresholds
+            and self.config.model.dynamic_moe_k_values
+        ):
+            score = self._get_safe_complexity_score(complexity_score)
+            dynamic_top_k_ltm = self._get_dynamic_parameter(
+                score,
+                self.config.model.dynamic_moe_thresholds,
+                self.config.model.dynamic_moe_k_values,
+            )
+
+        # Override with generation config if provided
+        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
+
+
         total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i, block in enumerate(self.layers.decoder):
+        for i in range(active_layers):
+            block = self.layers.decoder[i]
             inputs = ForwardPassInput(
-                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=dynamic_top_k
+                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k
             )
             h, aux_loss = block(inputs)
             if aux_loss is not None:
@@ -184,6 +217,33 @@ class Transformer(nn.Module):
         logits = F.linear(h, self.layers.embedding.weight)  # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
+
+    def _get_safe_complexity_score(self, complexity_score: torch.Tensor | None) -> float:
+        """
+        Validates the complexity score tensor and returns a safe scalar value.
+        Logs a warning if the tensor is invalid.
+        """
+        if complexity_score is None or complexity_score.numel() == 0:
+            return 0.0
+
+        if torch.isnan(complexity_score).any() or torch.isinf(complexity_score).any():
+            logging.warning(
+                "Invalid complexity score tensor detected (NaN or Inf). "
+                "Defaulting to 0.0. Tensor: %s",
+                complexity_score,
+            )
+            return 0.0
+
+        return torch.max(complexity_score).item()
+
+    def _get_dynamic_parameter(
+        self, score: float, thresholds: list[float], values: list[int]
+    ) -> int:
+        """Selects a value from a list based on a score and thresholds."""
+        for i, threshold in enumerate(thresholds):
+            if score < threshold:
+                return values[i]
+        return values[-1]
 
     def _sample_from_logits(self, logits, temperature, top_k):
         """Samples a token from logits."""
@@ -239,23 +299,33 @@ class Transformer(nn.Module):
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
     def _validate_and_accept_chunk(self, true_logits, speculative_chunk, inputs):
-        """Validates the speculative chunk and returns the accepted tokens."""
+        """
+        Validates the speculative chunk and returns the accepted tokens.
+        NOTE: This implementation currently only supports a batch size of 1,
+        which matches the constraint of the parent `generate` method.
+        """
+        if speculative_chunk.size(0) != 1:
+            raise NotImplementedError(
+                "The current generate method does not support batch sizes > 1 for speculative decoding."
+            )
+
+        verification_tokens = self._sample_from_logits(
+            true_logits.view(-1, true_logits.size(-1)),
+            inputs.sampling_config.temperature,
+            inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
+        ).view(speculative_chunk.shape)
+
         accepted_tokens = []
         for i in range(speculative_chunk.size(1)):
-            true_next_token_logits = true_logits[:, i, :]
-            draft_token = speculative_chunk[:, i].unsqueeze(-1)
-            resampled_token = self._sample_from_logits(
-                true_next_token_logits,
-                inputs.sampling_config.temperature,
-                inputs.sampling_config.dynamic_top_k
-                or inputs.sampling_config.top_k,
-            )
-            if resampled_token.item() == draft_token.item():
-                accepted_tokens.append(draft_token)
+            draft_token = speculative_chunk[0, i]
+            ver_token = verification_tokens[0, i]
+            if draft_token == ver_token:
+                accepted_tokens.append(draft_token.unsqueeze(0))
             else:
-                accepted_tokens.append(resampled_token)
+                accepted_tokens.append(ver_token.unsqueeze(0))
                 break
-        return torch.cat(accepted_tokens, dim=1) if accepted_tokens else None
+
+        return torch.cat(accepted_tokens, dim=0).unsqueeze(0) if accepted_tokens else None
 
     def generate(self, inputs: GenerateInput) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
@@ -263,9 +333,9 @@ class Transformer(nn.Module):
         Yields chunks of accepted tokens and the surprise value.
         """
         self.eval()
+        draft_model = copy.deepcopy(self)
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
-        draft_model = copy.deepcopy(self)
 
         while total_generated < inputs.max_new_tokens:
             speculative_chunk, draft_tokens = self._generate_speculative_chunk(

@@ -15,6 +15,7 @@ from nn_components.linear import Linear
 from nn_components.moe import MixtureOfExperts
 from nn_components.multi_head_attention import MultiHeadAttention
 from nn_components.rms_norm import RMSNorm
+from nn_components.film import FiLMLayer
 
 
 @dataclass
@@ -50,6 +51,9 @@ class DecoderBlock(nn.Module):
             {'dropout1': Dropout(config.dropout_rate),
              'dropout2': Dropout(config.dropout_rate)}
         )
+        if self.ltm:
+            self.film1 = FiLMLayer(config.d_model, linear_class=linear_class)
+            self.film2 = FiLMLayer(config.d_model, linear_class=linear_class)
 
     def _check_moe_usage(self, config):
         return (config.num_experts is not None and
@@ -88,10 +92,12 @@ class DecoderBlock(nn.Module):
     def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the Decoder Block."""
         aux_loss = torch.tensor(0.0, device=inputs.x.device)
+        x = inputs.x
 
-        # Additive memory injection before the first sub-layer
-        x_with_mem = inputs.x + inputs.ltm_state if self.ltm else inputs.x
-        x_norm1 = self.norm['norm1'](x_with_mem)
+        # First sub-layer: MHA
+        x_norm1 = self.norm['norm1'](x)
+        if self.ltm:
+            x_norm1 = self.film1(x_norm1, inputs.ltm_state)
 
         attn_output = self.mha(
             x_norm1,
@@ -99,11 +105,12 @@ class DecoderBlock(nn.Module):
             kv_cache=inputs.kv_cache,
             layer_idx=inputs.layer_idx,
         )
+        x = x + self.dropout['dropout1'](attn_output)
 
-        # First residual connection
-        x = inputs.x + self.dropout['dropout1'](attn_output)
-
+        # Second sub-layer: FFN
         x_norm2 = self.norm['norm2'](x)
+        if self.ltm:
+            x_norm2 = self.film2(x_norm2, inputs.ltm_state)
 
         if self.use_moe:
             ffn_output, aux_loss = self.ff_layer(

@@ -2,8 +2,9 @@
 Unit tests for the tools library.
 """
 import unittest
-from unittest.mock import MagicMock, patch
-import tools
+from unittest.mock import MagicMock
+
+from src import tools
 
 class TestTools(unittest.TestCase):
     """Tests for the tools."""

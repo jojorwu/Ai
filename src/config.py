@@ -4,7 +4,7 @@ Pydantic models for strong typing and validation of the project configuration.
 import json
 from typing import Any, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class LTMArchitectureConfig(BaseModel):
@@ -36,6 +36,34 @@ class ModelConfig(BaseModel):
         None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(
         None, description="Number of 'experts' to select for each token.")
+    early_exit_thresholds: Optional[list[float]] = Field(
+        None, description="Complexity thresholds for early exit.")
+    early_exit_num_layers: Optional[list[int]] = Field(
+        None, description="Number of layers to use for each complexity level.")
+    dynamic_moe_thresholds: Optional[list[float]] = Field(
+        None, description="Complexity thresholds for dynamic MoE.")
+    dynamic_moe_k_values: Optional[list[int]] = Field(
+        None, description="Number of experts to use for each complexity level.")
+
+    @model_validator(mode='after')
+    def validate_dynamic_architecture(self):
+        """
+        Validates that the lengths of thresholds and corresponding value lists are consistent.
+        """
+        if self.early_exit_thresholds is not None:
+            if not len(self.early_exit_num_layers) == len(self.early_exit_thresholds) + 1:
+                raise ValueError(
+                    "Length of 'early_exit_num_layers' must be exactly one greater than "
+                    "the length of 'early_exit_thresholds'."
+                )
+
+        if self.dynamic_moe_thresholds is not None:
+            if not len(self.dynamic_moe_k_values) == len(self.dynamic_moe_thresholds) + 1:
+                raise ValueError(
+                    "Length of 'dynamic_moe_k_values' must be exactly one greater than "
+                    "the length of 'dynamic_moe_thresholds'."
+                )
+        return self
 
 
 class MultiHeadAttentionConfig(BaseModel):

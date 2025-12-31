@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from nn_components.long_term_memory import LongTermMemory
+from src.nn_components.long_term_memory import LongTermMemory
 
 
 class TestLongTermMemory(unittest.TestCase):
@@ -19,9 +19,10 @@ class TestLongTermMemory(unittest.TestCase):
         ltm = LongTermMemory(d_model, d_hidden, num_layers)
 
         x = torch.randn(4, 1, d_model)  # Batch, SeqLen (1 for summary), Dim
-        output = ltm(x)
+        context, complexity_score = ltm(x)
 
-        self.assertEqual(output.shape, x.shape)
+        self.assertEqual(context.shape, x.shape)
+        self.assertEqual(complexity_score.shape, (4, 1, 1))
 
     def test_backward_pass_computes_grads(self):
         """
@@ -33,10 +34,10 @@ class TestLongTermMemory(unittest.TestCase):
         x = torch.randn(4, 1, d_model, requires_grad=True)
 
         # Forward pass
-        output = ltm(x)
+        context, complexity_score = ltm(x)
 
         # Simulate a loss and backward pass
-        fake_loss = output.sum()
+        fake_loss = context.sum() + complexity_score.sum()
         fake_loss.backward()
 
         # Check that gradients exist for all parameters in the network
