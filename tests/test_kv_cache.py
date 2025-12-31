@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.nn_components.kv_cache import KVCache, KVCacheConfig
+from src.model.layers.kv_cache import KVCache, KVCacheConfig
 
 
 class TestKVCache(unittest.TestCase):

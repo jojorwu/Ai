@@ -9,13 +9,13 @@ from bitsandbytes.nn import Linear4bit
 
 from src.config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
                         MultiHeadAttentionConfig)
-from src.nn_components.dropout import Dropout
-from src.nn_components.feed_forward import FeedForward
-from src.nn_components.linear import Linear
-from src.nn_components.moe import MixtureOfExperts
-from src.nn_components.multi_head_attention import MultiHeadAttention
-from src.nn_components.rms_norm import RMSNorm
-from src.nn_components.film import FiLMLayer
+from src.model.layers.dropout import Dropout
+from src.model.layers.feed_forward import FeedForward
+from src.model.layers.linear import Linear
+from src.model.layers.moe import MixtureOfExperts
+from src.model.layers.multi_head_attention import MultiHeadAttention
+from src.model.layers.rms_norm import RMSNorm
+from src.model.layers.film import FiLMLayer
 
 
 @dataclass

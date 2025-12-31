@@ -11,7 +11,7 @@ from bitsandbytes.optim import Adam8bit
 from torch import nn
 
 from src.config import Config, TransformerConfig
-from src.model import Transformer
+from src.model.model import Transformer
 
 
 @dataclass
@@ -97,7 +97,7 @@ class TestQuantizationIntegration(unittest.TestCase):
         optimizer, policy_loss_fn, value_loss_fn = self._prepare_training(model)
         dummy_input, dummy_policy_target, dummy_value_target = self._get_dummy_data()
 
-        initial_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
+        initial_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
 
         args = TrainingStepArgs(
             model=model,
@@ -110,7 +110,7 @@ class TestQuantizationIntegration(unittest.TestCase):
         )
         self._run_training_step(args)
 
-        updated_weights = model.decoder_blocks[0].mha.wo.weight.clone().detach()
+        updated_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
         weights_updated = not torch.equal(initial_weights, updated_weights)
 
         self.assertTrue(

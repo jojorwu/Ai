@@ -5,7 +5,7 @@ import os
 import shutil
 import unittest
 
-from src.tokenizer import Tokenizer
+from src.data.tokenizer import Tokenizer
 
 class TestTokenizer(unittest.TestCase):
     """Tests for the Tokenizer."""

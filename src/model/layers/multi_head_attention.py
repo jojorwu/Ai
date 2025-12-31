@@ -6,9 +6,9 @@ import torch
 from torch import nn
 
 from src.config import MultiHeadAttentionConfig
-from src.nn_components.attention import ScaledDotProductAttention
-from src.nn_components.linear import Linear
-from src.nn_components.rotary_embedding import apply_rope_embeddings
+from src.model.layers.attention import ScaledDotProductAttention
+from src.model.layers.linear import Linear
+from src.model.layers.rotary_embedding import apply_rope_embeddings
 
 
 class MultiHeadAttention(nn.Module):

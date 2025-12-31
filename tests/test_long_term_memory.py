@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.nn_components.long_term_memory import LongTermMemory
+from src.model.layers.long_term_memory import LongTermMemory
 
 
 class TestLongTermMemory(unittest.TestCase):

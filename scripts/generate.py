@@ -12,14 +12,15 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from src.complexity_manager import ComplexityManager
 from src.config import Config
-from src.model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
-from src.tokenizer import Tokenizer
-from src.tools import execute_tool
-from src.utils import (main_entrypoint, parse_tool_call,
-                       select_model_interactively, setup_logging,
-                       load_model_and_tokenizer)
+from src.data.tokenizer import Tokenizer
+from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
+                           Transformer)
+from src.utils.complexity_manager import ComplexityManager
+from src.utils.core import (load_model_and_tokenizer, main_entrypoint,
+                          parse_tool_call, select_model_interactively,
+                          setup_logging)
+from src.utils.tools import execute_tool
 
 
 @dataclass

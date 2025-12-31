@@ -6,8 +6,8 @@ import unittest
 import torch
 
 from src.config import MultiHeadAttentionConfig
-from src.nn_components.multi_head_attention import MultiHeadAttention
-from src.nn_components.rotary_embedding import precompute_rope_embeddings
+from src.model.layers.multi_head_attention import MultiHeadAttention
+from src.model.layers.rotary_embedding import precompute_rope_embeddings
 
 
 class TestMultiHeadAttention(unittest.TestCase):

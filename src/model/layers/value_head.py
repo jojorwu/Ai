@@ -3,8 +3,8 @@ PyTorch implementation of the Value Head.
 """
 from torch import nn
 
-from src.nn_components.activations import Tanh
-from src.nn_components.linear import Linear
+from src.model.layers.activations import Tanh
+from src.model.layers.linear import Linear
 
 
 class ValueHead(nn.Module):

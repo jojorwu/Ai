@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import torch
 
 from src.config import DecoderBlockConfig
-from src.nn_components.decoder_block import DecoderBlock, ForwardPassInput
+from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 
 
 class TestDecoderBlock(unittest.TestCase):

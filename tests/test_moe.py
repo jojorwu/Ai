@@ -6,7 +6,7 @@ import unittest
 import torch
 
 from src.config import MoEConfig
-from src.nn_components.moe import MixtureOfExperts
+from src.model.layers.moe import MixtureOfExperts
 
 
 class TestMoE(unittest.TestCase):

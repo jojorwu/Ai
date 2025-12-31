@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
-from src.model import GenerateInput, SamplingConfig, Transformer
+from src.model.model import GenerateInput, SamplingConfig, Transformer
 
 
 @dataclass

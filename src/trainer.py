@@ -10,11 +10,11 @@ from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from src.agent_manager import AgentManager, SpecializationConfig
+from src.agent.agent_manager import AgentManager, SpecializationConfig
 from src.config import Config, TransformerConfig
-from src.data_loader import \
+from src.data.data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
-from src.model import Transformer
+from src.model.model import Transformer
 
 
 def create_trainer(

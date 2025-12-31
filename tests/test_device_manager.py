@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from src.config import HardwareConfig
-from src.device_manager import DeviceManager
+from src.utils.device_manager import DeviceManager
 
 
 class TestDeviceManager(unittest.TestCase):

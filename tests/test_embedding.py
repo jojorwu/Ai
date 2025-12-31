@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.nn_components.embedding import Embedding
+from src.model.layers.embedding import Embedding
 
 
 class TestEmbedding(unittest.TestCase):

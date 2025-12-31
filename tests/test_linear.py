@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.nn_components.linear import Linear
+from src.model.layers.linear import Linear
 
 
 class TestLinear(unittest.TestCase):
