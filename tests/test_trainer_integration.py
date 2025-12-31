@@ -45,7 +45,7 @@ def _create_test_config_and_data():
 
     return config, tokenizer, train_data, val_data
 
-class TestTrainerIntegration(unittest.TestCase):
+class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-code
     """
     Tests the Trainer's ability to run pre-training and evolution cycles.
     """
