@@ -7,9 +7,8 @@ import os
 import torch
 import torch.quantization
 
-from src.model import Transformer
-from src.config import Config, TransformerConfig
-from src.tokenizer import Tokenizer
+from src.config import Config
+from src.utils import load_model_and_tokenizer
 
 
 def quantize_model(model_path: str, config_path: str, output_path: str):
@@ -23,34 +22,12 @@ def quantize_model(model_path: str, config_path: str, output_path: str):
     """
     # Load the main configuration
     config = Config.from_json(config_path)
-
-    # Instantiate tokenizer to get vocab size
-    model_dir = os.path.dirname(config_path)
-    tokenizer = Tokenizer(model_dir)
-
-    # Create the TransformerConfig
-    transformer_config = TransformerConfig(
-        vocab_size=tokenizer.vocab_size,
-        model=config.model,
-        vision=config.vision,
-        ltm=config.ltm,
-        tokenizer=tokenizer,
-    )
-
-    # Instantiate the model
-    model = Transformer(transformer_config)
-    model.load_state_dict(torch.load(model_path, map_location='cpu'))
-
-    # Set the model to evaluation mode
-    model.eval()
-
-    # Apply dynamic quantization for CPU
-    quantized_model = torch.quantization.quantize_dynamic(
-        model, {torch.nn.Linear}, dtype=torch.qint8
+    model, _ = load_model_and_tokenizer(
+        os.path.basename(os.path.dirname(model_path)), config, False, True
     )
 
     # Save the quantized model
-    torch.save(quantized_model.state_dict(), output_path)
+    torch.save(model.state_dict(), output_path)
     print(f"Quantized model saved to {output_path}")
 
 

@@ -30,96 +30,98 @@ class ForwardPassInput:
     dynamic_top_k: int = None
 
 
+class AttentionSubLayer(nn.Module):
+    """Encapsulates the Multi-Head Attention sub-layer."""
+    def __init__(self, config: DecoderBlockConfig, linear_class):
+        super().__init__()
+        self.norm = RMSNorm(config.d_model)
+        self.mha = self._create_mha(config, linear_class)
+        self.dropout = Dropout(config.dropout_rate)
+        self.film = (
+            FiLMLayer(config.d_model, linear_class=linear_class)
+            if config.long_term_memory else None
+        )
+
+    def _create_mha(self, config, linear_class):
+        mha_config = MultiHeadAttentionConfig(
+            d_model=config.d_model, num_heads=config.num_heads,
+            num_kv_heads=config.num_kv_heads, rotary_emb=config.rotary_emb,
+            bias=False, num_layers=config.num_layers
+        )
+        return MultiHeadAttention(mha_config, linear_class=linear_class)
+
+    def forward(self, x, ltm_state, mask, kv_cache, layer_idx):
+        """Forward pass for the attention sub-layer."""
+        x_norm = self.norm(x)
+        if self.film:
+            x_norm = self.film(x_norm, ltm_state)
+        attn_output = self.mha(
+            x_norm, mask=mask, kv_cache=kv_cache, layer_idx=layer_idx
+        )
+        return x + self.dropout(attn_output)
+
+class FeedForwardSubLayer(nn.Module):
+    """Encapsulates the Feed-Forward Network sub-layer."""
+    def __init__(self, config: DecoderBlockConfig, use_moe: bool, linear_class):
+        super().__init__()
+        self.norm = RMSNorm(config.d_model)
+        self.ff_layer = self._create_ff_layer(config, use_moe, linear_class)
+        self.dropout = Dropout(config.dropout_rate)
+        self.film = (
+            FiLMLayer(config.d_model, linear_class=linear_class)
+            if config.long_term_memory else None
+        )
+        self.use_moe = use_moe
+
+    def _create_ff_layer(self, config, use_moe, linear_class):
+        if use_moe:
+            moe_config = MoEConfig(
+                d_model=config.d_model, d_ff=config.d_ff,
+                num_experts=config.num_experts, top_k=config.top_k_experts,
+                bias=False
+            )
+            return MixtureOfExperts(moe_config, linear_class=linear_class)
+        ffn_config = FeedForwardConfig(
+            d_model=config.d_model, d_ff=config.d_ff, bias=False,
+            num_layers=config.num_layers
+        )
+        return FeedForward(ffn_config, linear_class=linear_class)
+
+    def forward(self, x, ltm_state, dynamic_top_k):
+        """Forward pass for the feed-forward sub-layer."""
+        aux_loss = torch.tensor(0.0, device=x.device)
+        x_norm = self.norm(x)
+        if self.film:
+            x_norm = self.film(x_norm, ltm_state)
+        if self.use_moe:
+            ffn_output, aux_loss = self.ff_layer(
+                x_norm, dynamic_top_k=dynamic_top_k
+            )
+        else:
+            ffn_output = self.ff_layer(x_norm)
+        return x + self.dropout(ffn_output), aux_loss
+
+
 class DecoderBlock(nn.Module):
     """
     Implements a single Transformer Decoder block, migrated to PyTorch.
     """
     def __init__(self, config: DecoderBlockConfig):
         super().__init__()
-        self.config = config
-        self.ltm = config.long_term_memory
-        self.use_moe = self._check_moe_usage(config)
-
+        self.use_moe = (
+            config.num_experts is not None and config.top_k_experts is not None and
+            config.num_experts > 0
+        )
         linear_class = Linear4bit if config.load_in_4bit else Linear
-        self.mha = self._create_mha(config, linear_class)
-        self.ff_layer = self._create_ff_layer(config, linear_class)
-        self.norm = nn.ModuleDict(
-            {'norm1': RMSNorm(config.d_model),
-             'norm2': RMSNorm(config.d_model)}
-        )
-        self.dropout = nn.ModuleDict(
-            {'dropout1': Dropout(config.dropout_rate),
-             'dropout2': Dropout(config.dropout_rate)}
-        )
-        if self.ltm:
-            self.film1 = FiLMLayer(config.d_model, linear_class=linear_class)
-            self.film2 = FiLMLayer(config.d_model, linear_class=linear_class)
-
-    def _check_moe_usage(self, config):
-        return (config.num_experts is not None and
-                config.top_k_experts is not None and
-                config.num_experts > 0)
-
-    def _create_mha(self, config, linear_class):
-        mha_config = MultiHeadAttentionConfig(
-            d_model=config.d_model,
-            num_heads=config.num_heads,
-            num_kv_heads=config.num_kv_heads,
-            rotary_emb=config.rotary_emb,
-            bias=False,
-            num_layers=config.num_layers
-        )
-        return MultiHeadAttention(mha_config, linear_class=linear_class)
-
-    def _create_ff_layer(self, config, linear_class):
-        if self.use_moe:
-            moe_config = MoEConfig(
-                d_model=config.d_model,
-                d_ff=config.d_ff,
-                num_experts=config.num_experts,
-                top_k=config.top_k_experts,
-                bias=False
-            )
-            return MixtureOfExperts(moe_config, linear_class=linear_class)
-        ffn_config = FeedForwardConfig(
-            d_model=config.d_model,
-            d_ff=config.d_ff,
-            bias=False,
-            num_layers=config.num_layers
-        )
-        return FeedForward(ffn_config, linear_class=linear_class)
+        self.attention_sublayer = AttentionSubLayer(config, linear_class)
+        self.ff_sublayer = FeedForwardSubLayer(config, self.use_moe, linear_class)
 
     def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the Decoder Block."""
-        aux_loss = torch.tensor(0.0, device=inputs.x.device)
-        x = inputs.x
-
-        # First sub-layer: MHA
-        x_norm1 = self.norm['norm1'](x)
-        if self.ltm:
-            x_norm1 = self.film1(x_norm1, inputs.ltm_state)
-
-        attn_output = self.mha(
-            x_norm1,
-            mask=inputs.mask,
-            kv_cache=inputs.kv_cache,
-            layer_idx=inputs.layer_idx,
+        x = self.attention_sublayer(
+            inputs.x, inputs.ltm_state, inputs.mask, inputs.kv_cache, inputs.layer_idx
         )
-        x = x + self.dropout['dropout1'](attn_output)
-
-        # Second sub-layer: FFN
-        x_norm2 = self.norm['norm2'](x)
-        if self.ltm:
-            x_norm2 = self.film2(x_norm2, inputs.ltm_state)
-
-        if self.use_moe:
-            ffn_output, aux_loss = self.ff_layer(
-                x_norm2, dynamic_top_k=inputs.dynamic_top_k
-            )
-        else:
-            ffn_output = self.ff_layer(x_norm2)
-
-        # Second residual connection
-        x = x + self.dropout['dropout2'](ffn_output)
-
+        x, aux_loss = self.ff_sublayer(
+            x, inputs.ltm_state, inputs.dynamic_top_k
+        )
         return x, aux_loss

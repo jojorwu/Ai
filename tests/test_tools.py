@@ -34,7 +34,7 @@ class TestTools(unittest.TestCase):
         args = {"command": "ls -l"}
         result = tools.execute_tool("execute_shell", args)
 
-        tools.AVAILABLE_TOOLS['execute_shell'].assert_called_once_with(**args)
+        tools.AVAILABLE_TOOLS['execute_shell'].assert_called_once_with(**args)  # pylint: disable=no-member
         self.assertEqual(result, "Success from mock")
 
         # Restore the original function to avoid side effects in other tests

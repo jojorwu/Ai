@@ -153,35 +153,16 @@ class Transformer(nn.Module):
             load_in_4bit=load_in_4bit,
         )
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        ltm_state: torch.Tensor = None,
-        dynamic_top_k: int = None, # This is passed in from generation config
-        ltm_override: nn.Module | None = None,
-    ):
-        """Forward pass of the model."""
-        # Initialize dynamic_top_k from the LTM to None
+    def _get_dynamic_params(self, complexity_score, dynamic_top_k):
+        """Gets dynamic parameters for the forward pass."""
+        active_layers = self.config.model.num_layers
         dynamic_top_k_ltm = None
 
-        h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
-        long_term_memory = ltm_override or self.layers.long_term_memory
-        complexity_score = None
-
-        if ltm_state is None:
-            if long_term_memory:
-                ltm_state, complexity_score = long_term_memory(h.mean(dim=1, keepdim=True))
-            else:
-                ltm_state = torch.zeros(
-                    (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
-                )
-
-        active_layers = self.config.model.num_layers
+        score = self._get_safe_complexity_score(complexity_score)
         if (
             self.config.model.early_exit_thresholds
             and self.config.model.early_exit_num_layers
         ):
-            score = self._get_safe_complexity_score(complexity_score)
             active_layers = self._get_dynamic_parameter(
                 score,
                 self.config.model.early_exit_thresholds,
@@ -192,29 +173,56 @@ class Transformer(nn.Module):
             self.config.model.dynamic_moe_thresholds
             and self.config.model.dynamic_moe_k_values
         ):
-            score = self._get_safe_complexity_score(complexity_score)
             dynamic_top_k_ltm = self._get_dynamic_parameter(
                 score,
                 self.config.model.dynamic_moe_thresholds,
                 self.config.model.dynamic_moe_k_values,
             )
+        final_dynamic_top_k = (
+            dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
+        )
+        return active_layers, final_dynamic_top_k
 
-        # Override with generation config if provided
-        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
+    def forward(
+        self,
+        x: torch.Tensor,
+        ltm_state: torch.Tensor = None,
+        dynamic_top_k: int = None, # This is passed in from generation config
+        ltm_override: nn.Module | None = None,
+    ):
+        """Forward pass of the model."""
+        h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
+        long_term_memory = ltm_override or self.layers.long_term_memory
+        complexity_score = None
+        if ltm_state is None:
+            if long_term_memory:
+                ltm_state, complexity_score = long_term_memory(
+                    h.mean(dim=1, keepdim=True)
+                )
+            else:
+                ltm_state = torch.zeros(
+                    (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
+                )
 
+        active_layers, final_dynamic_top_k = self._get_dynamic_params(
+            complexity_score, dynamic_top_k
+        )
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
             inputs = ForwardPassInput(
-                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k
+                x=h,
+                ltm_state=ltm_state,
+                layer_idx=i,
+                dynamic_top_k=final_dynamic_top_k,
             )
             h, aux_loss = block(inputs)
             if aux_loss is not None:
                 total_aux_loss += aux_loss
 
         h = self.layers.final_norm(h)
-        logits = F.linear(h, self.layers.embedding.weight)  # pylint: disable=not-callable
+        logits = F.linear(h, self.layers.embedding.weight) # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 
@@ -306,7 +314,7 @@ class Transformer(nn.Module):
         """
         if speculative_chunk.size(0) != 1:
             raise NotImplementedError(
-                "The current generate method does not support batch sizes > 1 for speculative decoding."
+                "Speculative decoding only supports batch size 1."
             )
 
         verification_tokens = self._sample_from_logits(

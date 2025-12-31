@@ -3,9 +3,7 @@ PyTorch implementation of the Linear layer.
 """
 import math
 
-import torch
 from torch import nn
-from torch.nn import functional as F
 
 
 class Linear(nn.Linear):

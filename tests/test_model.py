@@ -50,7 +50,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=speculative_chunk):
-            accepted_chunk = self.model._validate_and_accept_chunk(
+            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             self.assertTrue(torch.equal(accepted_chunk, speculative_chunk))
@@ -70,7 +70,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk(
+            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = torch.cat(
@@ -92,7 +92,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk(
+            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = verification_tokens[:, 0].unsqueeze(-1)
@@ -103,45 +103,50 @@ class TestTransformer(unittest.TestCase):
         Tests that the model correctly skips layers based on the complexity score.
         """
         # Low complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_low_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                self.assertEqual(mock_decoder_forward.call_count, 2)
+                self.assertEqual(mock.call_count, 2)
 
         # Medium complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_med_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                self.assertEqual(mock_decoder_forward.call_count, 6)
+                self.assertEqual(mock.call_count, 6)
 
         # High complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_high_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                self.assertEqual(mock_decoder_forward.call_count, 12)
+                self.assertEqual(mock.call_count, 12)
 
     def test_dynamic_expert_allocation(self):
         """
         Tests that the model correctly allocates experts based on the complexity score.
         """
         # Low complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_low_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.1]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_low_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                # Check that the dynamic_top_k argument in the first call matches the expected value
-                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 2)
+                self.assertEqual(mock.call_args[0][0].dynamic_top_k, 2)
 
         # Medium complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_med_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.4]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_med_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 4)
+                self.assertEqual(mock.call_args[0][0].dynamic_top_k, 4)
 
         # High complexity
-        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))):
-            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+        ltm_high_complexity = (torch.randn(1, 1, 64), torch.tensor([[[0.8]]]))
+        with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_high_complexity):
+            with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
-                self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, 8)
+                self.assertEqual(mock.call_args[0][0].dynamic_top_k, 8)
 
     def test_forward_pass_handles_invalid_complexity_score(self):
         """
@@ -156,15 +161,13 @@ class TestTransformer(unittest.TestCase):
 
         for score in invalid_scores:
             with self.subTest(score=score):
-                with patch.object(self.model.layers.long_term_memory, 'forward', return_value=(torch.randn(1, 1, 64), score)):
-                    with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder_forward:
+                ltm_output = (torch.randn(1, 1, 64), score)
+                with patch.object(self.model.layers.long_term_memory, 'forward', return_value=ltm_output):
+                    with patch('src.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock:
                         self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
 
-                        # An invalid score defaults to 0.0, which means "lowest complexity".
-                        # It should run the minimum number of layers.
                         min_layers = self.config.model.early_exit_num_layers[0]
-                        self.assertEqual(mock_decoder_forward.call_count, min_layers)
+                        self.assertEqual(mock.call_count, min_layers)
 
-                        # It should also use the minimum number of experts.
                         min_experts = self.config.model.dynamic_moe_k_values[0]
-                        self.assertEqual(mock_decoder_forward.call_args[0][0].dynamic_top_k, min_experts)
+                        self.assertEqual(mock.call_args[0][0].dynamic_top_k, min_experts)
