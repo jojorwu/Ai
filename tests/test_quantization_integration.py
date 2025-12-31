@@ -10,8 +10,8 @@ from accelerate import Accelerator, dispatch_model, init_empty_weights
 from bitsandbytes.optim import Adam8bit
 from torch import nn
 
-from config import Config, TransformerConfig
-from model import Transformer
+from src.config import Config, TransformerConfig
+from src.model import Transformer
 
 
 @dataclass

@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from nn_components.attention import ScaledDotProductAttention
+from src.nn_components.attention import ScaledDotProductAttention
 
 
 class TestScaledDotProductAttention(unittest.TestCase):

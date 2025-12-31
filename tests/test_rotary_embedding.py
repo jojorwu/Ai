@@ -5,8 +5,8 @@ import unittest
 
 import torch
 
-from nn_components.rotary_embedding import (apply_rope_embeddings,
-                                            precompute_rope_embeddings)
+from src.nn_components.rotary_embedding import (apply_rope_embeddings,
+                                                precompute_rope_embeddings)
 
 
 class TestRotaryEmbedding(unittest.TestCase):

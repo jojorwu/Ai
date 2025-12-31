@@ -5,9 +5,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from config import FeedForwardConfig, MoEConfig
-from nn_components.feed_forward import FeedForward
-from nn_components.linear import Linear
+from src.config import FeedForwardConfig, MoEConfig
+from src.nn_components.feed_forward import FeedForward
+from src.nn_components.linear import Linear
 
 
 class MixtureOfExperts(nn.Module):

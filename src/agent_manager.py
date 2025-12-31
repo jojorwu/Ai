@@ -10,9 +10,9 @@ import torch
 from accelerate import Accelerator
 from torch import nn
 
-from agent import Agent
-from data_loader import get_batches_torch
-from model import Transformer
+from src.agent import Agent
+from src.data_loader import get_batches_torch
+from src.model import Transformer
 
 
 @dataclass

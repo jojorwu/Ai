@@ -12,14 +12,14 @@ from torch import nn
 from torch.nn import functional as F
 from bitsandbytes.nn import Linear4bit
 
-from config import DecoderBlockConfig, TransformerConfig
-from nn_components.decoder_block import DecoderBlock, ForwardPassInput
-from nn_components.embedding import Embedding
-from nn_components.linear import Linear
-from nn_components.long_term_memory import LongTermMemory
-from nn_components.rms_norm import RMSNorm
-from nn_components.rotary_embedding import precompute_rope_embeddings
-from nn_components.value_head import ValueHead
+from src.config import DecoderBlockConfig, TransformerConfig
+from src.nn_components.decoder_block import DecoderBlock, ForwardPassInput
+from src.nn_components.embedding import Embedding
+from src.nn_components.linear import Linear
+from src.nn_components.long_term_memory import LongTermMemory
+from src.nn_components.rms_norm import RMSNorm
+from src.nn_components.rotary_embedding import precompute_rope_embeddings
+from src.nn_components.value_head import ValueHead
 
 
 @dataclass

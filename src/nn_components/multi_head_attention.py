@@ -5,10 +5,10 @@ and Rotary Positional Embeddings (RoPE).
 import torch
 from torch import nn
 
-from config import MultiHeadAttentionConfig
-from nn_components.attention import ScaledDotProductAttention
-from nn_components.linear import Linear
-from nn_components.rotary_embedding import apply_rope_embeddings
+from src.config import MultiHeadAttentionConfig
+from src.nn_components.attention import ScaledDotProductAttention
+from src.nn_components.linear import Linear
+from src.nn_components.rotary_embedding import apply_rope_embeddings
 
 
 class MultiHeadAttention(nn.Module):

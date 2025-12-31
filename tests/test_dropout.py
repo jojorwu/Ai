@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from nn_components.dropout import Dropout
+from src.nn_components.dropout import Dropout
 
 
 class TestDropout(unittest.TestCase):

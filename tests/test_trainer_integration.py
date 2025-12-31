@@ -6,8 +6,8 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from config import Config
-from trainer import create_trainer, DataComponents
+from src.config import Config
+from src.trainer import create_trainer, DataComponents
 
 
 def _create_test_config_and_data():

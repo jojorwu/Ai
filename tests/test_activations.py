@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from nn_components.activations import Tanh
+from src.nn_components.activations import Tanh
 
 
 class TestActivations(unittest.TestCase):

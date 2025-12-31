@@ -7,15 +7,15 @@ import torch
 from torch import nn
 from bitsandbytes.nn import Linear4bit
 
-from config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
-                    MultiHeadAttentionConfig)
-from nn_components.dropout import Dropout
-from nn_components.feed_forward import FeedForward
-from nn_components.linear import Linear
-from nn_components.moe import MixtureOfExperts
-from nn_components.multi_head_attention import MultiHeadAttention
-from nn_components.rms_norm import RMSNorm
-from nn_components.film import FiLMLayer
+from src.config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
+                        MultiHeadAttentionConfig)
+from src.nn_components.dropout import Dropout
+from src.nn_components.feed_forward import FeedForward
+from src.nn_components.linear import Linear
+from src.nn_components.moe import MixtureOfExperts
+from src.nn_components.multi_head_attention import MultiHeadAttention
+from src.nn_components.rms_norm import RMSNorm
+from src.nn_components.film import FiLMLayer
 
 
 @dataclass

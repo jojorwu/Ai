@@ -5,8 +5,8 @@ import unittest
 
 import torch
 
-from config import FeedForwardConfig
-from nn_components.feed_forward import FeedForward
+from src.config import FeedForwardConfig
+from src.nn_components.feed_forward import FeedForward
 
 
 class TestFeedForward(unittest.TestCase):
