@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from typing import List
 
 import torch
-from accelerate import Accelerator
+from accelerate import Accelerator, dispatch_model, init_empty_weights
 
 from src.complexity_manager import ComplexityManager
 from src.config import Config, TransformerConfig
+from src.device_manager import DeviceManager
 from src.model import GenerateInput, SamplingConfig, SpeculativeConfig, Transformer
 from src.tokenizer import Tokenizer
 from src.tools import execute_tool
@@ -50,42 +51,34 @@ def load_model_and_tokenizer(
         ltm=config.ltm,
         tokenizer=tokenizer,
     )
-    model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+    device_manager = DeviceManager(config.hardware)
+    if device_manager.should_disable_4bit():
+        if load_in_4bit:
+            logging.warning("4-bit quantization is not supported on this hardware, disabling.")
+            load_in_4bit = False
+
+    with init_empty_weights():
+        model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+
+    weights_path = os.path.join(model_dir, "best_model.pt")
+    if not os.path.exists(weights_path):
+        weights_path = os.path.join(model_dir, "model.pt")
+
+    if not os.path.exists(weights_path):
+        raise FileNotFoundError(f"No weights file found in {model_dir}")
+
+    model.load_state_dict(
+        torch.load(weights_path, map_location="cpu"), strict=False
+    )
 
     if quantized:
-        quantized_weights_path = os.path.join(model_dir, "quantized_model.pt")
-        if os.path.exists(quantized_weights_path):
-            logging.info("Loading pre-quantized model from %s", quantized_weights_path)
-            model = torch.quantization.quantize_dynamic(
-                model, {torch.nn.Linear}, dtype=torch.qint8
-            )
-            model.load_state_dict(
-                torch.load(quantized_weights_path, map_location="cpu")
-            )
-        else:
-            logging.warning(
-                "No quantized model found. Loading standard model and quantizing on the fly."
-            )
-            weights_path = os.path.join(model_dir, "best_model.pt")
-            if not os.path.exists(weights_path):
-                weights_path = os.path.join(model_dir, "model.pt")
-            model.load_state_dict(
-                torch.load(weights_path, map_location="cpu"), strict=False
-            )
-            model = torch.quantization.quantize_dynamic(
-                model, {torch.nn.Linear}, dtype=torch.qint8
-            )
-    else:
-        weights_path = os.path.join(model_dir, "best_model.pt")
-        if not os.path.exists(weights_path):
-            weights_path = os.path.join(model_dir, "model.pt")
-        if not os.path.exists(weights_path):
-            raise FileNotFoundError(f"No weights file found in {model_dir}")
-        model.load_state_dict(
-            torch.load(weights_path, map_location="cpu"), strict=False
+        model = torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
         )
 
-    model = accelerator.prepare(model)
+    device_map = device_manager.get_device_map()
+    model = dispatch_model(model, device_map=device_map)
+
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
