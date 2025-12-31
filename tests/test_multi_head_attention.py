@@ -53,9 +53,9 @@ class TestMultiHeadAttention(unittest.TestCase):
         fake_loss.backward()
 
         # Check that gradients exist for the projection weights and biases
-        self.assertIsNotNone(mha.qkv_proj.weights.grad)
+        self.assertIsNotNone(mha.qkv_proj.weight.grad)
         self.assertIsNotNone(mha.qkv_proj.bias.grad)
-        self.assertIsNotNone(mha.wo.weights.grad)
+        self.assertIsNotNone(mha.wo.weight.grad)
         self.assertIsNotNone(mha.wo.bias.grad)
 
         self.assertIsNotNone(x.grad)

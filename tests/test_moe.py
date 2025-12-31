@@ -42,7 +42,7 @@ class TestMoE(unittest.TestCase):
         fake_loss.backward()
 
         # Check gradients for the gating network
-        self.assertIsNotNone(moe.gate.weights.grad)
+        self.assertIsNotNone(moe.gate.weight.grad)
         self.assertIsNotNone(moe.gate.bias.grad)
 
         # Check gradients for at least one expert

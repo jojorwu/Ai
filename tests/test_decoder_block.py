@@ -61,8 +61,8 @@ class TestDecoderBlock(unittest.TestCase):
 
         # Check gradients for some key parameters
         # MHA gradients
-        self.assertIsNotNone(decoder_block.mha.qkv_proj.weights.grad)
-        self.assertIsNotNone(decoder_block.mha.wo.weights.grad)
+        self.assertIsNotNone(decoder_block.mha.qkv_proj.weight.grad)
+        self.assertIsNotNone(decoder_block.mha.wo.weight.grad)
 
         # Norm gradients
         self.assertIsNotNone(decoder_block.norm['norm1'].gamma.grad)
@@ -70,12 +70,12 @@ class TestDecoderBlock(unittest.TestCase):
 
         # FiLM gradients
         if decoder_block.ltm:
-            self.assertIsNotNone(decoder_block.film1.projection.weights.grad)
-            self.assertIsNotNone(decoder_block.film2.projection.weights.grad)
+            self.assertIsNotNone(decoder_block.film1.projection.weight.grad)
+            self.assertIsNotNone(decoder_block.film2.projection.weight.grad)
 
         # MoE/FFN gradients
         if decoder_block.use_moe:
-            self.assertIsNotNone(decoder_block.ff_layer.gate.weights.grad)
+            self.assertIsNotNone(decoder_block.ff_layer.gate.weight.grad)
             self.assertTrue(
                 any(
                     p.grad is not None
