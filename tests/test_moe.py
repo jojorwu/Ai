@@ -5,8 +5,8 @@ import unittest
 
 import torch
 
-from config import MoEConfig
-from nn_components.moe import MixtureOfExperts
+from src.config import MoEConfig
+from src.model.layers.moe import MixtureOfExperts
 
 
 class TestMoE(unittest.TestCase):

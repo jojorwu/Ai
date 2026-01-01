@@ -12,14 +12,15 @@ from torch import nn
 from torch.nn import functional as F
 from bitsandbytes.nn import Linear4bit
 
-from config import DecoderBlockConfig, TransformerConfig
-from nn_components.decoder_block import DecoderBlock, ForwardPassInput
-from nn_components.embedding import Embedding
-from nn_components.linear import Linear
-from nn_components.long_term_memory import LongTermMemory
-from nn_components.rms_norm import RMSNorm
-from nn_components.rotary_embedding import precompute_rope_embeddings
-from nn_components.value_head import ValueHead
+from src.config import DecoderBlockConfig, TransformerConfig
+from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
+from src.model.layers.embedding import Embedding
+from src.model.layers.gating import GatingNetwork
+from src.model.layers.linear import Linear
+from src.model.layers.long_term_memory import LongTermMemory
+from src.model.layers.rms_norm import RMSNorm
+from src.model.layers.rotary_embedding import precompute_rope_embeddings
+from src.model.layers.value_head import ValueHead
 
 
 @dataclass
@@ -36,6 +37,7 @@ class ModelLayers(nn.Module):
         super().__init__()
         self.embedding: Embedding = layers["embedding"]
         self.long_term_memory: LongTermMemory = layers["long_term_memory"]
+        self.gating_network: GatingNetwork = layers["gating_network"]
         self.decoder: nn.ModuleList = layers["decoder"]
         self.final_norm: RMSNorm = layers["final_norm"]
         self.value_head: ValueHead = layers["value_head"]
@@ -76,8 +78,14 @@ class GenerateInput:
 
 class Transformer(nn.Module):
     """
-    Full GPT-style (decoder-only) Transformer model, migrated to PyTorch.
+    A decoder-only Transformer model with a dual-head architecture for policy and
+    value prediction. It supports dynamic layer skipping and Mixture of Experts (MoE)
+    allocation based on a complexity score from its Long-Term Memory (LTM).
+
+    The model is designed for agent-based learning and supports speculative decoding
+    to accelerate generation.
     """
+
     _no_split_modules = ["DecoderBlock"]
 
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
@@ -86,6 +94,33 @@ class Transformer(nn.Module):
         self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
+        self.draft_model = self._create_draft_model(config, load_in_4bit)
+
+    def _create_draft_model(
+        self, config: TransformerConfig, load_in_4bit: bool
+    ) -> "Transformer|None":
+        """
+        Creates a smaller, faster 'draft' model for speculative decoding.
+        This model is created once during initialization to avoid the expensive
+        `copy.deepcopy()` operation during generation.
+
+        The draft model has fewer layers, making it faster but less accurate.
+        If the base model is already too small, no draft model is created.
+        """
+        if config.model.num_layers < 2:
+            return None # Don't create a draft model for very small models.
+
+        draft_config_dict = config.model_dump()
+        # Reduce the number of layers for the draft model, e.g., by half.
+        draft_config_dict["model"]["num_layers"] //= 2
+
+        draft_config = TransformerConfig(**draft_config_dict)
+
+        logging.info(
+            "Creating a draft model with %d layers.",
+            draft_config.model.num_layers,
+        )
+        return Transformer(draft_config, load_in_4bit)
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
@@ -98,6 +133,11 @@ class Transformer(nn.Module):
         value_head_linear_class = Linear4bit if load_in_4bit else Linear
 
         embedding = Embedding(config.vocab_size, config.model.d_model)
+        gating_network = GatingNetwork(
+            d_model=config.model.d_model,
+            num_layers=config.model.num_layers,
+            num_experts=config.model.num_experts,
+        )
         decoder = nn.ModuleList(
             [DecoderBlock(decoder_config) for _ in range(config.model.num_layers)]
         )
@@ -109,6 +149,7 @@ class Transformer(nn.Module):
         layers_dict = {
             "embedding": embedding,
             "long_term_memory": ltm,
+            "gating_network": gating_network,
             "decoder": decoder,
             "final_norm": final_norm,
             "value_head": value_head,
@@ -153,97 +194,81 @@ class Transformer(nn.Module):
             load_in_4bit=load_in_4bit,
         )
 
-    def forward(
+    def forward( # pylint: disable=too-many-locals
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
-        dynamic_top_k: int = None, # This is passed in from generation config
+        dynamic_top_k: int = None,  # This is passed in from generation config
         ltm_override: nn.Module | None = None,
-    ):
-        """Forward pass of the model."""
-        # Initialize dynamic_top_k from the LTM to None
-        dynamic_top_k_ltm = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Performs the forward pass of the Transformer model.
 
+        This method includes the logic for dynamic architecture adjustments,
+        such as layer skipping and adaptive MoE, based on the LTM's complexity score.
+
+        Args:
+            x: Input tensor of token IDs.
+            ltm_state: An optional pre-computed state from the Long-Term Memory.
+                       If None, it will be computed from the input `x`.
+            dynamic_top_k: An optional integer to override the dynamic MoE k-value.
+            ltm_override: An optional LTM module to use instead of the model's default.
+                          This is used for agent-specific LTMs.
+
+        Returns:
+            A tuple containing:
+            - logits: The output logits for the next token prediction.
+            - value: The predicted value from the value head.
+            - total_aux_loss: The auxiliary loss from the MoE layers.
+        """
+        # 1. Get token embeddings
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
-        long_term_memory = ltm_override or self.layers.long_term_memory
-        complexity_score = None
 
+        # 2. Determine and compute the Long-Term Memory state
+        long_term_memory = ltm_override or self.layers.long_term_memory
         if ltm_state is None:
             if long_term_memory:
-                ltm_state, complexity_score = long_term_memory(h.mean(dim=1, keepdim=True))
+                # If no LTM state is provided, compute it from the input sequence
+                ltm_state, _ = long_term_memory(
+                    h.mean(dim=1, keepdim=True) # Use mean of sequence as summary
+                )
             else:
+                # If there's no LTM, use a zero tensor as a placeholder
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
-        active_layers = self.config.model.num_layers
-        if (
-            self.config.model.early_exit_thresholds
-            and self.config.model.early_exit_num_layers
-        ):
-            score = self._get_safe_complexity_score(complexity_score)
-            active_layers = self._get_dynamic_parameter(
-                score,
-                self.config.model.early_exit_thresholds,
-                self.config.model.early_exit_num_layers,
-            )
+        # 3. Get dynamic parameters from the GatingNetwork
+        active_layers_tensor, moe_top_k = self.layers.gating_network(ltm_state)
+        # For the decoder loop, we need a single integer. Since generation has a
+        # batch size of 1, taking the max works for both cases.
+        active_layers = int(torch.max(active_layers_tensor).item())
 
-        if (
-            self.config.model.dynamic_moe_thresholds
-            and self.config.model.dynamic_moe_k_values
-        ):
-            score = self._get_safe_complexity_score(complexity_score)
-            dynamic_top_k_ltm = self._get_dynamic_parameter(
-                score,
-                self.config.model.dynamic_moe_thresholds,
-                self.config.model.dynamic_moe_k_values,
-            )
+        # Generation config can override the LTM's dynamic selection
+        final_dynamic_top_k_tensor = dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        # For the MoE layer, we need a single integer.
+        final_dynamic_top_k = int(torch.max(final_dynamic_top_k_tensor).item())
 
-        # Override with generation config if provided
-        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
 
+        # 4. Pass through the dynamically selected number of decoder blocks
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
             inputs = ForwardPassInput(
-                x=h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k
+                x=h,
+                ltm_state=ltm_state,
+                layer_idx=i,
+                dynamic_top_k=final_dynamic_top_k,
             )
             h, aux_loss = block(inputs)
             if aux_loss is not None:
                 total_aux_loss += aux_loss
 
         h = self.layers.final_norm(h)
-        logits = F.linear(h, self.layers.embedding.weight)  # pylint: disable=not-callable
+        logits = F.linear(h, self.layers.embedding.weight) # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
-
-    def _get_safe_complexity_score(self, complexity_score: torch.Tensor | None) -> float:
-        """
-        Validates the complexity score tensor and returns a safe scalar value.
-        Logs a warning if the tensor is invalid.
-        """
-        if complexity_score is None or complexity_score.numel() == 0:
-            return 0.0
-
-        if torch.isnan(complexity_score).any() or torch.isinf(complexity_score).any():
-            logging.warning(
-                "Invalid complexity score tensor detected (NaN or Inf). "
-                "Defaulting to 0.0. Tensor: %s",
-                complexity_score,
-            )
-            return 0.0
-
-        return torch.max(complexity_score).item()
-
-    def _get_dynamic_parameter(
-        self, score: float, thresholds: list[float], values: list[int]
-    ) -> int:
-        """Selects a value from a list based on a score and thresholds."""
-        for i, threshold in enumerate(thresholds):
-            if score < threshold:
-                return values[i]
-        return values[-1]
 
     def _sample_from_logits(self, logits, temperature, top_k):
         """Samples a token from logits."""
@@ -281,13 +306,28 @@ class Transformer(nn.Module):
         long_term_memory.zero_grad()
         return surprise
 
-    def _generate_speculative_chunk(self, draft_model, tokens, inputs):
-        """Generates a speculative chunk of tokens."""
+    def _generate_speculative_chunk(
+        self, draft_model: "Transformer", tokens: torch.Tensor, inputs: GenerateInput
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Generates a small 'draft' chunk of tokens using a faster, smaller model.
+
+        Args:
+            draft_model: The smaller, faster model used for generating speculative tokens.
+            tokens: The current sequence of tokens generated so far.
+            inputs: The main input object containing generation configurations.
+
+        Returns:
+            A tuple containing:
+            - The newly generated speculative chunk.
+            - The full sequence including the speculative chunk.
+        """
         draft_tokens = tokens
         with torch.no_grad():
             for _ in range(inputs.speculative_config.speculative_steps):
+                # Generate one token at a time with the draft model
                 draft_logits, _, _ = draft_model(
-                    draft_tokens[:, -self.config.model.max_seq_len:]
+                    draft_tokens[:, -self.config.model.max_seq_len :]
                 )
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
@@ -296,19 +336,36 @@ class Transformer(nn.Module):
                     or inputs.sampling_config.top_k,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
+        # Return only the newly generated tokens and the full draft sequence
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
-    def _validate_and_accept_chunk(self, true_logits, speculative_chunk, inputs):
+    def _validate_and_accept_chunk(
+        self,
+        true_logits: torch.Tensor,
+        speculative_chunk: torch.Tensor,
+        inputs: GenerateInput,
+    ) -> torch.Tensor | None:
         """
-        Validates the speculative chunk and returns the accepted tokens.
-        NOTE: This implementation currently only supports a batch size of 1,
-        which matches the constraint of the parent `generate` method.
+        Validates a speculative chunk against logits from the main model.
+
+        It compares the tokens proposed by the draft model with tokens sampled from
+        the main model's logits. Tokens are accepted up to the first mismatch.
+
+        Args:
+            true_logits: The logits produced by the main model for the speculative sequence.
+            speculative_chunk: The chunk of tokens generated by the draft model.
+            inputs: The main input object containing sampling configurations.
+
+        Returns:
+            A tensor containing the sequence of accepted tokens, which may be shorter
+            than the original speculative chunk.
         """
         if speculative_chunk.size(0) != 1:
             raise NotImplementedError(
-                "The current generate method does not support batch sizes > 1 for speculative decoding."
+                "Speculative decoding only supports batch size 1."
             )
 
+        # Sample verification tokens from the main model's logits
         verification_tokens = self._sample_from_logits(
             true_logits.view(-1, true_logits.size(-1)),
             inputs.sampling_config.temperature,
@@ -333,7 +390,8 @@ class Transformer(nn.Module):
         Yields chunks of accepted tokens and the surprise value.
         """
         self.eval()
-        draft_model = copy.deepcopy(self)
+        # Use the pre-initialized draft model, or default to self if it's not available.
+        draft_model = self.draft_model or self
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
 
@@ -368,6 +426,24 @@ class Transformer(nn.Module):
                 yield next_token, surprise
                 tokens = torch.cat((tokens, next_token), dim=1)
                 total_generated += 1
+
+    def train(self, mode: bool = True):
+        """
+        Overrides the default `train` method to also set the mode for the draft model.
+        """
+        super().train(mode)
+        if self.draft_model:
+            self.draft_model.train(mode)
+        return self
+
+    def eval(self):
+        """
+        Overrides the default `eval` method to also set the mode for the draft model.
+        """
+        super().eval()
+        if self.draft_model:
+            self.draft_model.eval()
+        return self
 
     @property
     def device(self):

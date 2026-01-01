@@ -36,34 +36,6 @@ class ModelConfig(BaseModel):
         None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(
         None, description="Number of 'experts' to select for each token.")
-    early_exit_thresholds: Optional[list[float]] = Field(
-        None, description="Complexity thresholds for early exit.")
-    early_exit_num_layers: Optional[list[int]] = Field(
-        None, description="Number of layers to use for each complexity level.")
-    dynamic_moe_thresholds: Optional[list[float]] = Field(
-        None, description="Complexity thresholds for dynamic MoE.")
-    dynamic_moe_k_values: Optional[list[int]] = Field(
-        None, description="Number of experts to use for each complexity level.")
-
-    @model_validator(mode='after')
-    def validate_dynamic_architecture(self):
-        """
-        Validates that the lengths of thresholds and corresponding value lists are consistent.
-        """
-        if self.early_exit_thresholds is not None:
-            if not len(self.early_exit_num_layers) == len(self.early_exit_thresholds) + 1:
-                raise ValueError(
-                    "Length of 'early_exit_num_layers' must be exactly one greater than "
-                    "the length of 'early_exit_thresholds'."
-                )
-
-        if self.dynamic_moe_thresholds is not None:
-            if not len(self.dynamic_moe_k_values) == len(self.dynamic_moe_thresholds) + 1:
-                raise ValueError(
-                    "Length of 'dynamic_moe_k_values' must be exactly one greater than "
-                    "the length of 'dynamic_moe_thresholds'."
-                )
-        return self
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -162,6 +134,8 @@ class EvolutionConfig(BaseModel):
                                  description="Path to save the best model.")
     moe_aux_loss_coeff: float = Field(
         0.01, description="Coefficient for the MoE auxiliary loss.")
+    label_smoothing: float = Field(
+        0.0, description="Value for label smoothing (0.0 means disabled).")
 
 
 class OptimizerConfig(BaseModel):
@@ -228,20 +202,6 @@ class HardwareConfig(BaseModel):
         "discrete", description="Memory strategy for hardware.")
 
 
-class DynamicParametersConfig(BaseModel):
-    """Configuration for dynamic parameter allocation."""
-    medium_complexity_threshold: float = Field(
-        ..., description="Surprise threshold to switch to medium complexity.")
-    high_complexity_threshold: float = Field(
-        ..., description="Surprise threshold to switch to high complexity.")
-    low_complexity_top_k: int = Field(
-        ..., description="Top-k experts for low complexity tasks.")
-    medium_complexity_top_k: int = Field(
-        ..., description="Top-k experts for medium complexity tasks.")
-    high_complexity_top_k: int = Field(
-        ..., description="Top-k experts for high complexity tasks.")
-
-
 class Config(BaseModel):
     """Main configuration model."""
     model: ModelConfig
@@ -252,7 +212,6 @@ class Config(BaseModel):
     scheduler: SchedulerConfig
     generation: GenerationConfig
     hardware: HardwareConfig
-    dynamic_parameters: Optional[DynamicParametersConfig] = None
 
     @classmethod
     def from_json(cls, file_path: str) -> 'Config':

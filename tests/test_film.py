@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.nn_components.film import FiLMLayer
+from src.model.layers.film import FiLMLayer
 
 
 class TestFiLMLayer(unittest.TestCase):

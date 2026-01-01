@@ -6,8 +6,8 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from config import Config
-from trainer import create_trainer, DataComponents
+from src.config import Config
+from src.trainer import create_trainer, DataComponents
 
 
 def _create_test_config_and_data():
@@ -17,7 +17,6 @@ def _create_test_config_and_data():
     config.model.num_layers = 1
     config.model.num_heads = 2
     config.model.d_ff = 16
-    config.model.early_exit_thresholds = None
     config.evolution.pretrain_epochs = 1
     config.evolution.evolution_epochs = 1
     config.evolution.num_agents = 2
@@ -45,7 +44,7 @@ def _create_test_config_and_data():
 
     return config, tokenizer, train_data, val_data
 
-class TestTrainerIntegration(unittest.TestCase):
+class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-code
     """
     Tests the Trainer's ability to run pre-training and evolution cycles.
     """
@@ -65,11 +64,15 @@ class TestTrainerIntegration(unittest.TestCase):
         unwrapped_model = model.module if hasattr(model, "module") else model
 
         # --- 1. Test Pre-training ---
-        initial_weights_pre = unwrapped_model.layers.decoder[0].mha.wo.weight.clone().detach()
+        initial_weights_pre = (
+            unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        )
 
         trainer.train_pretrain_epoch()
 
-        updated_weights_pre = unwrapped_model.layers.decoder[0].mha.wo.weight.clone().detach()
+        updated_weights_pre = (
+            unwrapped_model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
+        )
 
         self.assertFalse(
             torch.equal(initial_weights_pre, updated_weights_pre),

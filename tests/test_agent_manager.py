@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import torch
 from accelerate import Accelerator
 
-from src.agent_manager import AgentManager
+from src.agent.agent_manager import AgentManager
 from src.config import Config
-from src.model import Transformer
+from src.model.model import Transformer
 
 
 class TestAgentManager(unittest.TestCase):
@@ -62,7 +62,7 @@ class TestAgentManager(unittest.TestCase):
 
         self.assertTrue(torch.equal(loaded_state['weight'], expected_avg_state['weight']))
 
-    @patch('src.agent_manager.AgentManager._batch_critique')
+    @patch('src.agent.agent_manager.AgentManager._batch_critique')
     def test_collaborative_evaluation_independent_success(self, mock_batch_critique):
         """Test collaboration evaluation for a successful independent response."""
         manager = AgentManager(
@@ -92,7 +92,7 @@ class TestAgentManager(unittest.TestCase):
             # In this simple case, each agent proposes once
             self.assertAlmostEqual(agent.get_fitness_score(), expected_reward, places=5)
 
-    @patch('src.agent_manager.AgentManager._batch_critique')
+    @patch('src.agent.agent_manager.AgentManager._batch_critique')
     def test_collaborative_evaluation_asks_for_help_and_succeeds(self, mock_batch_critique):
         """Test evaluation when an agent asks for help and gets a good response."""
         manager = AgentManager(

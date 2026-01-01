@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import torch
 
-from config import DecoderBlockConfig
-from nn_components.decoder_block import DecoderBlock, ForwardPassInput
+from src.config import DecoderBlockConfig
+from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 
 
 class TestDecoderBlock(unittest.TestCase):
@@ -61,29 +61,29 @@ class TestDecoderBlock(unittest.TestCase):
 
         # Check gradients for some key parameters
         # MHA gradients
-        self.assertIsNotNone(decoder_block.mha.qkv_proj.weight.grad)
-        self.assertIsNotNone(decoder_block.mha.wo.weight.grad)
+        self.assertIsNotNone(decoder_block.attention_sublayer.mha.qkv_proj.weight.grad)
+        self.assertIsNotNone(decoder_block.attention_sublayer.mha.wo.weight.grad)
 
         # Norm gradients
-        self.assertIsNotNone(decoder_block.norm['norm1'].gamma.grad)
-        self.assertIsNotNone(decoder_block.norm['norm2'].gamma.grad)
+        self.assertIsNotNone(decoder_block.attention_sublayer.norm.gamma.grad)
+        self.assertIsNotNone(decoder_block.ff_sublayer.norm.gamma.grad)
 
         # FiLM gradients
-        if decoder_block.ltm:
-            self.assertIsNotNone(decoder_block.film1.projection.weight.grad)
-            self.assertIsNotNone(decoder_block.film2.projection.weight.grad)
+        if decoder_block.attention_sublayer.film:
+            self.assertIsNotNone(decoder_block.attention_sublayer.film.projection.weight.grad)
+            self.assertIsNotNone(decoder_block.ff_sublayer.film.projection.weight.grad)
 
         # MoE/FFN gradients
         if decoder_block.use_moe:
-            self.assertIsNotNone(decoder_block.ff_layer.gate.weight.grad)
+            self.assertIsNotNone(decoder_block.ff_sublayer.ff_layer.gate.weight.grad)
             self.assertTrue(
                 any(
                     p.grad is not None
-                    for p in decoder_block.ff_layer.experts[0].parameters()
+                    for p in decoder_block.ff_sublayer.ff_layer.experts[0].parameters()
                 )
             )
         else:
-            self.assertIsNotNone(decoder_block.ff_layer.w1.weights.grad)
+            self.assertIsNotNone(decoder_block.ff_sublayer.ff_layer.w1.weight.grad)
 
         self.assertIsNotNone(x.grad)
 

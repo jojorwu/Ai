@@ -4,7 +4,7 @@ Unit tests for the tools library.
 import unittest
 from unittest.mock import MagicMock
 
-from src import tools
+from src.utils import tools
 
 class TestTools(unittest.TestCase):
     """Tests for the tools."""
@@ -34,7 +34,7 @@ class TestTools(unittest.TestCase):
         args = {"command": "ls -l"}
         result = tools.execute_tool("execute_shell", args)
 
-        tools.AVAILABLE_TOOLS['execute_shell'].assert_called_once_with(**args)
+        tools.AVAILABLE_TOOLS['execute_shell'].assert_called_once_with(**args)  # pylint: disable=no-member
         self.assertEqual(result, "Success from mock")
 
         # Restore the original function to avoid side effects in other tests

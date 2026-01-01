@@ -6,7 +6,7 @@ import unittest
 
 import torch
 
-from nn_components.rms_norm import RMSNorm
+from src.model.layers.rms_norm import RMSNorm
 
 
 class TestRMSNorm(unittest.TestCase):

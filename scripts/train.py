@@ -128,7 +128,7 @@ def main():
     args = parser.parse_args()
 
     config, model_dir, resume_dir = setup_environment(args)
-    accelerator = Accelerator()
+    accelerator = Accelerator(mixed_precision="fp16")
     tokenizer, train_data, val_data = load_and_prepare_data(
         config.evolution.data_dir,
         config.evolution.data_dir,

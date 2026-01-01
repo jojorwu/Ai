@@ -10,11 +10,12 @@ from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from agent_manager import AgentManager, SpecializationConfig
-from config import Config, TransformerConfig
-from data_loader import \
+from src.agent.agent_manager import AgentManager, SpecializationConfig
+from src.config import Config, TransformerConfig
+from src.data.data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
-from model import Transformer
+from src.model.loss import cross_entropy_with_label_smoothing
+from src.model.model import Transformer
 
 
 def create_trainer(
@@ -33,17 +34,15 @@ def create_trainer(
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
-    policy_loss_fn = nn.CrossEntropyLoss()
     value_loss_fn = nn.MSELoss()
 
-    model, optimizer, policy_loss_fn, value_loss_fn = accelerator.prepare(
-        model, optimizer, policy_loss_fn, value_loss_fn
+    model, optimizer, value_loss_fn = accelerator.prepare(
+        model, optimizer, value_loss_fn
     )
 
     training_components = TrainingComponents(
         model=model,
         optimizer=optimizer,
-        policy_loss_fn=policy_loss_fn,
         value_loss_fn=value_loss_fn,
     )
     trainer_config = TrainerConfig(
@@ -60,7 +59,6 @@ class TrainingComponents:
     """Core components for training."""
     model: nn.Module
     optimizer: Adam
-    policy_loss_fn: nn.Module
     value_loss_fn: nn.Module
 
 @dataclass
@@ -106,8 +104,11 @@ class Trainer:
         with torch.no_grad():
             for x, y, _ in batch_iterator:
                 logits, _, _ = self._config.components.model(x)
-                loss = self._config.components.policy_loss_fn(
-                    logits.view(-1, logits.size(-1)), y.view(-1)
+                loss = cross_entropy_with_label_smoothing(
+                    logits,
+                    y,
+                    smoothing=evo_cfg.label_smoothing,
+                    vocab_size=self._config.data.tokenizer.vocab_size,
                 )
                 total_loss += loss.item()
                 num_batches += 1
@@ -117,8 +118,11 @@ class Trainer:
     def _run_training_step(self, x, y, evo_cfg):
         """Runs a single training step."""
         logits, _, aux_loss = self._config.components.model(x)
-        policy_loss = self._config.components.policy_loss_fn(
-            logits.view(-1, logits.size(-1)), y.view(-1)
+        policy_loss = cross_entropy_with_label_smoothing(
+            logits,
+            y,
+            smoothing=evo_cfg.label_smoothing,
+            vocab_size=self._config.data.tokenizer.vocab_size,
         )
         total_loss = policy_loss + (
             evo_cfg.moe_aux_loss_coeff * aux_loss if aux_loss else 0

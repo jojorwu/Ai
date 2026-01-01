@@ -3,7 +3,7 @@ PyTorch implementation of the FiLM (Feature-wise Linear Modulation) layer.
 """
 from torch import nn
 
-from nn_components.linear import Linear
+from src.model.layers.linear import Linear
 
 
 class FiLMLayer(nn.Module):
