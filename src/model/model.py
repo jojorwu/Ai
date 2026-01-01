@@ -375,17 +375,28 @@ class Transformer(nn.Module):
             inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
         ).view(speculative_chunk.shape)
 
-        accepted_tokens = []
-        for i in range(speculative_chunk.size(1)):
-            draft_token = speculative_chunk[0, i]
-            ver_token = verification_tokens[0, i]
-            if draft_token == ver_token:
-                accepted_tokens.append(draft_token.unsqueeze(0))
-            else:
-                accepted_tokens.append(ver_token.unsqueeze(0))
-                break
+        # Vectorized comparison to find the first mismatch
+        mismatches = (speculative_chunk != verification_tokens).long()
+        first_mismatch_indices = torch.argmax(mismatches, dim=1)
 
-        return torch.cat(accepted_tokens, dim=0).unsqueeze(0) if accepted_tokens else None
+        # Check if there are any mismatches at all
+        any_mismatch = mismatches.any()
+
+        if not any_mismatch:
+            return speculative_chunk
+
+        first_mismatch_idx = first_mismatch_indices[0]
+
+        # If the first token is a mismatch, we only take the first verification token
+        if first_mismatch_idx == 0 and mismatches[0,0] == 1:
+            return verification_tokens[:,:1]
+
+        # Accept the speculative tokens up to the mismatch
+        accepted_prefix = speculative_chunk[:, :first_mismatch_idx]
+        # Accept the correct token from the verification set
+        corrected_token = verification_tokens[:, first_mismatch_idx:first_mismatch_idx+1]
+
+        return torch.cat([accepted_prefix, corrected_token], dim=1)
 
     def generate(self, inputs: GenerateInput) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
