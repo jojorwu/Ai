@@ -220,10 +220,12 @@ class Transformer(nn.Module):
             - value: The predicted value from the value head.
             - total_aux_loss: The auxiliary loss from the MoE layers.
         """
-        # 1. Get token embeddings
+        # 1. Get token embeddings. The embedding output is scaled by the square
+        # root of the model dimension, a standard practice in Transformers.
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
-        # 2. Determine and compute the Long-Term Memory state
+        # 2. Determine and compute the Long-Term Memory (LTM) state.
+        # An agent can override the base model's LTM with its own.
         long_term_memory = ltm_override or self.layers.long_term_memory
         if ltm_state is None:
             if long_term_memory:
@@ -237,20 +239,22 @@ class Transformer(nn.Module):
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
-        # 3. Get dynamic parameters from the GatingNetwork
+        # 3. Get dynamic parameters from the GatingNetwork. The GatingNetwork
+        # takes the LTM state and decides how many decoder layers and MoE experts
+        # to use for this forward pass. This makes the architecture dynamic.
         active_layers_tensor, moe_top_k = self.layers.gating_network(ltm_state)
         # For the decoder loop, we need a single integer. Since generation has a
-        # batch size of 1, taking the max works for both cases.
+        # batch size of 1, taking the max works for both training and inference.
         active_layers = int(torch.max(active_layers_tensor).item())
 
-        # Generation config can override the LTM's dynamic selection
+        # The generation configuration can override the dynamically selected top-k value for MoE.
         final_dynamic_top_k_tensor = dynamic_top_k if dynamic_top_k is not None else moe_top_k
         # For the MoE layer, we need a single integer.
         final_dynamic_top_k = int(torch.max(final_dynamic_top_k_tensor).item())
 
-
-        # 4. Pass through the dynamically selected number of decoder blocks
-
+        # 4. Pass through the dynamically selected number of decoder blocks.
+        # The model only computes the number of layers determined by the GatingNetwork,
+        # saving computation on simpler tokens.
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
@@ -386,10 +390,27 @@ class Transformer(nn.Module):
     def generate(self, inputs: GenerateInput) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
         Generates a sequence of tokens using speculative decoding.
-        Yields chunks of accepted tokens and the surprise value.
+
+        This method accelerates generation by using a smaller, faster 'draft' model
+        to produce a chunk of speculative tokens. The main model then validates this
+        chunk in a single forward pass. Tokens from the chunk are accepted up to the
+        first mismatch, and then the process repeats.
+
+        This generator yields `(accepted_chunk, surprise_value)` tuples, allowing
+        for incremental processing of the generated text.
+
+        Args:
+            inputs: A dataclass containing all necessary parameters for generation,
+                    including start tokens, max length, and sampling settings.
+
+        Yields:
+            A tuple containing:
+            - A tensor of the accepted token chunk.
+            - A float representing the 'surprise' value calculated during this step.
         """
         self.eval()
-        # Use the pre-initialized draft model, or default to self if it's not available.
+        # Use the pre-initialized draft model. If it's not available (e.g., for
+        # very small models), default to the main model itself.
         draft_model = self.draft_model or self
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
@@ -410,11 +431,14 @@ class Transformer(nn.Module):
                 true_logits, speculative_chunk, inputs
             )
 
+            # If the chunk is accepted, yield it and update the token sequence.
             if accepted_chunk is not None:
                 yield accepted_chunk, surprise
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 total_generated += accepted_chunk.size(1)
             else:
+                # If the entire speculative chunk is rejected, fall back to standard
+                # auto-regressive sampling for one token.
                 logits, _, _ = self(tokens[:, -self.config.model.max_seq_len :])
                 next_token = self._sample_from_logits(
                     logits[:, -1, :],
