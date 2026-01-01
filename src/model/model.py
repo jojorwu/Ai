@@ -1,7 +1,6 @@
 """
 PyTorch implementation of the main Transformer model.
 """
-import copy
 import logging
 import math
 from dataclasses import dataclass, field
