@@ -76,8 +76,14 @@ class GenerateInput:
 
 class Transformer(nn.Module):
     """
-    Full GPT-style (decoder-only) Transformer model, migrated to PyTorch.
+    A decoder-only Transformer model with a dual-head architecture for policy and
+    value prediction. It supports dynamic layer skipping and Mixture of Experts (MoE)
+    allocation based on a complexity score from its Long-Term Memory (LTM).
+
+    The model is designed for agent-based learning and supports speculative decoding
+    to accelerate generation.
     """
+
     _no_split_modules = ["DecoderBlock"]
 
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
@@ -154,48 +160,94 @@ class Transformer(nn.Module):
         )
 
     def _get_dynamic_params(self, complexity_score, dynamic_top_k):
-        """Gets dynamic parameters for the forward pass."""
+        """
+        Determines the number of active layers and the number of experts (top-k)
+        to use for the current forward pass based on the complexity score.
+
+        This enables dynamic architecture features like layer skipping and
+        adaptive MoE.
+
+        Args:
+            complexity_score: A scalar tensor representing the complexity score from the LTM.
+            dynamic_top_k: An integer from the generation config that can override
+                           the LTM's dynamic top-k selection.
+
+        Returns:
+            A tuple containing:
+            - The number of decoder layers to execute.
+            - The final top-k value for expert selection in MoE layers.
+        """
         score = self._get_safe_complexity_score(complexity_score)
+        # Determine the number of layers to use (early exit/layer skipping)
         active_layers = self._get_dynamic_parameter(
             score,
             self.config.model.early_exit_thresholds,
             self.config.model.early_exit_num_layers,
-        ) or self.config.model.num_layers
+        ) or self.config.model.num_layers # Default to all layers
 
+        # Determine the number of experts to use (dynamic MoE)
         dynamic_top_k_ltm = self._get_dynamic_parameter(
             score,
             self.config.model.dynamic_moe_thresholds,
             self.config.model.dynamic_moe_k_values,
         )
+        # Generation config can override the LTM's dynamic selection
         final_dynamic_top_k = (
             dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
         )
         return active_layers, final_dynamic_top_k
 
-    def forward(
+    def forward( # pylint: disable=too-many-locals
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
-        dynamic_top_k: int = None, # This is passed in from generation config
+        dynamic_top_k: int = None,  # This is passed in from generation config
         ltm_override: nn.Module | None = None,
-    ):
-        """Forward pass of the model."""
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Performs the forward pass of the Transformer model.
+
+        This method includes the logic for dynamic architecture adjustments,
+        such as layer skipping and adaptive MoE, based on the LTM's complexity score.
+
+        Args:
+            x: Input tensor of token IDs.
+            ltm_state: An optional pre-computed state from the Long-Term Memory.
+                       If None, it will be computed from the input `x`.
+            dynamic_top_k: An optional integer to override the dynamic MoE k-value.
+            ltm_override: An optional LTM module to use instead of the model's default.
+                          This is used for agent-specific LTMs.
+
+        Returns:
+            A tuple containing:
+            - logits: The output logits for the next token prediction.
+            - value: The predicted value from the value head.
+            - total_aux_loss: The auxiliary loss from the MoE layers.
+        """
+        # 1. Get token embeddings
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
+
+        # 2. Determine and compute the Long-Term Memory state
         long_term_memory = ltm_override or self.layers.long_term_memory
         complexity_score = None
         if ltm_state is None:
             if long_term_memory:
+                # If no LTM state is provided, compute it from the input sequence
                 ltm_state, complexity_score = long_term_memory(
-                    h.mean(dim=1, keepdim=True)
+                    h.mean(dim=1, keepdim=True) # Use mean of sequence as summary
                 )
             else:
+                # If there's no LTM, use a zero tensor as a placeholder
                 ltm_state = torch.zeros(
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
+        # 3. Get dynamic parameters for layer skipping and MoE
         active_layers, final_dynamic_top_k = self._get_dynamic_params(
             complexity_score, dynamic_top_k
         )
+
+        # 4. Pass through the dynamically selected number of decoder blocks
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
@@ -280,13 +332,28 @@ class Transformer(nn.Module):
         long_term_memory.zero_grad()
         return surprise
 
-    def _generate_speculative_chunk(self, draft_model, tokens, inputs):
-        """Generates a speculative chunk of tokens."""
+    def _generate_speculative_chunk(
+        self, draft_model: "Transformer", tokens: torch.Tensor, inputs: GenerateInput
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Generates a small 'draft' chunk of tokens using a faster, smaller model.
+
+        Args:
+            draft_model: The smaller, faster model used for generating speculative tokens.
+            tokens: The current sequence of tokens generated so far.
+            inputs: The main input object containing generation configurations.
+
+        Returns:
+            A tuple containing:
+            - The newly generated speculative chunk.
+            - The full sequence including the speculative chunk.
+        """
         draft_tokens = tokens
         with torch.no_grad():
             for _ in range(inputs.speculative_config.speculative_steps):
+                # Generate one token at a time with the draft model
                 draft_logits, _, _ = draft_model(
-                    draft_tokens[:, -self.config.model.max_seq_len:]
+                    draft_tokens[:, -self.config.model.max_seq_len :]
                 )
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
@@ -295,19 +362,36 @@ class Transformer(nn.Module):
                     or inputs.sampling_config.top_k,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
+        # Return only the newly generated tokens and the full draft sequence
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
-    def _validate_and_accept_chunk(self, true_logits, speculative_chunk, inputs):
+    def _validate_and_accept_chunk(
+        self,
+        true_logits: torch.Tensor,
+        speculative_chunk: torch.Tensor,
+        inputs: GenerateInput,
+    ) -> torch.Tensor | None:
         """
-        Validates the speculative chunk and returns the accepted tokens.
-        NOTE: This implementation currently only supports a batch size of 1,
-        which matches the constraint of the parent `generate` method.
+        Validates a speculative chunk against logits from the main model.
+
+        It compares the tokens proposed by the draft model with tokens sampled from
+        the main model's logits. Tokens are accepted up to the first mismatch.
+
+        Args:
+            true_logits: The logits produced by the main model for the speculative sequence.
+            speculative_chunk: The chunk of tokens generated by the draft model.
+            inputs: The main input object containing sampling configurations.
+
+        Returns:
+            A tensor containing the sequence of accepted tokens, which may be shorter
+            than the original speculative chunk.
         """
         if speculative_chunk.size(0) != 1:
             raise NotImplementedError(
                 "Speculative decoding only supports batch size 1."
             )
 
+        # Sample verification tokens from the main model's logits
         verification_tokens = self._sample_from_logits(
             true_logits.view(-1, true_logits.size(-1)),
             inputs.sampling_config.temperature,

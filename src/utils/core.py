@@ -11,9 +11,9 @@ from accelerate import dispatch_model, init_empty_weights
 
 
 from src.config import Config, TransformerConfig
-from src.device_manager import DeviceManager
-from src.model import Transformer
-from src.tokenizer import Tokenizer
+from src.data.tokenizer import Tokenizer
+from src.model.model import Transformer
+from src.utils.device_manager import DeviceManager
 
 def setup_logging(log_path: str = None):
     """

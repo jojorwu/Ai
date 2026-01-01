@@ -132,7 +132,17 @@ class AgentManager:
             logging.info("Base model's LTM has been updated with merged weights.")
 
     def _initialize_evaluation(self, tokenizer):
-        """Initializes scores and token IDs for the evaluation phase."""
+        """
+        Initializes the data structures needed for a collaborative evaluation cycle.
+
+        Args:
+            tokenizer: The tokenizer instance, used to get special token IDs.
+
+        Returns:
+            A tuple containing:
+            - A dictionary to store the fitness scores for each agent.
+            - A dictionary mapping special action names to their token IDs.
+        """
         scores = {agent.agent_id: 0.0 for agent in self.agents}
         tokens = {
             "ask_help": tokenizer.char_to_idx.get("<ASK_FOR_HELP>"),
@@ -142,14 +152,17 @@ class AgentManager:
 
     def _handle_collaboration_request(self, ctx: CollaborationContext):
         """
-        Handles the scenario where an agent asks for help.
+        Manages the 'ask for help' scenario in collaborative evaluation.
 
-        The proposing agent gets a small reward for asking. A helper agent is
-        chosen to provide a response, and this response is then critiqued by all
-        other agents. The helper and proposer are rewarded or penalized based on
-        the critique score.
+        The agent that asked for help (proposer) is rewarded. Another agent (helper)
+        is chosen to provide a response. This response is then critiqued by all other
+        agents. The helper and proposer are both rewarded or penalized based on the
+        quality of the help provided, as judged by the critics.
+
+        Args:
+            ctx: The context object containing all necessary information for this interaction.
         """
-        # Reward the agent for asking for help
+        # Reward the agent for asking for help, as it's a desirable collaborative behavior.
         ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
 
         # Select the next agent in the list as the helper
@@ -189,12 +202,16 @@ class AgentManager:
 
     def _handle_independent_response(self, ctx: IndependentResponseContext):
         """
-        Handles the scenario where an agent responds independently.
+        Manages the 'independent response' scenario in collaborative evaluation.
 
-        The response is critiqued by all other agents. The proposing agent is
-        rewarded or penalized based on the average critique score.
+        The agent's response is evaluated by all other agents in the population
+        (the 'critics'). The proposing agent is then rewarded or penalized based
+        on the average critique score, encouraging high-quality, independent solutions.
+
+        Args:
+            ctx: The context object containing all necessary information for this interaction.
         """
-        # All other agents act as critics
+        # All other agents in the population act as critics.
         critics = (
             [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
             or [ctx.proposer]  # If no other critics, proposer critiques itself
