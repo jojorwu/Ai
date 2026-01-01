@@ -287,7 +287,7 @@ class AgentManager:
                 if ltm:
                     # Each LTM processes its corresponding sequence embedding
                     ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
-                    ltm_states[i] = ltm(ltm_input)
+                    ltm_states[i], _ = ltm(ltm_input)
 
             # A single forward pass with the batched LTM states
             _, values, _ = self.base_model.forward(

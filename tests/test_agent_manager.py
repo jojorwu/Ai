@@ -143,5 +143,40 @@ class TestAgentManager(unittest.TestCase):
         self.assertAlmostEqual(critic_score, expected_critic_score, places=5)
 
 
+        # Agent 2 also proposes for itself
+        critic_score = manager.agents[2].get_fitness_score()
+        expected_critic_score = manager.REWARD_INDEPENDENT_SUCCESS * 0.9
+        self.assertAlmostEqual(critic_score, expected_critic_score, places=5)
+
+    def test_batch_critique_handles_ltm_output_tuple(self):
+        """
+        Tests that _batch_critique correctly unpacks the (context, complexity)
+        tuple from the LTM.
+        """
+        manager = AgentManager(
+            self.mock_model, num_agents=2, accelerator=self.mock_accelerator
+        )
+
+        dummy_sequence = torch.randint(0, 100, (2, 10), device="cpu")
+        mock_ltms = [agent.long_term_memory for agent in manager.agents]
+
+        # Mock the LTMs to return a tuple, which was causing the bug
+        for ltm in mock_ltms:
+            ltm.return_value = (torch.randn(1, 1, 64), torch.tensor([0.5]))
+
+        # Mock the base model's forward pass
+        self.mock_model.forward.return_value = (None, torch.tensor([[0.8], [0.7]]), None)
+        self.mock_model.layers.embedding.return_value = torch.randn(2, 10, 64)
+
+        # Call the private method. If the bug is present, this will likely
+        # raise a TypeError or AttributeError.
+        # pylint: disable=protected-access
+        avg_score = manager._batch_critique(dummy_sequence, mock_ltms)
+
+        # Assert that the score is a valid float, confirming the method ran successfully
+        self.assertIsInstance(avg_score, float)
+        self.assertAlmostEqual(avg_score, 0.75, places=5)
+
+
 if __name__ == '__main__':
     unittest.main()
