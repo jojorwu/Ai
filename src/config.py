@@ -134,6 +134,8 @@ class EvolutionConfig(BaseModel):
                                  description="Path to save the best model.")
     moe_aux_loss_coeff: float = Field(
         0.01, description="Coefficient for the MoE auxiliary loss.")
+    label_smoothing: float = Field(
+        0.0, description="Value for label smoothing (0.0 means disabled).")
 
 
 class OptimizerConfig(BaseModel):

@@ -136,7 +136,7 @@ class Transformer(nn.Module):
         gating_network = GatingNetwork(
             d_model=config.model.d_model,
             num_layers=config.model.num_layers,
-            top_k_experts=config.model.top_k_experts,
+            num_experts=config.model.num_experts,
         )
         decoder = nn.ModuleList(
             [DecoderBlock(decoder_config) for _ in range(config.model.num_layers)]
@@ -239,9 +239,15 @@ class Transformer(nn.Module):
                 )
 
         # 3. Get dynamic parameters from the GatingNetwork
-        active_layers, moe_top_k = self.layers.gating_network(ltm_state)
+        active_layers_tensor, moe_top_k = self.layers.gating_network(ltm_state)
+        # For the decoder loop, we need a single integer. Since generation has a
+        # batch size of 1, taking the max works for both cases.
+        active_layers = int(torch.max(active_layers_tensor).item())
+
         # Generation config can override the LTM's dynamic selection
-        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        final_dynamic_top_k_tensor = dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        # For the MoE layer, we need a single integer.
+        final_dynamic_top_k = int(torch.max(final_dynamic_top_k_tensor).item())
 
 
         # 4. Pass through the dynamically selected number of decoder blocks

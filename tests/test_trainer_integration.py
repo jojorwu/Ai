@@ -17,7 +17,6 @@ def _create_test_config_and_data():
     config.model.num_layers = 1
     config.model.num_heads = 2
     config.model.d_ff = 16
-    config.model.early_exit_thresholds = None
     config.evolution.pretrain_epochs = 1
     config.evolution.evolution_epochs = 1
     config.evolution.num_agents = 2
