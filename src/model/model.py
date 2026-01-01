@@ -15,6 +15,7 @@ from bitsandbytes.nn import Linear4bit
 from src.config import DecoderBlockConfig, TransformerConfig
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 from src.model.layers.embedding import Embedding
+from src.model.layers.gating import GatingNetwork
 from src.model.layers.linear import Linear
 from src.model.layers.long_term_memory import LongTermMemory
 from src.model.layers.rms_norm import RMSNorm
@@ -36,6 +37,7 @@ class ModelLayers(nn.Module):
         super().__init__()
         self.embedding: Embedding = layers["embedding"]
         self.long_term_memory: LongTermMemory = layers["long_term_memory"]
+        self.gating_network: GatingNetwork = layers["gating_network"]
         self.decoder: nn.ModuleList = layers["decoder"]
         self.final_norm: RMSNorm = layers["final_norm"]
         self.value_head: ValueHead = layers["value_head"]
@@ -131,6 +133,11 @@ class Transformer(nn.Module):
         value_head_linear_class = Linear4bit if load_in_4bit else Linear
 
         embedding = Embedding(config.vocab_size, config.model.d_model)
+        gating_network = GatingNetwork(
+            d_model=config.model.d_model,
+            num_layers=config.model.num_layers,
+            top_k_experts=config.model.top_k_experts,
+        )
         decoder = nn.ModuleList(
             [DecoderBlock(decoder_config) for _ in range(config.model.num_layers)]
         )
@@ -142,6 +149,7 @@ class Transformer(nn.Module):
         layers_dict = {
             "embedding": embedding,
             "long_term_memory": ltm,
+            "gating_network": gating_network,
             "decoder": decoder,
             "final_norm": final_norm,
             "value_head": value_head,
@@ -186,44 +194,6 @@ class Transformer(nn.Module):
             load_in_4bit=load_in_4bit,
         )
 
-    def _get_dynamic_params(self, complexity_score, dynamic_top_k):
-        """
-        Determines the number of active layers and the number of experts (top-k)
-        to use for the current forward pass based on the complexity score.
-
-        This enables dynamic architecture features like layer skipping and
-        adaptive MoE.
-
-        Args:
-            complexity_score: A scalar tensor representing the complexity score from the LTM.
-            dynamic_top_k: An integer from the generation config that can override
-                           the LTM's dynamic top-k selection.
-
-        Returns:
-            A tuple containing:
-            - The number of decoder layers to execute.
-            - The final top-k value for expert selection in MoE layers.
-        """
-        score = self._get_safe_complexity_score(complexity_score)
-        # Determine the number of layers to use (early exit/layer skipping)
-        active_layers = self._get_dynamic_parameter(
-            score,
-            self.config.model.early_exit_thresholds,
-            self.config.model.early_exit_num_layers,
-        ) or self.config.model.num_layers # Default to all layers
-
-        # Determine the number of experts to use (dynamic MoE)
-        dynamic_top_k_ltm = self._get_dynamic_parameter(
-            score,
-            self.config.model.dynamic_moe_thresholds,
-            self.config.model.dynamic_moe_k_values,
-        )
-        # Generation config can override the LTM's dynamic selection
-        final_dynamic_top_k = (
-            dynamic_top_k if dynamic_top_k is not None else dynamic_top_k_ltm
-        )
-        return active_layers, final_dynamic_top_k
-
     def forward( # pylint: disable=too-many-locals
         self,
         x: torch.Tensor,
@@ -256,11 +226,10 @@ class Transformer(nn.Module):
 
         # 2. Determine and compute the Long-Term Memory state
         long_term_memory = ltm_override or self.layers.long_term_memory
-        complexity_score = None
         if ltm_state is None:
             if long_term_memory:
                 # If no LTM state is provided, compute it from the input sequence
-                ltm_state, complexity_score = long_term_memory(
+                ltm_state, _ = long_term_memory(
                     h.mean(dim=1, keepdim=True) # Use mean of sequence as summary
                 )
             else:
@@ -269,10 +238,11 @@ class Transformer(nn.Module):
                     (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
                 )
 
-        # 3. Get dynamic parameters for layer skipping and MoE
-        active_layers, final_dynamic_top_k = self._get_dynamic_params(
-            complexity_score, dynamic_top_k
-        )
+        # 3. Get dynamic parameters from the GatingNetwork
+        active_layers, moe_top_k = self.layers.gating_network(ltm_state)
+        # Generation config can override the LTM's dynamic selection
+        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else moe_top_k
+
 
         # 4. Pass through the dynamically selected number of decoder blocks
 
@@ -293,35 +263,6 @@ class Transformer(nn.Module):
         logits = F.linear(h, self.layers.embedding.weight) # pylint: disable=not-callable
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
-
-    def _get_safe_complexity_score(self, complexity_score: torch.Tensor | None) -> float:
-        """
-        Validates the complexity score tensor and returns a safe scalar value.
-        Logs a warning if the tensor is invalid.
-        """
-        if complexity_score is None or complexity_score.numel() == 0:
-            return 0.0
-
-        if torch.isnan(complexity_score).any() or torch.isinf(complexity_score).any():
-            logging.warning(
-                "Invalid complexity score tensor detected (NaN or Inf). "
-                "Defaulting to 0.0. Tensor: %s",
-                complexity_score,
-            )
-            return 0.0
-
-        return torch.max(complexity_score).item()
-
-    def _get_dynamic_parameter(
-        self, score: float, thresholds: list[float], values: list[int]
-    ) -> int:
-        """Selects a value from a list based on a score and thresholds."""
-        if thresholds is None:
-            return None
-        for i, threshold in enumerate(thresholds):
-            if score < threshold:
-                return values[i]
-        return values[-1]
 
     def _sample_from_logits(self, logits, temperature, top_k):
         """Samples a token from logits."""
