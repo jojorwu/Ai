@@ -92,6 +92,33 @@ class Transformer(nn.Module):
         self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
+        self.draft_model = self._create_draft_model(config, load_in_4bit)
+
+    def _create_draft_model(
+        self, config: TransformerConfig, load_in_4bit: bool
+    ) -> "Transformer|None":
+        """
+        Creates a smaller, faster 'draft' model for speculative decoding.
+        This model is created once during initialization to avoid the expensive
+        `copy.deepcopy()` operation during generation.
+
+        The draft model has fewer layers, making it faster but less accurate.
+        If the base model is already too small, no draft model is created.
+        """
+        if config.model.num_layers < 2:
+            return None # Don't create a draft model for very small models.
+
+        draft_config_dict = config.model_dump()
+        # Reduce the number of layers for the draft model, e.g., by half.
+        draft_config_dict["model"]["num_layers"] //= 2
+
+        draft_config = TransformerConfig(**draft_config_dict)
+
+        logging.info(
+            "Creating a draft model with %d layers.",
+            draft_config.model.num_layers,
+        )
+        return Transformer(draft_config, load_in_4bit)
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
@@ -416,7 +443,8 @@ class Transformer(nn.Module):
         Yields chunks of accepted tokens and the surprise value.
         """
         self.eval()
-        draft_model = copy.deepcopy(self)
+        # Use the pre-initialized draft model, or default to self if it's not available.
+        draft_model = self.draft_model or self
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
 
@@ -451,6 +479,24 @@ class Transformer(nn.Module):
                 yield next_token, surprise
                 tokens = torch.cat((tokens, next_token), dim=1)
                 total_generated += 1
+
+    def train(self, mode: bool = True):
+        """
+        Overrides the default `train` method to also set the mode for the draft model.
+        """
+        super().train(mode)
+        if self.draft_model:
+            self.draft_model.train(mode)
+        return self
+
+    def eval(self):
+        """
+        Overrides the default `eval` method to also set the mode for the draft model.
+        """
+        super().eval()
+        if self.draft_model:
+            self.draft_model.eval()
+        return self
 
     @property
     def device(self):
