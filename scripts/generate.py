@@ -119,10 +119,14 @@ def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
     parser = argparse.ArgumentParser(
-        description="Interact with a PyTorch Transformer model.")
-    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
+        description="Interact with a PyTorch Transformer model."
+    )
     parser.add_argument(
-        '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
+        '--model-name', type=str, help="The name of the model to use."
+    )
+    parser.add_argument(
+        '--load-in-4bit', action='store_true', help="Load the model in 4-bit."
+    )
     parser.add_argument(
         '--quantized', action='store_true', help="Load a quantized model for CPU."
     )

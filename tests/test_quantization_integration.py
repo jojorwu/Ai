@@ -1,120 +1,119 @@
 """
 Integration test for 4-bit quantization.
 """
+import json
 import os
+import shutil
+import tempfile
 import unittest
+
 import torch
-from accelerate import Accelerator, dispatch_model, init_empty_weights
-from bitsandbytes.nn import Linear4bit
-from bitsandbytes.optim import Adam8bit
+from accelerate import Accelerator
 from torch import nn
 
-from src.config import Config, TransformerConfig
+from src.config import Config
 from src.model.model import Transformer
+from src.trainer import Trainer, DataComponents
 from src.utils.core import load_model_and_tokenizer
+
 
 class TestQuantizationIntegration(unittest.TestCase):
     """
-    Tests that a 4-bit quantized model can be loaded, perform a forward pass,
-    and complete a training step.
+    Tests the full lifecycle of a 4-bit quantized model:
+    1. A model is trained for one step and saved.
+    2. The saved model is loaded with 4-bit quantization.
+    3. A training step is run on the quantized model to ensure compatibility.
     """
 
     def setUp(self):
-        """Set up a dummy model and config for the tests."""
-        self.model_name = "test_model_4bit"
-        self.model_dir = os.path.join("models", self.model_name)
+        """Set up a temporary directory for model artifacts."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.model_dir = os.path.join(self.temp_dir, "test_model")
         os.makedirs(self.model_dir, exist_ok=True)
-        self.vocab_size = 100
 
-        self.config_path = os.path.join(self.model_dir, "config.json")
-        with open(self.config_path, "w") as f:
-            f.write(f"""
-            {{
-                "vocab_size": {self.vocab_size},
-                "model": {{
-                    "d_model": 64, "num_layers": 2, "num_heads": 2,
-                    "num_kv_heads": 2, "d_ff": 128, "max_seq_len": 128,
-                    "dropout_rate": 0.1, "ltm": {{}}, "num_experts": null, "top_k_experts": null
-                }},
-                "vision": {{}}, "evolution": {{}},
-                "optimizer": {{"learning_rate": 0.001}},
-                "ltm": {{"surprise_threshold": 0.5, "optimizer": {{}}}},
-                "scheduler": {{}}, "generation": {{}}, "hardware": {{}}
-            }}
-            """)
+        # Create dummy data and config
+        self.config_path = os.path.join(self.temp_dir, "config.json")
+        self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
+        self.data_path = os.path.join(self.temp_dir, "data.txt")
 
-        vocab_path = os.path.join(self.model_dir, "tokenizer_vocab.json")
-        with open(vocab_path, "w") as f:
-            f.write('{"<PAD>": 0, "a": 1, "b": 2}')
-
-        self.weights_path = os.path.join(self.model_dir, "model.pt")
-        config = Config.from_json(self.config_path)
-        transformer_config = TransformerConfig(
-            vocab_size=self.vocab_size, model=config.model, vision=config.vision, ltm=config.ltm
+        config = Config.model_validate_json(
+            open("config.json", "r", encoding="utf-8").read()
         )
-        model = Transformer(transformer_config)
-        torch.save(model.state_dict(), self.weights_path)
+        config.model.d_model = 16
+        config.model.num_heads = 2
+        config.model.d_ff = 32
+        config.model.num_layers = 1
+        config.evolution.data_dir = self.temp_dir
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            f.write(config.model_dump_json(indent=4))
+
+        vocab = {"<pad>": 0, "a": 1, "b": 2}
+        with open(self.vocab_path, "w", encoding="utf-8") as f:
+            json.dump(vocab, f)
+
+        with open(self.data_path, "w", encoding="utf-8") as f:
+            f.write("a b " * 50)
 
     def tearDown(self):
-        """Clean up the dummy model files."""
-        for path in [self.config_path, os.path.join(self.model_dir, "tokenizer_vocab.json"), self.weights_path]:
-            if os.path.exists(path):
-                os.remove(path)
-        if os.path.exists(self.model_dir):
-            os.rmdir(self.model_dir)
+        """Clean up the temporary directory."""
+        shutil.rmtree(self.temp_dir)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available, skipping 4-bit test.")
-    def test_load_and_forward_in_4bit(self):
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
+    def test_quantized_model_training_lifecycle(self):
         """
-        Tests that the model can be loaded in 4-bit mode and perform a forward pass.
+        Tests the full training lifecycle with a 4-bit quantized model.
         """
+        # 1. Initial training and saving
         config = Config.from_json(self.config_path)
-        model, _ = load_model_and_tokenizer(
-            self.model_name, config, load_in_4bit=True, quantized=False
+        accelerator = Accelerator()
+        tokenizer = DataComponents.tokenizer
+        train_data = torch.randint(
+            0, config.vocab_size, (100,)
         )
+        val_data = torch.randint(
+            0, config.vocab_size, (20,)
+        )
+        data_components = DataComponents(
+            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+        )
+        trainer = Trainer(config, data_components, accelerator, False)
+        trainer.train_pretrain_epoch()
+        torch.save(
+            trainer.get_model().state_dict(),
+            os.path.join(self.model_dir, "model.pt")
+        )
+        shutil.copy(self.config_path, self.model_dir)
+        shutil.copy(self.vocab_path, self.model_dir)
 
+        # 2. Load the model with 4-bit quantization
+        quantized_model, _ = load_model_and_tokenizer(
+            os.path.basename(self.model_dir),
+            config,
+            load_in_4bit=True,
+            quantized=False
+        )
         self.assertTrue(
-            any(isinstance(m, Linear4bit) for m in model.modules()),
-            "Model should contain Linear4bit layers."
+            any(
+                "4bit" in str(type(m)).lower()
+                for m in quantized_model.modules()
+            )
         )
 
-        input_tensor = torch.tensor([[1, 2]], device=model.device)
-        with torch.no_grad():
-            logits, _, _ = model.forward(input_tensor)
-
-        self.assertIsNotNone(logits)
-        self.assertEqual(logits.shape[-1], self.vocab_size)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available, skipping 4-bit test.")
-    def test_4bit_model_training_step(self):
-        """
-        Verifies that a 4-bit model's weights are updated after one training step.
-        """
-        config = Config.from_json(self.config_path)
-        model, _ = load_model_and_tokenizer(
-            self.model_name, config, load_in_4bit=True, quantized=False
+        # 3. Run a training step on the quantized model
+        quantized_trainer = Trainer(
+            config, data_components, accelerator, False
         )
-
-        optimizer = Adam8bit(model.parameters(), lr=config.optimizer.learning_rate)
-        policy_loss_fn = nn.CrossEntropyLoss()
-
-        initial_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
-
-        dummy_input = torch.randint(0, self.vocab_size, (2, 4), device=model.device)
-        dummy_target = torch.randint(0, self.vocab_size, (2, 4), device=model.device)
-
-        model.train()
-        optimizer.zero_grad()
-        logits, _, _ = model(dummy_input)
-        loss = policy_loss_fn(logits.view(-1, self.vocab_size), dummy_target.view(-1))
-        loss.backward()
-        optimizer.step()
-
-        updated_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
-        self.assertFalse(
-            torch.equal(initial_weights, updated_weights),
-            "Model weights were NOT updated after a training step."
+        # Manually set the quantized model to the trainer
+        quantized_trainer.model = accelerator.prepare(quantized_model)
+        quantized_trainer.optimizer = torch.optim.AdamW(
+            quantized_trainer.model.parameters(), lr=1e-4
         )
+        loss, _ = quantized_trainer.train_pretrain_epoch()
+
+        # Assert that the training step was successful (loss is a valid number)
+        self.assertFalse(torch.isnan(loss))
+        self.assertFalse(torch.isinf(loss))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ import torch
 import torch.quantization
 
 from src.config import Config
-from src.utils import load_model_and_tokenizer
+from src.utils.core import load_model_and_tokenizer
 
 
 def quantize_model(model_path: str, config_path: str, output_path: str):

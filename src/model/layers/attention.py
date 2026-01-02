@@ -2,9 +2,28 @@
 PyTorch implementation of Scaled Dot-Product Attention using the optimized
 built-in PyTorch function.
 """
+"""
+PyTorch implementation of Scaled Dot-Product Attention using the optimized
+built-in PyTorch function.
+"""
+from dataclasses import dataclass
+from typing import Optional
+
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+
+@dataclass
+class AttentionInput:
+    """
+    Encapsulates the input for the ScaledDotProductAttention layer.
+    """
+    q: torch.Tensor
+    k: torch.Tensor
+    v: torch.Tensor
+    mask: Optional[torch.Tensor] = None
+    is_causal: bool = False
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -13,33 +32,22 @@ class ScaledDotProductAttention(nn.Module):
     This implementation automatically handles causal masking when `is_causal=True`.
     """
 
-    def forward(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        mask: torch.Tensor = None,
-        is_causal: bool = False,
-    ) -> torch.Tensor:
+    def forward(self, inputs: AttentionInput) -> torch.Tensor:
         """
         Forward pass for Scaled Dot-Product Attention.
 
         Args:
-            q: Query tensor.
-            k: Key tensor.
-            v: Value tensor.
-            mask: Optional attention mask.
-            is_causal: If True, applies a causal mask for autoregressive decoding.
-                       This argument is mutually exclusive with `mask`.
+            inputs: An AttentionInput object containing q, k, v, mask, and is_causal.
 
         Returns:
             The output tensor after applying attention.
         """
-        if is_causal and mask is not None:
+        if inputs.is_causal and inputs.mask is not None:
             raise ValueError("`is_causal` and `mask` are mutually exclusive.")
 
         # The built-in function is highly optimized and can use backends
         # like FlashAttention if available.
+        # pylint: disable=not-callable
         return F.scaled_dot_product_attention(
-            q, k, v, attn_mask=mask, is_causal=is_causal
+            inputs.q, inputs.k, inputs.v, attn_mask=inputs.mask, is_causal=inputs.is_causal
         )

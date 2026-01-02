@@ -68,11 +68,15 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
+            accepted_chunk = self.model._validate_and_accept_chunk(
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = torch.cat(
-                [speculative_chunk[:, :3], verification_tokens[:, 3].unsqueeze(-1)], dim=1
+                [
+                    speculative_chunk[:, :3],
+                    verification_tokens[:, 3].unsqueeze(-1)
+                ],
+                dim=1
             )
             self.assertTrue(torch.equal(accepted_chunk, expected_chunk))
 
@@ -90,7 +94,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
+            accepted_chunk = self.model._validate_and_accept_chunk(
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = verification_tokens[:, 0].unsqueeze(-1)
@@ -119,8 +123,12 @@ class TestTransformer(unittest.TestCase):
             'forward',
             return_value=(torch.tensor([12]), torch.tensor([5])) # Mock: use 12 layers, 5 experts
         ) as mock_gate:
-            with patch('src.model.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder:
+            with patch(
+                'src.model.model.DecoderBlock.forward',
+                return_value=(torch.randn(1, 10, 64), None)
+            ) as mock_decoder:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 mock_gate.assert_called_once()
-                # The 'dynamic_top_k' argument is now passed as a keyword argument
-                self.assertEqual(mock_decoder.call_args[1]['dynamic_top_k'], 5)
+                # The 'dynamic_top_k' is passed within the ForwardPassInput dataclass
+                final_call_args = mock_decoder.call_args[0][0]
+                self.assertEqual(final_call_args.dynamic_top_k, 5)

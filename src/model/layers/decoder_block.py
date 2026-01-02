@@ -23,7 +23,6 @@ class ForwardPassInput:
     """Dataclass for storing inputs to the forward pass of a DecoderBlock."""
     x: torch.Tensor
     ltm_state: torch.Tensor
-    mask: torch.Tensor = None
     kv_cache: 'KVCache' = None
     images: torch.Tensor = None
     layer_idx: int = None
@@ -35,7 +34,6 @@ class AttentionSubLayerInput:
     """Inputs for the AttentionSubLayer."""
     x: torch.Tensor
     ltm_state: torch.Tensor
-    mask: torch.Tensor
     kv_cache: 'KVCache'
     layer_idx: int
 
@@ -65,7 +63,7 @@ class AttentionSubLayer(nn.Module):
         if self.film:
             x_norm = self.film(x_norm, inputs.ltm_state)
         attn_output = self.mha(
-            x_norm, mask=inputs.mask, kv_cache=inputs.kv_cache, layer_idx=inputs.layer_idx
+            x_norm, kv_cache=inputs.kv_cache, layer_idx=inputs.layer_idx
         )
         return inputs.x + self.dropout(attn_output)
 
@@ -125,17 +123,16 @@ class DecoderBlock(nn.Module):
         self.attention_sublayer = AttentionSubLayer(config, linear_class)
         self.ff_sublayer = FeedForwardSubLayer(config, self.use_moe, linear_class)
 
-    def forward(self, x, ltm_state, mask=None, kv_cache=None, layer_idx=None, dynamic_top_k=None):
+    def forward(self, inputs: ForwardPassInput):
         """Performs the forward pass of the Decoder Block."""
         attn_inputs = AttentionSubLayerInput(
-            x=x,
-            ltm_state=ltm_state,
-            mask=mask,
-            kv_cache=kv_cache,
-            layer_idx=layer_idx,
+            x=inputs.x,
+            ltm_state=inputs.ltm_state,
+            kv_cache=inputs.kv_cache,
+            layer_idx=inputs.layer_idx,
         )
         x = self.attention_sublayer(attn_inputs)
         x, aux_loss = self.ff_sublayer(
-            x, ltm_state, dynamic_top_k
+            x, inputs.ltm_state, inputs.dynamic_top_k
         )
         return x, aux_loss

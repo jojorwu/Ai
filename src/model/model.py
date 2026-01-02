@@ -248,7 +248,9 @@ class Transformer(nn.Module):
         active_layers = int(torch.max(active_layers_tensor).item())
 
         # The generation configuration can override the dynamically selected top-k value for MoE.
-        final_dynamic_top_k_tensor = dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        final_dynamic_top_k_tensor = (
+            dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        )
         # For the MoE layer, we need a single integer.
         final_dynamic_top_k = int(torch.max(final_dynamic_top_k_tensor).item())
 
@@ -258,12 +260,18 @@ class Transformer(nn.Module):
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
+            block_input = ForwardPassInput(
+                x=h,
+                ltm_state=ltm_state,
+                layer_idx=i,
+                dynamic_top_k=final_dynamic_top_k
+            )
             if self.config.model.gradient_checkpointing and self.training:
                 h, aux_loss = torch.utils.checkpoint.checkpoint(
-                    block, h, ltm_state, None, None, i, final_dynamic_top_k, use_reentrant=False
+                    block, block_input, use_reentrant=False
                 )
             else:
-                h, aux_loss = block(h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k)
+                h, aux_loss = block(block_input)
 
             if aux_loss is not None:
                 total_aux_loss += aux_loss

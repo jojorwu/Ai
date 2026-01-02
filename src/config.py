@@ -4,7 +4,7 @@ Pydantic models for strong typing and validation of the project configuration.
 import json
 from typing import Any, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class LTMArchitectureConfig(BaseModel):
