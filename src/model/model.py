@@ -53,6 +53,7 @@ class SamplingConfig:
     """Configuration for sampling."""
     temperature: float = 1.0
     top_k: int = 0
+    top_p: float = 0.9
     dynamic_top_k: int = None
 
 
@@ -281,17 +282,37 @@ class Transformer(nn.Module):
         value = self.layers.value_head(h[:, -1, :])
         return logits, value, total_aux_loss
 
-    def _sample_from_logits(self, logits, temperature, top_k):
-        """Samples a token from logits."""
+    def _sample_from_logits(self, logits, temperature, top_k, top_p):
+        """Samples a token from logits using temperature, top-k, and top-p."""
         if temperature == 0.0:
             _, next_token = torch.topk(logits, k=1, dim=-1)
-        else:
-            logits = logits / temperature
-            if top_k > 0:
-                v, _ = torch.topk(logits, top_k)
-                logits[logits < v[:, -1, None]] = -float('Inf')
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
+            return next_token
+
+        logits = logits / temperature
+
+        # Apply top-k
+        if top_k > 0:
+            v, _ = torch.topk(logits, top_k)
+            logits[logits < v[:, -1, None]] = -float('Inf')
+
+        # Apply top-p (nucleus sampling)
+        if top_p > 0.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(
+                F.softmax(sorted_logits, dim=-1), dim=-1
+            )
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[
+                ..., :-1
+            ].clone()
+            sorted_indices_to_remove[..., 0] = 0
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, sorted_indices, sorted_indices_to_remove
+            )
+            logits[indices_to_remove] = -float('Inf')
+
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
         return next_token
 
 
@@ -343,8 +364,8 @@ class Transformer(nn.Module):
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
                     inputs.sampling_config.temperature,
-                    inputs.sampling_config.dynamic_top_k
-                    or inputs.sampling_config.top_k,
+                    inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
+                    inputs.sampling_config.top_p,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
         # Return only the newly generated tokens and the full draft sequence
@@ -381,6 +402,7 @@ class Transformer(nn.Module):
             true_logits.view(-1, true_logits.size(-1)),
             inputs.sampling_config.temperature,
             inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
+            inputs.sampling_config.top_p,
         ).view(speculative_chunk.shape)
 
         # Vectorized comparison to find the first mismatch
@@ -467,8 +489,8 @@ class Transformer(nn.Module):
                 next_token = self._sample_from_logits(
                     logits[:, -1, :],
                     inputs.sampling_config.temperature,
-                    inputs.sampling_config.dynamic_top_k
-                    or inputs.sampling_config.top_k,
+                    inputs.sampling_config.dynamic_top_k or inputs.sampling_config.top_k,
+                    inputs.sampling_config.top_p,
                 )
                 yield next_token, surprise
                 tokens = torch.cat((tokens, next_token), dim=1)

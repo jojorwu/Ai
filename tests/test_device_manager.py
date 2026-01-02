@@ -23,18 +23,18 @@ class TestDeviceManager(unittest.TestCase):
 
     @patch("torch.cuda.is_available", return_value=False)
     def test_hybrid_strategy_without_cuda(self, _mock_cuda_available):
-        """Tests that the hybrid strategy falls back to 'auto' without CUDA."""
-        config = HardwareConfig(strategy="hybrid")
+        """Tests that the hybrid strategy falls back to the default device without CUDA."""
+        config = HardwareConfig(strategy="hybrid", device="cpu")
         manager = DeviceManager(config)
         device_map = manager.get_device_map()
-        self.assertEqual(device_map, "auto")
+        self.assertEqual(device_map, {"": "cpu"})
         self.assertTrue(manager.should_disable_4bit())
 
     @patch("torch.cuda.is_available", return_value=False)
     def test_cpu_only_strategy(self, _mock_cuda_available):
-        """Tests that a non-hybrid strategy returns 'auto'."""
-        config = HardwareConfig(strategy="discrete")
+        """Tests that a non-hybrid strategy returns the default device."""
+        config = HardwareConfig(strategy="discrete", device="cpu")
         manager = DeviceManager(config)
         device_map = manager.get_device_map()
-        self.assertEqual(device_map, "auto")
+        self.assertEqual(device_map, {"": "cpu"})
         self.assertTrue(manager.should_disable_4bit())

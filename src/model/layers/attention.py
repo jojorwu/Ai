@@ -2,10 +2,6 @@
 PyTorch implementation of Scaled Dot-Product Attention using the optimized
 built-in PyTorch function.
 """
-"""
-PyTorch implementation of Scaled Dot-Product Attention using the optimized
-built-in PyTorch function.
-"""
 from dataclasses import dataclass
 from typing import Optional
 

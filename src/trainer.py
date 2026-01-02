@@ -34,15 +34,19 @@ def create_trainer(
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
+    scheduler = CosineAnnealingLR(
+        optimizer, T_max=config.scheduler.training_steps
+    )
     value_loss_fn = nn.MSELoss()
 
-    model, optimizer, value_loss_fn = accelerator.prepare(
-        model, optimizer, value_loss_fn
+    model, optimizer, scheduler, value_loss_fn = accelerator.prepare(
+        model, optimizer, scheduler, value_loss_fn
     )
 
     training_components = TrainingComponents(
         model=model,
         optimizer=optimizer,
+        scheduler=scheduler,
         value_loss_fn=value_loss_fn,
     )
     trainer_config = TrainerConfig(
@@ -59,6 +63,7 @@ class TrainingComponents:
     """Core components for training."""
     model: nn.Module
     optimizer: Adam
+    scheduler: CosineAnnealingLR
     value_loss_fn: nn.Module
 
 @dataclass
@@ -143,7 +148,6 @@ class Trainer:
             evo_cfg.seq_len,
             self._config.accelerator.device,
         )
-        scheduler = CosineAnnealingLR(self._config.components.optimizer, T_max=100)
         self._config.components.model.train()
         self._config.components.optimizer.zero_grad()
         for i, (x, y, _) in enumerate(batch_iterator):
@@ -157,7 +161,7 @@ class Trainer:
                     )
                 self._config.components.optimizer.step()
                 self._config.components.optimizer.zero_grad()
-        scheduler.step()
+        self._config.components.scheduler.step()
         avg_loss = total_policy_loss / num_batches if num_batches > 0 else 0
         epoch_time = time.time() - start_time
         return avg_loss, epoch_time

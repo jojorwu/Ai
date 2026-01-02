@@ -172,6 +172,8 @@ class SchedulerConfig(BaseModel):
     """Configuration for the learning rate scheduler."""
     warmup_steps: int = Field(...,
                               description="Number of 'warm-up' steps.")
+    training_steps: int = Field(...,
+                                description="Total number of training steps.")
     min_lr: float = Field(..., description="Minimum learning rate value.")
 
 

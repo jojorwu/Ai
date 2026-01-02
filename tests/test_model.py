@@ -132,3 +132,28 @@ class TestTransformer(unittest.TestCase):
                 # The 'dynamic_top_k' is passed within the ForwardPassInput dataclass
                 final_call_args = mock_decoder.call_args[0][0]
                 self.assertEqual(final_call_args.dynamic_top_k, 5)
+
+    def test_top_p_sampling(self):
+        """Tests the top-p (nucleus) sampling logic."""
+        # Test case 1: One token is overwhelmingly likely
+        logits1 = torch.tensor([[0.1, 0.2, 0.3, 0.4, 10.0]])
+        top_p1 = 0.9
+        next_token1 = self.model._sample_from_logits(
+            logits1, temperature=1.0, top_k=0, top_p=top_p1
+        )
+        self.assertEqual(next_token1.item(), 4)
+
+        # Test case 2: More evenly distributed probabilities
+        logits2 = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5]])
+        top_p2 = 0.4 # This should select tokens 4 and 3
+
+        tokens = [
+            self.model._sample_from_logits(
+                logits2, temperature=1.0, top_k=0, top_p=top_p2
+            ).item() for _ in range(100)
+        ]
+
+        # Check that the sampled tokens are only from the top-p nucleus
+        self.assertTrue(all(t in [3, 4] for t in tokens))
+        # Check that we have some variety, confirming it's not just greedy sampling
+        self.assertTrue(len(set(tokens)) > 1)
