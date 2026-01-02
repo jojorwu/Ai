@@ -16,6 +16,8 @@ class LTMArchitectureConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """Configuration for the Transformer model architecture."""
+    vocab_size: Optional[int] = Field(
+        None, description="Size of the vocabulary.")
     d_model: int = Field(...,
                          description="Dimensionality of the model's vectors.")
     num_layers: int = Field(
@@ -202,6 +204,8 @@ class HardwareConfig(BaseModel):
         "cpu", description="Device for computations (cpu, gpu, mps).")
     strategy: Literal["unified", "discrete", "hybrid"] = Field(
         "discrete", description="Memory strategy for hardware.")
+    torch_compile: bool = Field(
+        False, description="Enable torch.compile for the model.")
 
 
 class Config(BaseModel):

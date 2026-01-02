@@ -446,8 +446,13 @@ class Transformer(nn.Module):
                 )
             surprise = self._calculate_surprise(value, inputs.ltm_override)
 
+            # We only need the logits for the speculative part of the sequence
+            # for validation. The logits for the initial tokens are ignored.
+            validation_logits = true_logits[
+                :, -speculative_chunk.size(1) - 1 : -1, :
+            ]
             accepted_chunk = self._validate_and_accept_chunk(
-                true_logits, speculative_chunk, inputs
+                validation_logits, speculative_chunk, inputs
             )
 
             # If the chunk is accepted, yield it and update the token sequence.

@@ -57,6 +57,14 @@ def setup_environment(args):
     config = Config.from_json(config_path)
     return config, model_dir, resume_dir
 
+
+def save_updated_config(config: Config, tokenizer: Tokenizer, model_dir: str):
+    """Saves the updated config with the correct vocab size."""
+    config.model.vocab_size = tokenizer.vocab_size
+    with open(os.path.join(model_dir, "config.json"), "w", encoding="utf-8") as f:
+        f.write(config.model_dump_json(indent=4))
+
+
 def run_training_loop(trainer, config, model_dir):
     """Executes the main training loop."""
     best_val_loss = float('inf')
@@ -135,6 +143,7 @@ def main():
         config.evolution.validation_split,
     )
     if not resume_dir:
+        save_updated_config(config, tokenizer, model_dir)
         shutil.copy(
             os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
             model_dir,

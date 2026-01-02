@@ -73,6 +73,7 @@
   },
   "hardware": {
     "device": "cpu",
-    "strategy": "discrete"
+    "strategy": "discrete",
+    "torch_compile": false
   }
 }
