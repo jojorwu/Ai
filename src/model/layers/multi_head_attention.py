@@ -92,17 +92,17 @@ class MultiHeadAttention(nn.Module):
             q_proj = apply_rope_embeddings(q_proj, cos, sin, seq_offset)
             k_proj = apply_rope_embeddings(k_proj, cos, sin, seq_offset)
 
+        is_causal = kv_cache is None
         if kv_cache is not None:
             kv_cache.update(k_proj, v_proj, layer_idx)
             k_proj, v_proj = kv_cache.get(layer_idx)
-            mask = torch.triu(
-                torch.ones(seq_len, k_proj.size(2)), diagonal=1
-            ).bool().to(x.device)
 
         num_q_per_kv = self.config.num_heads // self.config.num_kv_heads
         k_proj = self._repeat_kv(k_proj, num_q_per_kv)
         v_proj = self._repeat_kv(v_proj, num_q_per_kv)
 
-        attention_output = self.attention(q_proj, k_proj, v_proj, mask)
+        attention_output = self.attention(
+            q_proj, k_proj, v_proj, is_causal=is_causal
+        )
         combined_output = self._combine_heads(attention_output)
         return self.wo(combined_output)
