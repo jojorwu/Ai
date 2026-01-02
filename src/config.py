@@ -36,6 +36,8 @@ class ModelConfig(BaseModel):
         None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(
         None, description="Number of 'experts' to select for each token.")
+    gradient_checkpointing: bool = Field(
+        False, description="Enable gradient checkpointing to save memory.")
 
 
 class MultiHeadAttentionConfig(BaseModel):

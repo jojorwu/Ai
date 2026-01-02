@@ -258,13 +258,13 @@ class Transformer(nn.Module):
         total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
-            inputs = ForwardPassInput(
-                x=h,
-                ltm_state=ltm_state,
-                layer_idx=i,
-                dynamic_top_k=final_dynamic_top_k,
-            )
-            h, aux_loss = block(inputs)
+            if self.config.model.gradient_checkpointing and self.training:
+                h, aux_loss = torch.utils.checkpoint.checkpoint(
+                    block, h, ltm_state, None, None, i, final_dynamic_top_k, use_reentrant=False
+                )
+            else:
+                h, aux_loss = block(h, ltm_state=ltm_state, layer_idx=i, dynamic_top_k=final_dynamic_top_k)
+
             if aux_loss is not None:
                 total_aux_loss += aux_loss
 

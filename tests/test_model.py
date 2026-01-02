@@ -122,4 +122,5 @@ class TestTransformer(unittest.TestCase):
             with patch('src.model.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 mock_gate.assert_called_once()
-                self.assertEqual(mock_decoder.call_args[0][0].dynamic_top_k, 5)
+                # The 'dynamic_top_k' argument is now passed as a keyword argument
+                self.assertEqual(mock_decoder.call_args[1]['dynamic_top_k'], 5)

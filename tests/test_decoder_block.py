@@ -34,9 +34,9 @@ class TestDecoderBlock(unittest.TestCase):
         decoder_block = DecoderBlock(config)
 
         x = torch.randn(4, 10, config.d_model) # Batch, SeqLen, Dim
-        inputs = ForwardPassInput(x=x, ltm_state=torch.zeros_like(x))
+        ltm_state = torch.zeros_like(x)
 
-        output, aux_loss = decoder_block(inputs)
+        output, aux_loss = decoder_block(x, ltm_state)
 
         self.assertEqual(x.shape, output.shape)
         self.assertIsNotNone(aux_loss)
@@ -50,10 +50,9 @@ class TestDecoderBlock(unittest.TestCase):
 
         x = torch.randn(4, 10, config.d_model, requires_grad=True)
         ltm_state = torch.randn(4, 1, config.d_model, requires_grad=True)
-        inputs = ForwardPassInput(x=x, ltm_state=ltm_state)
 
         # Forward pass
-        output, aux_loss = decoder_block(inputs)
+        output, aux_loss = decoder_block(x, ltm_state)
 
         # Simulate a combined loss and backward pass
         fake_loss = output.sum() + aux_loss

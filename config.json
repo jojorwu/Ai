@@ -8,7 +8,8 @@
     "max_seq_len": 128,
     "dropout_rate": 0.1,
     "num_experts": 8,
-    "top_k_experts": 2
+    "top_k_experts": 2,
+    "gradient_checkpointing": false
   },
   "vision": {
     "image_size": [
