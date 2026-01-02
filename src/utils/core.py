@@ -7,7 +7,7 @@ import os
 import re
 from typing import Tuple
 import torch
-from accelerate import dispatch_model, init_empty_weights
+from accelerate import dispatch_model
 
 
 from src.config import Config, TransformerConfig

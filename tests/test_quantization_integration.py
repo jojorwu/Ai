@@ -9,11 +9,15 @@ import unittest
 
 import torch
 from accelerate import Accelerator
-from torch import nn
 
 from src.config import Config
-from src.model.model import Transformer
-from src.trainer import Trainer, DataComponents
+from src.trainer import (
+    Trainer,
+    DataComponents,
+    create_trainer,
+    TrainerConfig,
+    TrainingComponents,
+)
 from src.utils.core import load_model_and_tokenizer
 
 
@@ -36,9 +40,8 @@ class TestQuantizationIntegration(unittest.TestCase):
         self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
         self.data_path = os.path.join(self.temp_dir, "data.txt")
 
-        config = Config.model_validate_json(
-            open("config.json", "r", encoding="utf-8").read()
-        )
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = Config.model_validate_json(f.read())
         config.model.d_model = 16
         config.model.num_heads = 2
         config.model.d_ff = 32
@@ -59,7 +62,7 @@ class TestQuantizationIntegration(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
-    def test_quantized_model_training_lifecycle(self):
+    def test_quantized_model_training_lifecycle(self): # pylint: disable=too-many-locals
         """
         Tests the full training lifecycle with a 4-bit quantized model.
         """
@@ -76,10 +79,12 @@ class TestQuantizationIntegration(unittest.TestCase):
         data_components = DataComponents(
             tokenizer=tokenizer, train_data=train_data, val_data=val_data
         )
-        trainer = Trainer(config, data_components, accelerator, False)
+        trainer = create_trainer(config, data_components, accelerator)
         trainer.train_pretrain_epoch()
+        # Ensure we save the unwrapped model state dict
+        unwrapped_model = accelerator.unwrap_model(trainer.get_model())
         torch.save(
-            trainer.get_model().state_dict(),
+            unwrapped_model.state_dict(),
             os.path.join(self.model_dir, "model.pt")
         )
         shutil.copy(self.config_path, self.model_dir)
@@ -100,14 +105,42 @@ class TestQuantizationIntegration(unittest.TestCase):
         )
 
         # 3. Run a training step on the quantized model
-        quantized_trainer = Trainer(
-            config, data_components, accelerator, False
+        # We need to create a new optimizer for the quantized model's parameters
+        quantized_optimizer = torch.optim.AdamW(
+            quantized_model.parameters(), lr=config.optimizer.learning_rate
         )
-        # Manually set the quantized model to the trainer
-        quantized_trainer.model = accelerator.prepare(quantized_model)
-        quantized_trainer.optimizer = torch.optim.AdamW(
-            quantized_trainer.model.parameters(), lr=1e-4
+
+        # We can reuse the scheduler and loss function from the original trainer.
+        # We access the internal config of the original trainer to get them.
+        # pylint: disable=protected-access
+        original_trainer_config = trainer._config
+        scheduler = original_trainer_config.components.scheduler
+        value_loss_fn = original_trainer_config.components.value_loss_fn
+
+        # Prepare the new model, optimizer, and re-prepare the reused components
+        (
+            quantized_model,
+            quantized_optimizer,
+            scheduler,
+            value_loss_fn,
+        ) = accelerator.prepare(
+            quantized_model, quantized_optimizer, scheduler, value_loss_fn
         )
+
+        # Create new training components and config for the quantized trainer
+        quantized_components = TrainingComponents(
+            model=quantized_model,
+            optimizer=quantized_optimizer,
+            scheduler=scheduler,
+            value_loss_fn=value_loss_fn,
+        )
+        quantized_trainer_config = TrainerConfig(
+            components=quantized_components,
+            data=data_components,
+            config=config,
+            accelerator=accelerator,
+        )
+        quantized_trainer = Trainer(quantized_trainer_config)
         loss, _ = quantized_trainer.train_pretrain_epoch()
 
         # Assert that the training step was successful (loss is a valid number)

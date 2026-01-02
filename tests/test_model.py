@@ -48,7 +48,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=speculative_chunk):
-            accepted_chunk = self.model._validate_and_accept_chunk( # pylint: disable=protected-access
+            accepted_chunk = self.model._validate_and_accept_chunk(  # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             self.assertTrue(torch.equal(accepted_chunk, speculative_chunk))
@@ -68,7 +68,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk(
+            accepted_chunk = self.model._validate_and_accept_chunk(  # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = torch.cat(
@@ -94,7 +94,7 @@ class TestTransformer(unittest.TestCase):
         inputs.sampling_config.dynamic_top_k = None
 
         with patch.object(self.model, '_sample_from_logits', return_value=verification_tokens):
-            accepted_chunk = self.model._validate_and_accept_chunk(
+            accepted_chunk = self.model._validate_and_accept_chunk(  # pylint: disable=protected-access
                 true_logits, speculative_chunk, inputs
             )
             expected_chunk = verification_tokens[:, 0].unsqueeze(-1)
@@ -109,7 +109,10 @@ class TestTransformer(unittest.TestCase):
             'forward',
             return_value=(torch.tensor([3]), torch.tensor([1])) # Mock: use 3 layers, 1 expert
         ) as mock_gate:
-            with patch('src.model.model.DecoderBlock.forward', return_value=(torch.randn(1, 10, 64), None)) as mock_decoder:
+            with patch(
+                'src.model.model.DecoderBlock.forward',
+                return_value=(torch.randn(1, 10, 64), None)
+            ) as mock_decoder:
                 self.model(torch.randint(0, self.config.vocab_size, (1, 10)))
                 mock_gate.assert_called_once()
                 self.assertEqual(mock_decoder.call_count, 3)
@@ -138,17 +141,17 @@ class TestTransformer(unittest.TestCase):
         # Test case 1: One token is overwhelmingly likely
         logits1 = torch.tensor([[0.1, 0.2, 0.3, 0.4, 10.0]])
         top_p1 = 0.9
-        next_token1 = self.model._sample_from_logits(
+        next_token1 = self.model._sample_from_logits(  # pylint: disable=protected-access
             logits1, temperature=1.0, top_k=0, top_p=top_p1
         )
         self.assertEqual(next_token1.item(), 4)
 
         # Test case 2: More evenly distributed probabilities
         logits2 = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5]])
-        top_p2 = 0.4 # This should select tokens 4 and 3
+        top_p2 = 0.4  # This should select tokens 4 and 3
 
         tokens = [
-            self.model._sample_from_logits(
+            self.model._sample_from_logits(  # pylint: disable=protected-access
                 logits2, temperature=1.0, top_k=0, top_p=top_p2
             ).item() for _ in range(100)
         ]

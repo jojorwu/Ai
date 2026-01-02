@@ -73,7 +73,7 @@ class MixtureOfExperts(nn.Module):
 
         # 5. Process tokens by each expert in batches
         for i, expert in enumerate(self.experts):
-            expert_mask = (flat_selected_experts == i)
+            expert_mask = flat_selected_experts == i
             if expert_mask.any():
                 # Select the tokens for the current expert
                 expert_inputs = x_reshaped[token_indices[expert_mask]]

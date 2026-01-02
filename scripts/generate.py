@@ -145,7 +145,9 @@ def main():
 
     config = Config.from_json(config_path)
     accelerator = Accelerator()
-    model, tokenizer = load_model_and_tokenizer(model_name, config, args.load_in_4bit, args.quantized)
+    model, tokenizer = load_model_and_tokenizer(
+        model_name, config, args.load_in_4bit, args.quantized
+    )
     run_agent_loop(model, tokenizer, config, accelerator)
 
 if __name__ == "__main__":
