@@ -9,7 +9,7 @@ import shutil
 import torch
 from accelerate import Accelerator
 
-from src.config import Config
+from src.config import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.trainer import create_trainer, DataComponents
@@ -48,17 +48,16 @@ def setup_environment(args):
         if os.path.exists(model_dir):
             raise FileExistsError(f"Model directory '{model_dir}' already exists.")
         os.makedirs(model_dir)
-        config_path = 'config.json'
+        config_path = 'config_train.json'
         log_path = os.path.join(model_dir, 'training.log')
         setup_logging(log_path)
-        shutil.copy(config_path, os.path.join(model_dir, 'config.json'))
         logging.info("Starting new training run: '%s'.", args.model_name)
 
-    config = Config.from_json(config_path)
+    config = TrainConfig.from_json(config_path)
     return config, model_dir, resume_dir
 
 
-def save_updated_config(config: Config, tokenizer: Tokenizer, model_dir: str):
+def save_updated_config(config: TrainConfig, tokenizer: Tokenizer, model_dir: str):
     """Saves the updated config with the correct vocab size."""
     config.model.vocab_size = tokenizer.vocab_size
     with open(os.path.join(model_dir, "config.json"), "w", encoding="utf-8") as f:
@@ -133,9 +132,21 @@ def main():
     parser.add_argument(
         '--load-in-4bit', action='store_true', help="Load the model in 4-bit."
     )
+    parser.add_argument(
+        '--hardware-strategy',
+        type=str,
+        choices=['unified', 'discrete', 'hybrid'],
+        help="Override the hardware strategy from the config.",
+    )
     args = parser.parse_args()
 
     config, model_dir, resume_dir = setup_environment(args)
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
+
     accelerator = Accelerator(mixed_precision="fp16")
     tokenizer, train_data, val_data = load_and_prepare_data(
         config.evolution.data_dir,

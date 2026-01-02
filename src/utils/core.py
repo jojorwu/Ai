@@ -10,7 +10,7 @@ import torch
 from accelerate import dispatch_model
 
 
-from src.config import Config, TransformerConfig
+from src.config import BaseConfig, TransformerConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
 from src.utils.device_manager import DeviceManager
@@ -113,7 +113,7 @@ def main_entrypoint(main_func):
 
 def load_model_and_tokenizer(
     model_name: str,
-    config: "Config",
+    config: "BaseConfig",
     load_in_4bit: bool,
     quantized: bool,
     dispatch: bool = True,

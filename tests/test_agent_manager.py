@@ -8,7 +8,7 @@ import torch
 from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
-from src.config import Config
+from src.config import TrainConfig
 from src.model.model import Transformer
 
 
@@ -17,7 +17,7 @@ class TestAgentManager(unittest.TestCase):
 
     def setUp(self):
         """Set up a mock model and config for testing."""
-        self.mock_config = Config.from_json('config.json')
+        self.mock_config = TrainConfig.from_json('config_train.json')
         self.mock_model = MagicMock(spec=Transformer)
         self.mock_model.config = self.mock_config
 

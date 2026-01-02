@@ -11,7 +11,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.agent.agent_manager import AgentManager, SpecializationConfig
-from src.config import Config, TransformerConfig
+from src.config import TrainConfig, TransformerConfig
 from src.data.data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
 from src.model.loss import cross_entropy_with_label_smoothing
@@ -19,7 +19,7 @@ from src.model.model import Transformer
 
 
 def create_trainer(
-    config: Config,
+    config: TrainConfig,
     data_components: "DataComponents",
     accelerator: "Accelerator",
     load_in_4bit: bool = False,
@@ -78,7 +78,7 @@ class TrainerConfig:
     """Configuration for the Trainer, adapted for PyTorch."""
     components: TrainingComponents
     data: DataComponents
-    config: Config
+    config: TrainConfig
     accelerator: 'Accelerator'
 
 

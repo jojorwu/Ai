@@ -210,20 +210,26 @@ class HardwareConfig(BaseModel):
         False, description="Enable torch.compile for the model.")
 
 
-class Config(BaseModel):
-    """Main configuration model."""
+class BaseConfig(BaseModel):
+    """Base configuration model with shared settings."""
     model: ModelConfig
     vision: VisionConfig
-    evolution: EvolutionConfig
-    optimizer: OptimizerConfig
     ltm: LTMConfig
-    scheduler: SchedulerConfig
-    generation: GenerationConfig
     hardware: HardwareConfig
 
     @classmethod
-    def from_json(cls, file_path: str) -> 'Config':
+    def from_json(cls, file_path: str):
         """Loads and validates the configuration from a JSON file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        return cls(**data)
+        return cls.model_validate(data)
+
+class TrainConfig(BaseConfig):
+    """Configuration model for training."""
+    evolution: EvolutionConfig
+    optimizer: OptimizerConfig
+    scheduler: SchedulerConfig
+
+class GenerateConfig(BaseConfig):
+    """Configuration model for generation."""
+    generation: GenerationConfig

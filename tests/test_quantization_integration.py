@@ -10,7 +10,7 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from src.config import Config
+from src.config import TrainConfig
 from src.trainer import (
     Trainer,
     DataComponents,
@@ -40,8 +40,8 @@ class TestQuantizationIntegration(unittest.TestCase):
         self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
         self.data_path = os.path.join(self.temp_dir, "data.txt")
 
-        with open("config.json", "r", encoding="utf-8") as f:
-            config = Config.model_validate_json(f.read())
+        with open("config_train.json", "r", encoding="utf-8") as f:
+            config = TrainConfig.model_validate_json(f.read())
         config.model.d_model = 16
         config.model.num_heads = 2
         config.model.d_ff = 32
@@ -67,7 +67,7 @@ class TestQuantizationIntegration(unittest.TestCase):
         Tests the full training lifecycle with a 4-bit quantized model.
         """
         # 1. Initial training and saving
-        config = Config.from_json(self.config_path)
+        config = TrainConfig.from_json(self.config_path)
         accelerator = Accelerator()
         tokenizer = DataComponents.tokenizer
         train_data = torch.randint(

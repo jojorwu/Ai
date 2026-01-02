@@ -12,7 +12,7 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from src.config import Config
+from src.config import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
@@ -92,7 +92,7 @@ def _process_tool_call(agent_state, tokenizer):
     return False
 
 def run_agent_loop(
-    model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator
+    model: Transformer, tokenizer: Tokenizer, config: GenerateConfig, accelerator: Accelerator
 ):
     """Runs the main agent loop."""
     agent_state = _initialize_agent_state(config, tokenizer)
@@ -130,6 +130,12 @@ def main():
     parser.add_argument(
         '--quantized', action='store_true', help="Load a quantized model for CPU."
     )
+    parser.add_argument(
+        '--hardware-strategy',
+        type=str,
+        choices=['unified', 'discrete', 'hybrid'],
+        help="Override the hardware strategy from the config.",
+    )
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()
@@ -143,7 +149,13 @@ def main():
             f"Config file not found for model '{model_name}' at {config_path}"
         )
 
-    config = Config.from_json(config_path)
+    config = GenerateConfig.from_json(config_path)
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
+
     accelerator = Accelerator()
     model, tokenizer = load_model_and_tokenizer(
         model_name, config, args.load_in_4bit, args.quantized

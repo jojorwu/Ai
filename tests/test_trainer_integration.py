@@ -6,13 +6,13 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from src.config import Config
+from src.config import TrainConfig
 from src.trainer import create_trainer, DataComponents
 
 
 def _create_test_config_and_data():
     """Creates a minimal configuration and dummy data for testing the Trainer."""
-    config = Config.from_json('config.json')
+    config = TrainConfig.from_json('config_train.json')
     config.model.d_model = 8
     config.model.num_layers = 1
     config.model.num_heads = 2
