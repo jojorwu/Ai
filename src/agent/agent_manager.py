@@ -73,7 +73,19 @@ class AgentManager:
         logging.info("Agents cloned successfully.")
 
     def specialize_agents_on_dataset(self, spec_config: SpecializationConfig, device):
-        """Conducts a "specialization" phase."""
+        """
+        Conducts a "specialization" phase where each agent is trained on a
+        unique subset of the data.
+
+        This process allows each agent to develop a specialized Long-Term Memory (LTM)
+        based on its unique experiences, fostering diversity in the agent population.
+        The training is done for a fixed number of steps per agent.
+
+        Args:
+            spec_config: A dataclass containing the configuration for specialization,
+                         including the dataset and training parameters.
+            device: The device to perform the training on.
+        """
         if not spec_config.full_data:
             return
         data_tensor = torch.tensor(spec_config.full_data)
@@ -104,7 +116,17 @@ class AgentManager:
         logging.info("Agent specialization complete.")
 
     def merge_agents(self, best_agents: List[Agent]):
-        """Averages the LTM state_dicts of the 'best' agents."""
+        """
+        Merges the knowledge of the best-performing agents into the base model.
+
+        This is achieved by averaging the weights (state_dict) of the Long-Term
+        Memory (LTM) modules from the provided list of 'best' agents. The resulting
+        averaged LTM state is then loaded into the base model, effectively
+        assimilating the collective knowledge of the top performers.
+
+        Args:
+            best_agents: A list of the top-performing Agent objects.
+        """
         if not best_agents:
             return
         ltm_states = [a.get_ltm_state() for a in best_agents if a.get_ltm_state()]
@@ -112,6 +134,8 @@ class AgentManager:
             logging.warning("None of the best agents had a valid LTM state.")
             return
 
+        # Initialize a dictionary for the averaged state with zero-tensors.
+        # This avoids modifying any of the original state_dicts.
         avg_state = {
             key: torch.zeros_like(tensor, device="cpu")
             for key, tensor in ltm_states[0].items()
@@ -263,7 +287,7 @@ class AgentManager:
                 if ltm:
                     # Each LTM processes its corresponding sequence embedding
                     ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
-                    ltm_states[i] = ltm(ltm_input)
+                    ltm_states[i], _ = ltm(ltm_input)
 
             # A single forward pass with the batched LTM states
             _, values, _ = self.base_model.forward(

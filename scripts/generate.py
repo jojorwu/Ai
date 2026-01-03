@@ -3,7 +3,6 @@ Main agent script for interacting with the Transformer model using PyTorch.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
-import argparse
 import logging
 import os
 from dataclasses import dataclass
@@ -12,10 +11,11 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from src.config import Config
+from src.config import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
+from src.utils.cli import create_main_parser
 from src.utils.complexity_manager import ComplexityManager
 from src.utils.core import (load_model_and_tokenizer, main_entrypoint,
                           parse_tool_call, select_model_interactively,
@@ -92,7 +92,7 @@ def _process_tool_call(agent_state, tokenizer):
     return False
 
 def run_agent_loop(
-    model: Transformer, tokenizer: Tokenizer, config: Config, accelerator: Accelerator
+    model: Transformer, tokenizer: Tokenizer, config: GenerateConfig, accelerator: Accelerator
 ):
     """Runs the main agent loop."""
     agent_state = _initialize_agent_state(config, tokenizer)
@@ -118,11 +118,7 @@ def run_agent_loop(
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
-    parser = argparse.ArgumentParser(
-        description="Interact with a PyTorch Transformer model.")
-    parser.add_argument('--model-name', type=str, help="The name of the model to use.")
-    parser.add_argument(
-        '--load-in-4bit', action='store_true', help="Load the model in 4-bit.")
+    parser = create_main_parser()
     parser.add_argument(
         '--quantized', action='store_true', help="Load a quantized model for CPU."
     )
@@ -139,9 +135,17 @@ def main():
             f"Config file not found for model '{model_name}' at {config_path}"
         )
 
-    config = Config.from_json(config_path)
+    config = GenerateConfig.from_json(config_path)
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
+
     accelerator = Accelerator()
-    model, tokenizer = load_model_and_tokenizer(model_name, config, args.load_in_4bit, args.quantized)
+    model, tokenizer = load_model_and_tokenizer(
+        model_name, config, args.load_in_4bit, args.quantized
+    )
     run_agent_loop(model, tokenizer, config, accelerator)
 
 if __name__ == "__main__":

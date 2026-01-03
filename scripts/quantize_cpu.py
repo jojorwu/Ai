@@ -7,8 +7,8 @@ import os
 import torch
 import torch.quantization
 
-from src.config import Config
-from src.utils import load_model_and_tokenizer
+from src.config import TrainConfig
+from src.utils.core import load_model_and_tokenizer
 
 
 def quantize_model(model_path: str, config_path: str, output_path: str):
@@ -21,12 +21,18 @@ def quantize_model(model_path: str, config_path: str, output_path: str):
         output_path: Path to save the quantized model.
     """
     # Load the main configuration
-    config = Config.from_json(config_path)
+    config = TrainConfig.from_json(config_path)
+    # The load_model_and_tokenizer function already handles the quantization
+    # when the 'quantized' flag is set to True.
     model, _ = load_model_and_tokenizer(
-        os.path.basename(os.path.dirname(model_path)), config, False, True, dispatch=False
+        os.path.basename(os.path.dirname(model_path)),
+        config,
+        load_in_4bit=False,
+        quantized=True,
+        dispatch=False
     )
 
-    # Save the quantized model
+    # Save the quantized model state dictionary
     torch.save(model.state_dict(), output_path)
     print(f"Quantized model saved to {output_path}")
 

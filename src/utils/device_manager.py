@@ -16,19 +16,19 @@ class DeviceManager:
         self.cuda_available = torch.cuda.is_available()
         self.mps_available = torch.backends.mps.is_available()
 
-    def get_device_map(self) -> str | dict:
+    def get_device_map(self) -> dict:
         """
-        Determines the appropriate device map for `accelerate`.
+        Determenos the appropriate device map for `accelerate`.
 
         Returns:
-            A string ("auto") or a dictionary representing the device map.
+            A dictionary representing the device map.
         """
         if self.config.strategy == "hybrid" and self.cuda_available:
             # Hybrid strategy: LTM on CPU, rest on GPU
             return {"layers.long_term_memory": "cpu", "": "cuda:0"}
 
-        # For all other cases (CPU-only, GPU-only, ARM), let accelerate decide.
-        return "auto"
+        # Default to the configured device for other strategies
+        return {"": self.config.device}
 
     def should_disable_4bit(self) -> bool:
         """

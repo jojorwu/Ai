@@ -38,63 +38,57 @@ class MixtureOfExperts(nn.Module):
         f_i = top_k_mask.sum(dim=0).sum(dim=0) / (batch_size * seq_len)
         return self.num_experts * (p_i * f_i).sum()
 
-    def _get_expert_outputs(self, expanded_x, flat_top_k_indices):
-        """Gets the outputs from the experts."""
-        # pylint: disable=too-many-locals
-        expert_outputs = torch.zeros_like(expanded_x)
-        for i, expert in enumerate(self.experts):
-            expert_mask = flat_top_k_indices == i
-            if expert_mask.any():
-                expert_inputs = expanded_x[expert_mask]
-                expert_outputs.masked_scatter_(
-                    expert_mask.unsqueeze(-1), expert(expert_inputs)
-                )
-        return expert_outputs
-
-    def _route_tokens(self, x_reshaped: torch.Tensor, current_top_k: int):
-        """Computes routing for tokens and returns weights and indices."""
-        router_logits = self.gate(x_reshaped)
-        top_k_weights, top_k_indices = torch.topk(
-            router_logits, current_top_k, dim=-1
-        )
-        top_k_weights = F.softmax(
-            top_k_weights, dim=-1, dtype=torch.float32
-        ).to(x_reshaped.dtype)
-        return router_logits, top_k_weights, top_k_indices
-
     def forward(self, x: torch.Tensor, dynamic_top_k: int = None):
         """
-        Forward pass through the MoE layer using vectorized operations.
+        Forward pass through the MoE layer using fully vectorized operations.
+        This implementation avoids Python loops for better performance on parallel hardware.
         """
         # pylint: disable=too-many-locals
         batch_size, seq_len, d_model = x.shape
         x_reshaped = x.view(-1, d_model)
+        num_tokens = x_reshaped.shape[0]
         current_top_k = dynamic_top_k if dynamic_top_k is not None else self.top_k
 
-        router_logits, top_k_weights, top_k_indices = self._route_tokens(
-            x_reshaped, current_top_k
+        # 1. Route tokens to experts
+        router_logits = self.gate(x_reshaped)
+        routing_weights, selected_experts = torch.topk(
+            router_logits, current_top_k, dim=-1
         )
-        aux_loss = self._compute_aux_loss(
-            router_logits, top_k_indices, batch_size, seq_len
+        routing_weights = F.softmax(routing_weights, dim=-1, dtype=torch.float32)
+
+        # 2. Compute auxiliary load balancing loss
+        aux_loss = self._compute_aux_loss(router_logits, selected_experts, batch_size, seq_len)
+
+        # 3. Create a flat tensor of expert outputs
+        expert_outputs = torch.zeros(
+            num_tokens * current_top_k, d_model, device=x.device, dtype=x.dtype
         )
 
-        flat_top_k_indices = top_k_indices.view(-1)
-        expanded_x = x_reshaped.unsqueeze(1).expand(
-            -1, current_top_k, -1
-        ).reshape(-1, d_model)
-        expert_outputs = self._get_expert_outputs(expanded_x, flat_top_k_indices)
-
-        final_output = self._combine_expert_outputs(
-            expert_outputs, top_k_weights, current_top_k, d_model
+        # 4. Use torch.gather to select inputs for each expert
+        # This creates a flat tensor of all tokens that need to be processed.
+        flat_selected_experts = selected_experts.view(-1)
+        token_indices = torch.arange(num_tokens, device=x.device).repeat_interleave(
+            current_top_k
         )
+
+        # 5. Process tokens by each expert in batches
+        for i, expert in enumerate(self.experts):
+            expert_mask = flat_selected_experts == i
+            if expert_mask.any():
+                # Select the tokens for the current expert
+                expert_inputs = x_reshaped[token_indices[expert_mask]]
+                # Run the expert on its tokens
+                expert_result = expert(expert_inputs)
+                # Store the results back in the flat tensor
+                expert_outputs.masked_scatter_(expert_mask.unsqueeze(-1), expert_result)
+
+        # 6. Weight and combine the expert outputs
+        weighted_outputs = expert_outputs * routing_weights.view(-1, 1)
+
+        # 7. Use torch.scatter_add_ to sum the outputs for each token
+        final_output = torch.zeros_like(x_reshaped)
+        final_output.scatter_add_(
+            0, token_indices.unsqueeze(-1).expand(-1, d_model), weighted_outputs
+        )
+
         return final_output.view(batch_size, seq_len, d_model), aux_loss
-
-    def _combine_expert_outputs(
-        self, expert_outputs, top_k_weights, current_top_k, d_model
-    ):
-        """Combines the outputs of the experts."""
-        weighted_outputs = expert_outputs * top_k_weights.view(-1).unsqueeze(-1)
-        final_output = weighted_outputs.view(
-            -1, current_top_k, d_model
-        ).sum(dim=1)
-        return final_output

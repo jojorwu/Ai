@@ -11,7 +11,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.agent.agent_manager import AgentManager, SpecializationConfig
-from src.config import Config, TransformerConfig
+from src.config import TrainConfig, TransformerConfig
 from src.data.data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
 from src.model.loss import cross_entropy_with_label_smoothing
@@ -19,7 +19,7 @@ from src.model.model import Transformer
 
 
 def create_trainer(
-    config: Config,
+    config: TrainConfig,
     data_components: "DataComponents",
     accelerator: "Accelerator",
     load_in_4bit: bool = False,
@@ -34,15 +34,19 @@ def create_trainer(
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
+    scheduler = CosineAnnealingLR(
+        optimizer, T_max=config.scheduler.training_steps
+    )
     value_loss_fn = nn.MSELoss()
 
-    model, optimizer, value_loss_fn = accelerator.prepare(
-        model, optimizer, value_loss_fn
+    model, optimizer, scheduler, value_loss_fn = accelerator.prepare(
+        model, optimizer, scheduler, value_loss_fn
     )
 
     training_components = TrainingComponents(
         model=model,
         optimizer=optimizer,
+        scheduler=scheduler,
         value_loss_fn=value_loss_fn,
     )
     trainer_config = TrainerConfig(
@@ -59,6 +63,7 @@ class TrainingComponents:
     """Core components for training."""
     model: nn.Module
     optimizer: Adam
+    scheduler: CosineAnnealingLR
     value_loss_fn: nn.Module
 
 @dataclass
@@ -73,7 +78,7 @@ class TrainerConfig:
     """Configuration for the Trainer, adapted for PyTorch."""
     components: TrainingComponents
     data: DataComponents
-    config: Config
+    config: TrainConfig
     accelerator: 'Accelerator'
 
 
@@ -88,6 +93,10 @@ class Trainer:
     def get_model(self) -> nn.Module:
         """Returns the underlying model."""
         return self._config.components.model
+
+    def get_learning_rate(self) -> float:
+        """Returns the current learning rate from the scheduler."""
+        return self._config.components.scheduler.get_last_lr()[0]
 
     def run_validation(self) -> float:
         """Runs validation on the model."""
@@ -143,7 +152,6 @@ class Trainer:
             evo_cfg.seq_len,
             self._config.accelerator.device,
         )
-        scheduler = CosineAnnealingLR(self._config.components.optimizer, T_max=100)
         self._config.components.model.train()
         self._config.components.optimizer.zero_grad()
         for i, (x, y, _) in enumerate(batch_iterator):
@@ -157,7 +165,7 @@ class Trainer:
                     )
                 self._config.components.optimizer.step()
                 self._config.components.optimizer.zero_grad()
-        scheduler.step()
+        self._config.components.scheduler.step()
         avg_loss = total_policy_loss / num_batches if num_batches > 0 else 0
         epoch_time = time.time() - start_time
         return avg_loss, epoch_time

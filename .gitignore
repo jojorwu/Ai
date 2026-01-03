@@ -20,3 +20,4 @@ env/
 # Log files
 *.log
 transformer_project.egg-info/
+\n# Model artifacts and training runs\nmodels/

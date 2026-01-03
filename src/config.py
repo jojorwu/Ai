@@ -4,7 +4,7 @@ Pydantic models for strong typing and validation of the project configuration.
 import json
 from typing import Any, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class LTMArchitectureConfig(BaseModel):
@@ -16,6 +16,8 @@ class LTMArchitectureConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """Configuration for the Transformer model architecture."""
+    vocab_size: Optional[int] = Field(
+        None, description="Size of the vocabulary.")
     d_model: int = Field(...,
                          description="Dimensionality of the model's vectors.")
     num_layers: int = Field(
@@ -36,6 +38,8 @@ class ModelConfig(BaseModel):
         None, description="Number of 'experts' in the MoE layer.")
     top_k_experts: Optional[int] = Field(
         None, description="Number of 'experts' to select for each token.")
+    gradient_checkpointing: bool = Field(
+        False, description="Enable gradient checkpointing to save memory.")
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -168,6 +172,8 @@ class SchedulerConfig(BaseModel):
     """Configuration for the learning rate scheduler."""
     warmup_steps: int = Field(...,
                               description="Number of 'warm-up' steps.")
+    training_steps: int = Field(...,
+                                description="Total number of training steps.")
     min_lr: float = Field(..., description="Minimum learning rate value.")
 
 
@@ -200,22 +206,30 @@ class HardwareConfig(BaseModel):
         "cpu", description="Device for computations (cpu, gpu, mps).")
     strategy: Literal["unified", "discrete", "hybrid"] = Field(
         "discrete", description="Memory strategy for hardware.")
+    torch_compile: bool = Field(
+        False, description="Enable torch.compile for the model.")
 
 
-class Config(BaseModel):
-    """Main configuration model."""
+class BaseConfig(BaseModel):
+    """Base configuration model with shared settings."""
     model: ModelConfig
     vision: VisionConfig
-    evolution: EvolutionConfig
-    optimizer: OptimizerConfig
     ltm: LTMConfig
-    scheduler: SchedulerConfig
-    generation: GenerationConfig
     hardware: HardwareConfig
 
     @classmethod
-    def from_json(cls, file_path: str) -> 'Config':
+    def from_json(cls, file_path: str):
         """Loads and validates the configuration from a JSON file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        return cls(**data)
+        return cls.model_validate(data)
+
+class TrainConfig(BaseConfig):
+    """Configuration model for training."""
+    evolution: EvolutionConfig
+    optimizer: OptimizerConfig
+    scheduler: SchedulerConfig
+
+class GenerateConfig(BaseConfig):
+    """Configuration model for generation."""
+    generation: GenerationConfig

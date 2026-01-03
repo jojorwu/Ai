@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from src.config import MultiHeadAttentionConfig
-from src.model.layers.attention import ScaledDotProductAttention
+from src.model.layers.attention import AttentionInput, ScaledDotProductAttention
 from src.model.layers.linear import Linear
 from src.model.layers.rotary_embedding import apply_rope_embeddings
 
@@ -81,28 +81,32 @@ class MultiHeadAttention(nn.Module):
         v_proj = self._split_heads(v_proj, self.config.num_kv_heads)
         return q_proj, k_proj, v_proj, seq_len, seq_offset
 
-    def forward(self, x: torch.Tensor, mask=None, kv_cache=None, layer_idx=None):
-        """Forward pass of the GQA layer."""
-        q_proj, k_proj, v_proj, seq_len, seq_offset = self._prepare_qkv(
-            x, kv_cache
-        )
-
+    def _apply_rope(self, q: torch.Tensor, k: torch.Tensor, seq_offset: int):
+        """Applies Rotary Positional Embeddings to Q and K."""
         if self.config.rotary_emb is not None:
             cos, sin = self.config.rotary_emb
-            q_proj = apply_rope_embeddings(q_proj, cos, sin, seq_offset)
-            k_proj = apply_rope_embeddings(k_proj, cos, sin, seq_offset)
+            q = apply_rope_embeddings(q, cos, sin, seq_offset)
+            k = apply_rope_embeddings(k, cos, sin, seq_offset)
+        return q, k
 
+    def _get_updated_kv(self, k: torch.Tensor, v: torch.Tensor, kv_cache, layer_idx):
+        """Updates and retrieves K and V from the cache."""
         if kv_cache is not None:
-            kv_cache.update(k_proj, v_proj, layer_idx)
-            k_proj, v_proj = kv_cache.get(layer_idx)
-            mask = torch.triu(
-                torch.ones(seq_len, k_proj.size(2)), diagonal=1
-            ).bool().to(x.device)
+            kv_cache.update(k, v, layer_idx)
+            k, v = kv_cache.get(layer_idx)
+        return k, v
 
-        num_q_per_kv = self.config.num_heads // self.config.num_kv_heads
-        k_proj = self._repeat_kv(k_proj, num_q_per_kv)
-        v_proj = self._repeat_kv(v_proj, num_q_per_kv)
+    def forward(self, x: torch.Tensor, kv_cache=None, layer_idx=None):
+        """Forward pass of the GQA layer."""
+        q, k, v, _, seq_offset = self._prepare_qkv(x, kv_cache)
+        q, k = self._apply_rope(q, k, seq_offset)
+        k, v = self._get_updated_kv(k, v, kv_cache, layer_idx)
 
-        attention_output = self.attention(q_proj, k_proj, v_proj, mask)
+        n_rep = self.config.num_heads // self.config.num_kv_heads
+        k = self._repeat_kv(k, n_rep)
+        v = self._repeat_kv(v, n_rep)
+
+        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=kv_cache is None)
+        attention_output = self.attention(attn_input)
         combined_output = self._combine_heads(attention_output)
         return self.wo(combined_output)

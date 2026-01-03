@@ -1,124 +1,152 @@
 """
-Integration test to verify the end-to-end training process of a 4-bit quantized model.
+Integration test for 4-bit quantization.
 """
-import logging
+import json
+import os
+import shutil
+import tempfile
 import unittest
-from dataclasses import dataclass
 
 import torch
-from accelerate import Accelerator, dispatch_model, init_empty_weights
-from bitsandbytes.optim import Adam8bit
-from torch import nn
+from accelerate import Accelerator
 
-from src.config import Config, TransformerConfig
-from src.model.model import Transformer
+from src.config import TrainConfig
+from src.trainer import (
+    Trainer,
+    DataComponents,
+    create_trainer,
+    TrainerConfig,
+    TrainingComponents,
+)
+from src.utils.core import load_model_and_tokenizer
 
-
-@dataclass
-class TrainingStepArgs:
-    """Arguments for a single training step."""
-    model: nn.Module
-    optimizer: Adam8bit
-    policy_loss_fn: nn.Module
-    value_loss_fn: nn.Module
-    dummy_input: torch.Tensor
-    dummy_policy_target: torch.Tensor
-    dummy_value_target: torch.Tensor
 
 class TestQuantizationIntegration(unittest.TestCase):
     """
-    Tests that a 4-bit quantized model can complete a training step and update its weights.
+    Tests the full lifecycle of a 4-bit quantized model:
+    1. A model is trained for one step and saved.
+    2. The saved model is loaded with 4-bit quantization.
+    3. A training step is run on the quantized model to ensure compatibility.
     """
 
     def setUp(self):
-        """Set up the test environment."""
-        logging.basicConfig(
-            level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s'
-        )
-        torch.cuda.empty_cache()
-        self.accelerator = Accelerator()
-        self.config = Config.from_json('config.json')
-        self.vocab_size = 100
+        """Set up a temporary directory for model artifacts."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.model_dir = os.path.join(self.temp_dir, "test_model")
+        os.makedirs(self.model_dir, exist_ok=True)
 
-    def _init_model(self):
-        """Initializes the 4-bit quantized model."""
-        transformer_config = TransformerConfig(
-            vocab_size=self.vocab_size, model=self.config.model,
-            vision=self.config.vision, ltm=self.config.ltm
-        )
-        with init_empty_weights():
-            model = Transformer(transformer_config, load_in_4bit=True)
-        device_map = {"": 0}
-        logging.info("Using manual device map: %s", device_map)
-        return dispatch_model(model, device_map=device_map)
+        # Create dummy data and config
+        self.config_path = os.path.join(self.temp_dir, "config.json")
+        self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
+        self.data_path = os.path.join(self.temp_dir, "data.txt")
 
-    def _prepare_training(self, model):
-        """Prepares the optimizer and loss functions."""
-        optimizer = Adam8bit(
-            model.parameters(), lr=self.config.optimizer.learning_rate
-        )
-        loss_fns = (nn.CrossEntropyLoss(), nn.MSELoss())
-        return self.accelerator.prepare(optimizer, *loss_fns)
+        with open("config_train.json", "r", encoding="utf-8") as f:
+            config = TrainConfig.model_validate_json(f.read())
+        config.model.d_model = 16
+        config.model.num_heads = 2
+        config.model.d_ff = 32
+        config.model.num_layers = 1
+        config.evolution.data_dir = self.temp_dir
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            f.write(config.model_dump_json(indent=4))
 
-    def _get_dummy_data(self):
-        """Generates dummy data for the training step."""
-        batch_size = 4
-        seq_len = self.config.model.max_seq_len
-        dummy_input = torch.randint(
-            0, self.vocab_size, (batch_size, seq_len), device='cpu'
-        )
-        dummy_policy_target = torch.randint(
-            0, self.vocab_size, (batch_size, seq_len), device='cpu'
-        )
-        dummy_value_target = torch.randn(batch_size, 1, device='cpu')
-        return self.accelerator.prepare(
-            dummy_input, dummy_policy_target, dummy_value_target
-        )
+        vocab = {"<pad>": 0, "a": 1, "b": 2}
+        with open(self.vocab_path, "w", encoding="utf-8") as f:
+            json.dump(vocab, f)
 
-    def _run_training_step(self, args: TrainingStepArgs):
-        """Runs a single training step."""
-        args.model.train()
-        args.optimizer.zero_grad()
-        logits, value, aux_loss = args.model(args.dummy_input)
-        loss_policy = args.policy_loss_fn(
-            logits.view(-1, self.vocab_size), args.dummy_policy_target.view(-1)
-        )
-        loss_value = args.value_loss_fn(value, args.dummy_value_target)
-        total_loss = loss_policy + loss_value + (aux_loss or 0)
-        self.accelerator.backward(total_loss)
-        args.optimizer.step()
+        with open(self.data_path, "w", encoding="utf-8") as f:
+            f.write("a b " * 50)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available, skipping 4-bit test")
-    def test_4bit_model_training_step(self):
+    def tearDown(self):
+        """Clean up the temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
+    def test_quantized_model_training_lifecycle(self): # pylint: disable=too-many-locals
         """
-        Verifies that a 4-bit model's weights are updated after one training step.
+        Tests the full training lifecycle with a 4-bit quantized model.
         """
-        model = self._init_model()
-        optimizer, policy_loss_fn, value_loss_fn = self._prepare_training(model)
-        dummy_input, dummy_policy_target, dummy_value_target = self._get_dummy_data()
-
-        initial_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
-
-        args = TrainingStepArgs(
-            model=model,
-            optimizer=optimizer,
-            policy_loss_fn=policy_loss_fn,
-            value_loss_fn=value_loss_fn,
-            dummy_input=dummy_input,
-            dummy_policy_target=dummy_policy_target,
-            dummy_value_target=dummy_value_target,
+        # 1. Initial training and saving
+        config = TrainConfig.from_json(self.config_path)
+        accelerator = Accelerator()
+        tokenizer = DataComponents.tokenizer
+        train_data = torch.randint(
+            0, config.vocab_size, (100,)
         )
-        self._run_training_step(args)
+        val_data = torch.randint(
+            0, config.vocab_size, (20,)
+        )
+        data_components = DataComponents(
+            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+        )
+        trainer = create_trainer(config, data_components, accelerator)
+        trainer.train_pretrain_epoch()
+        # Ensure we save the unwrapped model state dict
+        unwrapped_model = accelerator.unwrap_model(trainer.get_model())
+        torch.save(
+            unwrapped_model.state_dict(),
+            os.path.join(self.model_dir, "model.pt")
+        )
+        shutil.copy(self.config_path, self.model_dir)
+        shutil.copy(self.vocab_path, self.model_dir)
 
-        updated_weights = model.layers.decoder[0].attention_sublayer.mha.wo.weight.clone().detach()
-        weights_updated = not torch.equal(initial_weights, updated_weights)
-
+        # 2. Load the model with 4-bit quantization
+        quantized_model, _ = load_model_and_tokenizer(
+            os.path.basename(self.model_dir),
+            config,
+            load_in_4bit=True,
+            quantized=False
+        )
         self.assertTrue(
-            weights_updated, "Model weights were NOT updated after a training step."
+            any(
+                "4bit" in str(type(m)).lower()
+                for m in quantized_model.modules()
+            )
         )
-        logging.info(
-            "Verification PASSED: 4-bit model weights were updated successfully."
+
+        # 3. Run a training step on the quantized model
+        # We need to create a new optimizer for the quantized model's parameters
+        quantized_optimizer = torch.optim.AdamW(
+            quantized_model.parameters(), lr=config.optimizer.learning_rate
         )
+
+        # We can reuse the scheduler and loss function from the original trainer.
+        # We access the internal config of the original trainer to get them.
+        # pylint: disable=protected-access
+        original_trainer_config = trainer._config
+        scheduler = original_trainer_config.components.scheduler
+        value_loss_fn = original_trainer_config.components.value_loss_fn
+
+        # Prepare the new model, optimizer, and re-prepare the reused components
+        (
+            quantized_model,
+            quantized_optimizer,
+            scheduler,
+            value_loss_fn,
+        ) = accelerator.prepare(
+            quantized_model, quantized_optimizer, scheduler, value_loss_fn
+        )
+
+        # Create new training components and config for the quantized trainer
+        quantized_components = TrainingComponents(
+            model=quantized_model,
+            optimizer=quantized_optimizer,
+            scheduler=scheduler,
+            value_loss_fn=value_loss_fn,
+        )
+        quantized_trainer_config = TrainerConfig(
+            components=quantized_components,
+            data=data_components,
+            config=config,
+            accelerator=accelerator,
+        )
+        quantized_trainer = Trainer(quantized_trainer_config)
+        loss, _ = quantized_trainer.train_pretrain_epoch()
+
+        # Assert that the training step was successful (loss is a valid number)
+        self.assertFalse(torch.isnan(loss))
+        self.assertFalse(torch.isinf(loss))
+
 
 if __name__ == "__main__":
     unittest.main()

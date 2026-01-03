@@ -7,10 +7,10 @@ import os
 import re
 from typing import Tuple
 import torch
-from accelerate import dispatch_model, init_empty_weights
+from accelerate import dispatch_model
 
 
-from src.config import Config, TransformerConfig
+from src.config import BaseConfig, TransformerConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
 from src.utils.device_manager import DeviceManager
@@ -113,7 +113,7 @@ def main_entrypoint(main_func):
 
 def load_model_and_tokenizer(
     model_name: str,
-    config: "Config",
+    config: "BaseConfig",
     load_in_4bit: bool,
     quantized: bool,
     dispatch: bool = True,
@@ -128,8 +128,10 @@ def load_model_and_tokenizer(
     model_dir = os.path.join("models", model_name)
     tokenizer = Tokenizer(model_dir)
 
+    # Use the vocab size from the config if available, otherwise from the tokenizer
+    vocab_size = config.model.vocab_size or tokenizer.vocab_size
     transformer_config = TransformerConfig(
-        vocab_size=tokenizer.vocab_size,
+        vocab_size=vocab_size,
         model=config.model,
         vision=config.vision,
         ltm=config.ltm,
@@ -141,9 +143,7 @@ def load_model_and_tokenizer(
             logging.warning("4-bit quantization is not supported on this hardware, disabling.")
             load_in_4bit = False
 
-    with init_empty_weights():
-        model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
-
+    model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     weights_path = os.path.join(model_dir, "best_model.pt")
     if not os.path.exists(weights_path):
         weights_path = os.path.join(model_dir, "model.pt")
@@ -151,9 +151,7 @@ def load_model_and_tokenizer(
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"No weights file found in {model_dir}")
 
-    model.load_state_dict(
-        torch.load(weights_path, map_location="cpu"), strict=False
-    )
+    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
 
     if quantized:
         model = torch.quantization.quantize_dynamic(
@@ -163,6 +161,10 @@ def load_model_and_tokenizer(
     if dispatch:
         device_map = device_manager.get_device_map()
         model = dispatch_model(model, device_map=device_map)
+
+    if config.hardware.torch_compile:
+        logging.info("Compiling the model with torch.compile...")
+        model = torch.compile(model)
 
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")

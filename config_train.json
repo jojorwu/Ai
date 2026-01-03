@@ -8,7 +8,8 @@
     "max_seq_len": 128,
     "dropout_rate": 0.1,
     "num_experts": 8,
-    "top_k_experts": 2
+    "top_k_experts": 2,
+    "gradient_checkpointing": false
   },
   "vision": {
     "image_size": [
@@ -55,23 +56,12 @@
   },
   "scheduler": {
     "warmup_steps": 10,
+    "training_steps": 5000,
     "min_lr": 0.00001
-  },
-  "generation": {
-    "start_text": "Пожалуйста, перечисли файлы в текущей директории. Используй инструмент 'list_files'.",
-    "max_len": 100,
-    "temperature": 0.0,
-    "top_k": 1,
-    "top_p": 0.0,
-    "speculative_steps": 0,
-    "value_threshold": -1.0,
-    "max_thought_len": 50,
-    "max_retries": 3,
-    "max_turns": 10,
-    "context_window_size": 2048
   },
   "hardware": {
     "device": "cpu",
-    "strategy": "discrete"
+    "strategy": "discrete",
+    "torch_compile": false
   }
 }

@@ -1,45 +1,49 @@
 """
-PyTorch implementation of Scaled Dot-Product Attention.
+PyTorch implementation of Scaled Dot-Product Attention using the optimized
+built-in PyTorch function.
 """
+from dataclasses import dataclass
+from typing import Optional
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 
+@dataclass
+class AttentionInput:
+    """
+    Encapsulates the input for the ScaledDotProductAttention layer.
+    """
+    q: torch.Tensor
+    k: torch.Tensor
+    v: torch.Tensor
+    mask: Optional[torch.Tensor] = None
+    is_causal: bool = False
+
+
 class ScaledDotProductAttention(nn.Module):
     """
-    Computes Scaled Dot-Product Attention, migrated to PyTorch.
+    A wrapper for the highly optimized `torch.nn.functional.scaled_dot_product_attention`.
+    This implementation automatically handles causal masking when `is_causal=True`.
     """
-    def __init__(self):
-        super().__init__()
 
-    def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-        mask: torch.Tensor = None
-    ) -> torch.Tensor:
+    def forward(self, inputs: AttentionInput) -> torch.Tensor:
         """
         Forward pass for Scaled Dot-Product Attention.
 
         Args:
-            q: Query tensor, shape (batch, heads, seq_len_q, d_k).
-            k: Key tensor, shape (batch, heads, seq_len_k, d_k).
-            v: Value tensor, shape (batch, heads, seq_len_v, d_v). Note: seq_len_k == seq_len_v.
-            mask: Optional mask tensor.
+            inputs: An AttentionInput object containing q, k, v, mask, and is_causal.
 
         Returns:
-            Output tensor and attention weights.
+            The output tensor after applying attention.
         """
-        d_k = q.size(-1)
-        # (batch, heads, seq_len_q, seq_len_k)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / \
-            torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        if inputs.is_causal and inputs.mask is not None:
+            raise ValueError("`is_causal` and `mask` are mutually exclusive.")
 
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-
-        attn_weights = F.softmax(scores, dim=-1)
-
-        # (batch, heads, seq_len_q, d_v)
-        output = torch.matmul(attn_weights, v)
-
-        return output
+        # The built-in function is highly optimized and can use backends
+        # like FlashAttention if available.
+        # pylint: disable=not-callable
+        return F.scaled_dot_product_attention(
+            inputs.q, inputs.k, inputs.v, attn_mask=inputs.mask, is_causal=inputs.is_causal
+        )
