@@ -13,4 +13,6 @@ if [ -d "$BASE_DIR/venv" ]; then
 fi
 
 # Run the generation script with discrete hardware strategy for GPU
-python3 "$SCRIPT_DIR/generate.py" --hardware-strategy discrete "$@"
+# For a potential speedup on supported hardware, uncomment the --torch_compile flag.
+# Note: This may increase initial startup time.
+python3 "$SCRIPT_DIR/generate.py" --hardware-strategy discrete "$@" # --torch_compile

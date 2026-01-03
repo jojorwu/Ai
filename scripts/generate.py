@@ -141,6 +141,9 @@ def main():
         logging.info(
             "Overriding hardware strategy with '%s'", args.hardware_strategy
         )
+    if args.torch_compile:
+        config.hardware.torch_compile = True
+        logging.info("Enabling torch.compile for the model.")
 
     accelerator = Accelerator()
     model, tokenizer = load_model_and_tokenizer(

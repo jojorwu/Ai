@@ -13,4 +13,6 @@ if [ -d "$BASE_DIR/venv" ]; then
 fi
 
 # Run the training script with hybrid hardware strategy
-python3 "$SCRIPT_DIR/train.py" --hardware-strategy hybrid "$@"
+# For a potential speedup on supported hardware, uncomment the --torch_compile flag.
+# Note: This may increase initial startup time.
+python3 "$SCRIPT_DIR/train.py" --hardware-strategy hybrid "$@" # --torch_compile

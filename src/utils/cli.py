@@ -29,4 +29,9 @@ def create_main_parser():
         choices=['unified', 'discrete', 'hybrid'],
         help="Override the hardware strategy from the config."
     )
+    parser.add_argument(
+        '--torch_compile',
+        action='store_true',
+        help="Enable torch.compile for the model for faster execution."
+    )
     return parser

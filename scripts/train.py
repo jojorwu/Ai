@@ -185,6 +185,9 @@ def main():
         logging.info(
             "Overriding hardware strategy with '%s'", args.hardware_strategy
         )
+    if args.torch_compile:
+        config.hardware.torch_compile = True
+        logging.info("Enabling torch.compile for the model.")
 
     accelerator = Accelerator(mixed_precision="fp16", log_with="wandb" if args.wandb else None)
     if accelerator.is_main_process and args.wandb:
