@@ -1,7 +1,6 @@
 """
 Main script for agent-centric training of the Transformer model using PyTorch.
 """
-import argparse
 import logging
 import os
 import shutil
@@ -13,6 +12,7 @@ from src.config import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.trainer import create_trainer, DataComponents
+from src.utils.cli import create_main_parser
 from src.utils.core import main_entrypoint, setup_logging
 
 
@@ -120,24 +120,15 @@ def run_training_loop(trainer, config, model_dir):
 @main_entrypoint
 def main():
     """Main training script."""
-    parser = argparse.ArgumentParser(
-        description="Agent-centric Transformer Training with PyTorch."
-    )
-    parser.add_argument(
-        '--model-name', type=str, required=True, help="Name for the model."
-    )
+    parser = create_main_parser()
     parser.add_argument(
         '--resume-from', type=str, help="Resume training from an existing model."
     )
-    parser.add_argument(
-        '--load-in-4bit', action='store_true', help="Load the model in 4-bit."
-    )
-    parser.add_argument(
-        '--hardware-strategy',
-        type=str,
-        choices=['unified', 'discrete', 'hybrid'],
-        help="Override the hardware strategy from the config.",
-    )
+    # Require model-name for training
+    for action in parser._actions:  # pylint: disable=protected-access
+        if action.dest == 'model_name':
+            action.required = True
+            break
     args = parser.parse_args()
 
     config, model_dir, resume_dir = setup_environment(args)

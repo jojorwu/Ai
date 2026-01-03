@@ -3,7 +3,6 @@ Main agent script for interacting with the Transformer model using PyTorch.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
-import argparse
 import logging
 import os
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from src.config import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
+from src.utils.cli import create_main_parser
 from src.utils.complexity_manager import ComplexityManager
 from src.utils.core import (load_model_and_tokenizer, main_entrypoint,
                           parse_tool_call, select_model_interactively,
@@ -118,23 +118,9 @@ def run_agent_loop(
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
-    parser = argparse.ArgumentParser(
-        description="Interact with a PyTorch Transformer model."
-    )
-    parser.add_argument(
-        '--model-name', type=str, help="The name of the model to use."
-    )
-    parser.add_argument(
-        '--load-in-4bit', action='store_true', help="Load the model in 4-bit."
-    )
+    parser = create_main_parser()
     parser.add_argument(
         '--quantized', action='store_true', help="Load a quantized model for CPU."
-    )
-    parser.add_argument(
-        '--hardware-strategy',
-        type=str,
-        choices=['unified', 'discrete', 'hybrid'],
-        help="Override the hardware strategy from the config.",
     )
     args = parser.parse_args()
 

@@ -7,7 +7,7 @@ import os
 import torch
 import torch.quantization
 
-from src.config import Config
+from src.config import TrainConfig
 from src.utils.core import load_model_and_tokenizer
 
 
@@ -21,7 +21,7 @@ def quantize_model(model_path: str, config_path: str, output_path: str):
         output_path: Path to save the quantized model.
     """
     # Load the main configuration
-    config = Config.from_json(config_path)
+    config = TrainConfig.from_json(config_path)
     # The load_model_and_tokenizer function already handles the quantization
     # when the 'quantized' flag is set to True.
     model, _ = load_model_and_tokenizer(
