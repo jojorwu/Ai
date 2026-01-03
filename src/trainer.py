@@ -94,6 +94,10 @@ class Trainer:
         """Returns the underlying model."""
         return self._config.components.model
 
+    def get_learning_rate(self) -> float:
+        """Returns the current learning rate from the scheduler."""
+        return self._config.components.scheduler.get_last_lr()[0]
+
     def run_validation(self) -> float:
         """Runs validation on the model."""
         self._config.components.model.eval()

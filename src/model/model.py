@@ -209,8 +209,8 @@ class Transformer(nn.Module):
         This method implements the core logic of the "Titans" architecture, where
         a GatingNetwork dynamically adjusts the model's depth and expert allocation
         based on a compressed representation of the sequence from the Long-Term Memory (LTM).
-        This allows the model to allocate fewer resources for simpler tokens and more for
-        complex ones, optimizing computational efficiency.
+        This allows the model to allocate fewer resources for simpler tokens and
+        more for complex ones, optimizing computational efficiency.
 
         Args:
             x: Input tensor of token IDs. Shape: (batch_size, seq_len).
@@ -298,9 +298,9 @@ class Transformer(nn.Module):
         h = self.layers.final_norm(h)
         # Policy head: projects the final hidden states to the vocabulary size
         # to get logits. It shares weights with the embedding layer (weight tying).
-        logits = F.linear(
+        logits = F.linear(  # pylint: disable=not-callable
             h, self.layers.embedding.weight
-        )  # pylint: disable=not-callable
+        )
         # Value head: projects the final hidden state of the last token to a
         # single scalar value, predicting the "usefulness" of the sequence.
         value = self.layers.value_head(h[:, -1, :])
@@ -376,7 +376,7 @@ class Transformer(nn.Module):
             return 0.0
 
         # The surprise is the L2 norm of all LTM gradients concatenated into a single vector.
-        surprise = torch.linalg.norm(
+        surprise = torch.linalg.norm(  # pylint: disable=not-callable
             torch.cat([t.flatten() for t in grad_tensors])
         ).item()
 

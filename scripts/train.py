@@ -82,7 +82,7 @@ class TrainingState:
         """Loads the training state."""
         self.epoch = state_dict['epoch']
 
-def run_training_loop(trainer, config, model_dir, checkpoint_dir, accelerator):
+def run_training_loop(trainer, config, checkpoint_dir, accelerator, args): # pylint: disable=too-many-locals
     """Executes the main training loop."""
     if accelerator.is_main_process:
         logging.info("Starting training loop...")
@@ -98,8 +98,12 @@ def run_training_loop(trainer, config, model_dir, checkpoint_dir, accelerator):
 
     if accelerator.is_main_process and args.resume_from:
         try:
-            accelerator.load_state(os.path.join('models', args.resume_from, 'checkpoints'))
-            logging.info("Successfully loaded checkpoint. Starting from epoch %d.", training_state.epoch)
+            checkpoint_path = os.path.join('models', args.resume_from, 'checkpoints')
+            accelerator.load_state(checkpoint_path)
+            logging.info(
+                "Successfully loaded checkpoint. Starting from epoch %d.",
+                training_state.epoch
+            )
         except FileNotFoundError:
             logging.warning("Checkpoint not found at the specified path. Starting from scratch.")
 
@@ -125,7 +129,7 @@ def run_training_loop(trainer, config, model_dir, checkpoint_dir, accelerator):
                 accelerator.log({
                     "avg_loss": avg_loss,
                     "epoch_time": epoch_time,
-                    "learning_rate": trainer._config.components.scheduler.get_last_lr()[0]
+                    "learning_rate": trainer.get_learning_rate()
                 }, step=epoch)
             logging.info("    - Average Loss: %.4f", avg_loss)
         else:
@@ -173,7 +177,6 @@ def main():
         if action.dest == 'model_name':
             action.required = True
             break
-    global args
     args = parser.parse_args()
 
     config, model_dir, checkpoint_dir, resume_from_checkpoint = setup_environment(args)
@@ -212,7 +215,7 @@ def main():
         config, data_components, accelerator, args.load_in_4bit
     )
 
-    run_training_loop(trainer, config, model_dir, checkpoint_dir, accelerator)
+    run_training_loop(trainer, config, checkpoint_dir, accelerator, args)
 
     # Save the final, unwrapped model for easy inference
     unwrapped_model = accelerator.unwrap_model(trainer.get_model())
