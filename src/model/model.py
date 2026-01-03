@@ -234,7 +234,9 @@ class Transformer(nn.Module):
         # 1. Get token embeddings. The embedding output is scaled by the square
         # root of the model dimension, a standard practice in Transformers to
         # preserve variance.
-        h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
+        h = self.layers.embedding(x) * math.sqrt(
+            self.config.model.d_model
+        )
 
         # 2. Determine and compute the Long-Term Memory (LTM) state.
         # An agent can override the base model's LTM with its own specialized one.

@@ -169,3 +169,15 @@ def load_model_and_tokenizer(
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
+
+
+def apply_cli_args_to_config(args, config):
+    """Applies command-line arguments to the configuration object."""
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
+    if args.torch_compile:
+        config.hardware.torch_compile = True
+        logging.info("Enabling torch.compile for the model.")

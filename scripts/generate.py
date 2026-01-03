@@ -17,9 +17,9 @@ from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
 from src.utils.cli import create_main_parser
 from src.utils.complexity_manager import ComplexityManager
-from src.utils.core import (load_model_and_tokenizer, main_entrypoint,
-                          parse_tool_call, select_model_interactively,
-                          setup_logging)
+from src.utils.core import (apply_cli_args_to_config, load_model_and_tokenizer,
+                          main_entrypoint, parse_tool_call,
+                          select_model_interactively, setup_logging)
 from src.utils.tools import execute_tool
 
 
@@ -136,14 +136,7 @@ def main():
         )
 
     config = GenerateConfig.from_json(config_path)
-    if args.hardware_strategy:
-        config.hardware.strategy = args.hardware_strategy
-        logging.info(
-            "Overriding hardware strategy with '%s'", args.hardware_strategy
-        )
-    if args.torch_compile:
-        config.hardware.torch_compile = True
-        logging.info("Enabling torch.compile for the model.")
+    apply_cli_args_to_config(args, config)
 
     accelerator = Accelerator()
     model, tokenizer = load_model_and_tokenizer(
