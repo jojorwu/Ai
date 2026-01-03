@@ -172,8 +172,10 @@ class Transformer(nn.Module):
         rope_cos, rope_sin = precompute_rope_embeddings(
             d_k, config.model.max_seq_len
         )
-        self.register_buffer("rope_cos_buf", rope_cos)
-        self.register_buffer("rope_sin_buf", rope_sin)
+        # Clone tensors to ensure they have separate memory storage, avoiding
+        # issues with safetensors saving shared tensors.
+        self.register_buffer("rope_cos_buf", rope_cos.clone())
+        self.register_buffer("rope_sin_buf", rope_sin.clone())
         return RopeEmbeddings(cos=self.rope_cos_buf, sin=self.rope_sin_buf)
 
     def _create_block_config(
