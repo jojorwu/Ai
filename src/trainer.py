@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 import torch
+from peft import LoraConfig, get_peft_model
 from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -33,6 +34,21 @@ def create_trainer(
         tokenizer=data_components.tokenizer,
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+
+    if config.lora:
+        logging.info("Applying LoRA configuration...")
+        lora_config = LoraConfig(
+            r=config.lora.r,
+            lora_alpha=config.lora.lora_alpha,
+            target_modules=config.lora.target_modules,
+            lora_dropout=config.lora.lora_dropout,
+            bias=config.lora.bias,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, lora_config)
+        logging.info("LoRA applied successfully.")
+        model.print_trainable_parameters()
+
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
     scheduler = CosineAnnealingLR(
         optimizer, T_max=config.scheduler.training_steps
@@ -184,6 +200,7 @@ class Trainer:
         agent_manager = AgentManager(
             base_model=self._config.components.model,
             num_agents=evo_config.num_agents,
+            ltm_config=self._config.config.ltm,
             accelerator=self._config.accelerator,
         )
         logging.info("Specializing %d agents...", evo_config.num_agents)

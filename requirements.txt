@@ -6,3 +6,4 @@ torch
 bitsandbytes
 accelerate
 wandb
+peft

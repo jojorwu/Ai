@@ -90,7 +90,8 @@ class Transformer(nn.Module):
 
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
         super().__init__()
-        self.config = config
+        self._config = config  # Store the full config internally
+        self.config = config.model  # Expose the model config for peft
         self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
@@ -107,10 +108,10 @@ class Transformer(nn.Module):
         layers, making it faster but less accurate. If the base model is already
         too small to benefit from this, no draft model is created.
         """
-        if config.model.num_layers < 2:
+        if self._config.model.num_layers < 2:
             return None # Don't create a draft model for very small models.
 
-        draft_config_dict = config.model_dump()
+        draft_config_dict = self._config.model_dump()
         # Reduce the number of layers for the draft model, e.g., by half.
         draft_config_dict["model"]["num_layers"] //= 2
 
@@ -125,6 +126,13 @@ class Transformer(nn.Module):
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def prepare_inputs_for_generation(self, *args, **kwargs):
+        """
+        A dummy method to satisfy the peft library's API requirements.
+        In this model, input preparation is handled internally.
+        """
+        return kwargs
 
     def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> ModelLayers:
         """Initializes all layers of the model."""
@@ -198,10 +206,11 @@ class Transformer(nn.Module):
 
     def forward(  # pylint: disable=too-many-locals
         self,
-        x: torch.Tensor,
+        input_ids: torch.Tensor,
         ltm_state: torch.Tensor = None,
         dynamic_top_k: int = None,  # This is passed in from generation config
         ltm_override: nn.Module | None = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Performs the forward pass of the Transformer model.
@@ -234,8 +243,8 @@ class Transformer(nn.Module):
         # 1. Get token embeddings. The embedding output is scaled by the square
         # root of the model dimension, a standard practice in Transformers to
         # preserve variance.
-        h = self.layers.embedding(x) * math.sqrt(
-            self.config.model.d_model
+        h = self.layers.embedding(input_ids) * math.sqrt(
+            self._config.model.d_model
         )
 
         # 2. Determine and compute the Long-Term Memory (LTM) state.
@@ -275,7 +284,7 @@ class Transformer(nn.Module):
         # 4. Pass through the dynamically selected number of decoder blocks.
         # The model only computes the number of layers determined by the GatingNetwork,
         # saving significant computation on simpler tokens.
-        total_aux_loss = torch.tensor(0.0, device=x.device)
+        total_aux_loss = torch.tensor(0.0, device=input_ids.device)
         for i in range(active_layers):
             block = self.layers.decoder[i]
             block_input = ForwardPassInput(
@@ -286,7 +295,7 @@ class Transformer(nn.Module):
             )
             # Gradient checkpointing is used to save memory during training by
             # recomputing activations in the backward pass instead of storing them.
-            if self.config.model.gradient_checkpointing and self.training:
+            if self._config.model.gradient_checkpointing and self.training:
                 h, aux_loss = torch.utils.checkpoint.checkpoint(
                     block, block_input, use_reentrant=False
                 )
@@ -411,7 +420,7 @@ class Transformer(nn.Module):
             for _ in range(inputs.speculative_config.speculative_steps):
                 # Generate one token at a time with the draft model.
                 draft_logits, _, _ = draft_model(
-                    draft_tokens[:, -self.config.model.max_seq_len :]
+                    draft_tokens[:, -self._config.model.max_seq_len :]
                 )
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
@@ -539,7 +548,7 @@ class Transformer(nn.Module):
             # the 'surprise' calculation for the LTM.
             with torch.enable_grad():
                 true_logits, value, _ = self(
-                    draft_tokens[:, -self.config.model.max_seq_len :],
+                    draft_tokens[:, -self._config.model.max_seq_len :],
                     ltm_override=inputs.ltm_override,
                 )
 
@@ -563,7 +572,7 @@ class Transformer(nn.Module):
                 # current validation logic. It handles the case where validation
                 # might fail entirely by reverting to standard auto-regressive sampling
                 # for one token to ensure progress is always made.
-                logits, _, _ = self(tokens[:, -self.config.model.max_seq_len :])
+                logits, _, _ = self(tokens[:, -self._config.model.max_seq_len :])
                 next_token = self._sample_from_logits(
                     logits[:, -1, :],
                     inputs.sampling_config.temperature,

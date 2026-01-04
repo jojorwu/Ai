@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
+from src.config import LTMConfig
 from src.model.model import GenerateInput, SamplingConfig, Transformer
 
 
@@ -26,7 +27,7 @@ class Agent:
     The agent shares the base model's weights but has a unique LTM.
     """
 
-    def __init__(self, base_model: Transformer, agent_id: str | None = None):
+    def __init__(self, base_model: Transformer, ltm_config: LTMConfig, agent_id: str | None = None):
         self.agent_id = agent_id or str(uuid.uuid4())
         self.base_model = base_model
         self.long_term_memory = (
@@ -34,11 +35,12 @@ class Agent:
             if base_model.layers.long_term_memory
             else None
         )
+        self.ltm_config = ltm_config
 
         if self.long_term_memory:
             self.ltm_optimizer = Adam(
                 self.long_term_memory.parameters(),
-                lr=self.base_model.config.ltm.optimizer.learning_rate,
+                lr=self.ltm_config.optimizer.learning_rate,
             )
         else:
             self.ltm_optimizer = None
@@ -67,7 +69,7 @@ class Agent:
         surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.metrics.total_surprise += surprise
 
-        if surprise > self.base_model.config.ltm.surprise_threshold:
+        if surprise > self.ltm_config.surprise_threshold:
             self.ltm_optimizer.step()
 
         return surprise

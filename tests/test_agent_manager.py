@@ -19,7 +19,7 @@ class TestAgentManager(unittest.TestCase):
         """Set up a mock model and config for testing."""
         self.mock_config = TrainConfig.from_json('config_train.json')
         self.mock_model = MagicMock(spec=Transformer)
-        self.mock_model.config = self.mock_config
+        self.mock_model.config = self.mock_config.model  # Use the nested ModelConfig
 
         # Create a mock for the 'layers' attribute, which in turn has a 'long_term_memory' attribute
         mock_layers = MagicMock()
@@ -37,7 +37,10 @@ class TestAgentManager(unittest.TestCase):
     def test_merge_agents_averages_ltm_weights(self):
         """Test that merge_agents correctly averages the LTM weights."""
         manager = AgentManager(
-            self.mock_model, num_agents=2, accelerator=self.mock_accelerator
+            self.mock_model,
+            num_agents=2,
+            ltm_config=self.mock_config.ltm,
+            accelerator=self.mock_accelerator
         )
 
         # Create mock LTM states for two agents
@@ -66,7 +69,10 @@ class TestAgentManager(unittest.TestCase):
     def test_collaborative_evaluation_independent_success(self, mock_batch_critique):
         """Test collaboration evaluation for a successful independent response."""
         manager = AgentManager(
-            self.mock_model, num_agents=3, accelerator=self.mock_accelerator
+            self.mock_model,
+            num_agents=3,
+            ltm_config=self.mock_config.ltm,
+            accelerator=self.mock_accelerator
         )
 
         # Mock the critique score to be high (successful)
@@ -96,7 +102,10 @@ class TestAgentManager(unittest.TestCase):
     def test_collaborative_evaluation_asks_for_help_and_succeeds(self, mock_batch_critique):
         """Test evaluation when an agent asks for help and gets a good response."""
         manager = AgentManager(
-            self.mock_model, num_agents=3, accelerator=self.mock_accelerator
+            self.mock_model,
+            num_agents=3,
+            ltm_config=self.mock_config.ltm,
+            accelerator=self.mock_accelerator
         )
 
         # Mock the critique score to be high (successful help)
@@ -118,7 +127,7 @@ class TestAgentManager(unittest.TestCase):
         manager.agents[2].generate_response.return_value = torch.tensor([[30, 40]])
 
         # Run evaluation with just enough data for one proposal (from agent 0)
-        prompt_len = self.mock_model.config.model.max_seq_len // 2
+        prompt_len = self.mock_model.config.max_seq_len // 2
         manager.collaborative_evaluation(
             evaluation_data[:prompt_len], mock_tokenizer, top_k=3, device='cpu'
         )
@@ -154,7 +163,10 @@ class TestAgentManager(unittest.TestCase):
         tuple from the LTM.
         """
         manager = AgentManager(
-            self.mock_model, num_agents=2, accelerator=self.mock_accelerator
+            self.mock_model,
+            num_agents=2,
+            ltm_config=self.mock_config.ltm,
+            accelerator=self.mock_accelerator
         )
 
         dummy_sequence = torch.randint(0, 100, (2, 10), device="cpu")

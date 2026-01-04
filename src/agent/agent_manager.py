@@ -11,6 +11,7 @@ from accelerate import Accelerator
 from torch import nn
 
 from src.agent.agent import Agent
+from src.config import LTMConfig
 from src.data.data_loader import get_batches_torch
 from src.model.model import Transformer
 
@@ -56,10 +57,12 @@ class AgentManager:
         self,
         base_model: Transformer,
         num_agents: int,
+        ltm_config: LTMConfig,
         accelerator: Accelerator,
     ):
         self.base_model = accelerator.unwrap_model(base_model)
         self.num_agents = num_agents
+        self.ltm_config = ltm_config
         self.agents: List[Agent] = []
         self.accelerator = accelerator
         self.fork_agents()
@@ -68,7 +71,7 @@ class AgentManager:
         """Creates (clones) a population of agents from the base model."""
         logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
-            agent = Agent(self.base_model, agent_id=f"agent_{i}")
+            agent = Agent(self.base_model, self.ltm_config, agent_id=f"agent_{i}")
             self.agents.append(agent)
         logging.info("Agents cloned successfully.")
 
@@ -277,7 +280,7 @@ class AgentManager:
         with torch.no_grad():
             # Manually compute embeddings and LTM states to create a batch
             h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
-                self.base_model.config.model.d_model
+                self.base_model.config.d_model
             )
 
             ltm_states = torch.zeros(
@@ -315,7 +318,7 @@ class AgentManager:
         """
         Iterates through evaluation data, creating prompts and triggering evaluation for each.
         """
-        prompt_len = self.base_model.config.model.max_seq_len // 2
+        prompt_len = self.base_model.config.max_seq_len // 2
         num_prompts = len(evaluation_data) // prompt_len
         if num_prompts == 0:
             logging.warning("Not enough validation data for evaluation.")

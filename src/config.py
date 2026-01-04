@@ -2,7 +2,7 @@
 Pydantic models for strong typing and validation of the project configuration.
 """
 import json
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -40,6 +40,13 @@ class ModelConfig(BaseModel):
         None, description="Number of 'experts' to select for each token.")
     gradient_checkpointing: bool = Field(
         False, description="Enable gradient checkpointing to save memory.")
+    tie_word_embeddings: bool = Field(
+        True, description="Tie the weights of the token embeddings and the final output projection.")
+    model_type: str = Field("custom", description="Type of the model for peft compatibility.")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Provides dictionary-like access for compatibility with peft."""
+        return getattr(self, key, default)
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -200,6 +207,18 @@ class GenerationConfig(BaseModel):
         2048, description="The number of tokens to retain in history.")
 
 
+class LoraConfig(BaseModel):
+    """Configuration for LoRA (Low-Rank Adaptation)."""
+    r: int = Field(8, description="Rank of the LoRA matrices.")
+    lora_alpha: int = Field(16, description="LoRA scaling factor.")
+    target_modules: List[str] = Field(
+        default_factory=lambda: ["qkv_proj"],
+        description="Names of the modules to apply LoRA to."
+    )
+    lora_dropout: float = Field(0.1, description="Dropout probability for LoRA layers.")
+    bias: str = Field("none", description="Bias type for LoRA. Can be 'none', 'all', or 'lora_only'.")
+
+
 class HardwareConfig(BaseModel):
     """Hardware configuration."""
     device: Literal["cpu", "gpu", "mps"] = Field(
@@ -241,6 +260,7 @@ class TrainConfig(BaseConfig):
     evolution: EvolutionConfig
     optimizer: OptimizerConfig
     scheduler: SchedulerConfig
+    lora: Optional[LoraConfig] = Field(None, description="Configuration for LoRA.")
 
 
 class GenerateConfig(BaseConfig):
