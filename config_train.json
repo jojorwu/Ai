@@ -63,5 +63,18 @@
     "device": "cpu",
     "strategy": "discrete",
     "torch_compile": false
+  },
+  "lora": {
+    "r": 8,
+    "lora_alpha": 16,
+    "target_modules": [
+      "qkv_proj",
+      "w1",
+      "w2",
+      "w3",
+      "gate"
+    ],
+    "lora_dropout": 0.05,
+    "bias": "none"
   }
 }

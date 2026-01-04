@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 
 import torch
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -34,6 +34,9 @@ def create_trainer(
         tokenizer=data_components.tokenizer,
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
+
+    if load_in_4bit:
+        model = prepare_model_for_kbit_training(model)
 
     if config.lora:
         logging.info("Applying LoRA configuration...")
@@ -105,11 +108,6 @@ class Trainer:
 
     def __init__(self, trainer_config: TrainerConfig):
         self._config = trainer_config
-        self.profiler = None
-
-    def set_profiler(self, profiler):
-        """Sets the profiler for the trainer."""
-        self.profiler = profiler
 
     def get_model(self) -> nn.Module:
         """Returns the underlying model."""

@@ -1,57 +1,61 @@
-#!/usr/bin/env python3
 """
-This script loads a trained model, applies dynamic quantization for CPU,
-and saves the quantized model.
+This script quantizes a trained model for CPU inference.
 """
+import logging
 import os
+
 import torch
-import torch.quantization
 
-from src.config import TrainConfig
-from src.utils.core import load_model_and_tokenizer
+from src.utils.cli import create_main_parser
+from src.utils.core import load_model_and_tokenizer, main_entrypoint, setup_logging
 
 
-def quantize_model(model_path: str, config_path: str, output_path: str):
+@main_entrypoint
+def main():
     """
-    Loads a model, applies dynamic quantization, and saves the quantized model.
-
-    Args:
-        model_path: Path to the trained model's state_dict.
-        config_path: Path to the model's configuration JSON file.
-        output_path: Path to save the quantized model.
+    Main function to load a model, apply dynamic quantization, and save the
+    quantized model.
     """
-    # Load the main configuration
-    config = TrainConfig.from_json(config_path)
-    # The load_model_and_tokenizer function already handles the quantization
-    # when the 'quantized' flag is set to True.
-    model, _ = load_model_and_tokenizer(
-        os.path.basename(os.path.dirname(model_path)),
-        config,
-        load_in_4bit=False,
-        quantized=True,
-        dispatch=False
-    )
-
-    # Save the quantized model state dictionary
-    torch.save(model.state_dict(), output_path)
-    print(f"Quantized model saved to {output_path}")
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Quantize a trained Transformer model for CPU."
-    )
-    parser.add_argument(
-        "model_path", type=str, help="Path to the trained model's state_dict."
-    )
-    parser.add_argument(
-        "config_path", type=str, help="Path to the model's configuration JSON file."
-    )
-    parser.add_argument(
-        "output_path", type=str, help="Path to save the quantized model."
-    )
+    parser = create_main_parser()
+    # model-name is required for quantization
+    for action in parser._actions:  # pylint: disable=protected-access
+        if action.dest == 'model_name':
+            action.required = True
+            break
     args = parser.parse_args()
 
-    quantize_model(args.model_path, args.config_path, args.output_path)
+    setup_logging()
+
+    # --- Load Model ---
+    logging.info("Loading model '%s' for quantization...", args.model_name)
+    # Load the model without dispatching it to a device yet, ensuring it stays on CPU
+    model, _ = load_model_and_tokenizer(
+        args.model_name,
+        load_in_4bit=False,  # Quantization is a CPU feature, not 4-bit
+        quantized=False,     # Load the original, unquantized model
+        dispatch=False       # Do not dispatch to accelerator yet
+    )
+    model.to('cpu')
+    model.eval()
+
+    # --- Apply Dynamic Quantization ---
+    logging.info("Applying dynamic quantization...")
+    # `torch.quantization.quantize_dynamic` is a utility that automatically
+    # replaces specified layers (like Linear) with their quantized versions.
+    quantized_model = torch.quantization.quantize_dynamic(
+        model, {torch.nn.Linear}, dtype=torch.qint8
+    )
+    logging.info("Quantization complete.")
+
+    # --- Save Quantized Model ---
+    model_dir = os.path.join("models", args.model_name)
+    save_path = os.path.join(model_dir, "model_quantized_cpu.pt")
+    torch.save(quantized_model.state_dict(), save_path)
+    logging.info("Quantized model saved to: %s", save_path)
+    logging.info(
+        "To run inference, use: python scripts/generate.py --model-name %s --quantized",
+        args.model_name
+    )
+
+if __name__ == "__main__":
+    main()
