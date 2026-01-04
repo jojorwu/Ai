@@ -101,11 +101,11 @@ class Transformer(nn.Module):
     ) -> "Transformer|None":
         """
         Creates a smaller, faster 'draft' model for speculative decoding.
-        This model is created once during initialization to avoid the expensive
-        `copy.deepcopy()` operation during generation.
 
-        The draft model has fewer layers, making it faster but less accurate.
-        If the base model is already too small, no draft model is created.
+        This model is created once during initialization to avoid the expensive
+        `copy.deepcopy()` operation during generation. The draft model has fewer
+        layers, making it faster but less accurate. If the base model is already
+        too small to benefit from this, no draft model is created.
         """
         if config.model.num_layers < 2:
             return None # Don't create a draft model for very small models.
@@ -311,17 +311,19 @@ class Transformer(nn.Module):
     def _sample_from_logits(self, logits, temperature, top_k, top_p):
         """Samples a token from logits using temperature, top-k, and top-p."""
         if temperature == 0.0:
+            # Greedy sampling: take the most likely token.
             _, next_token = torch.topk(logits, k=1, dim=-1)
             return next_token
 
+        # Apply temperature scaling.
         logits = logits / temperature
 
-        # Apply top-k
+        # Apply top-k filtering.
         if top_k > 0:
             v, _ = torch.topk(logits, top_k)
             logits[logits < v[:, -1, None]] = -float('Inf')
 
-        # Apply top-p (nucleus sampling)
+        # Apply top-p (nucleus) filtering.
         if top_p > 0.0:
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
             cumulative_probs = torch.cumsum(
@@ -337,6 +339,7 @@ class Transformer(nn.Module):
             )
             logits[indices_to_remove] = -float('Inf')
 
+        # Sample from the filtered distribution.
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
         return next_token
@@ -406,7 +409,7 @@ class Transformer(nn.Module):
         draft_tokens = tokens
         with torch.no_grad():
             for _ in range(inputs.speculative_config.speculative_steps):
-                # Generate one token at a time with the draft model
+                # Generate one token at a time with the draft model.
                 draft_logits, _, _ = draft_model(
                     draft_tokens[:, -self.config.model.max_seq_len :]
                 )
@@ -417,7 +420,7 @@ class Transformer(nn.Module):
                     inputs.sampling_config.top_p,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
-        # Return only the newly generated tokens and the full draft sequence
+        # Return only the newly generated tokens and the full draft sequence.
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
     def _validate_and_accept_chunk(
