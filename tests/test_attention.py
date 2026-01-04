@@ -60,6 +60,36 @@ class TestScaledDotProductAttention(unittest.TestCase):
             inputs.q, inputs.k, inputs.v, attn_mask=None, is_causal=True
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Flash Attention test requires CUDA")
+    @patch('src.model.layers.attention.flash_attn_func')
+    @patch('src.model.layers.attention.FLASH_ATTENTION_AVAILABLE', True)
+    def test_uses_flash_attention_if_available(self, mock_flash_attn):
+        """Tests that flash_attn_func is called when available and conditions are met."""
+        attention = ScaledDotProductAttention()
+        inputs = AttentionInput(
+            q=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            k=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            v=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            is_causal=True,
+        )
+        attention(inputs)
+        mock_flash_attn.assert_called_once()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Flash Attention test requires CUDA")
+    @patch('torch.nn.functional.scaled_dot_product_attention')
+    @patch('src.model.layers.attention.FLASH_ATTENTION_AVAILABLE', False)
+    def test_uses_pytorch_fallback_if_flash_not_available(self, mock_pytorch_attn):
+        """Tests that the PyTorch fallback is used when flash_attn is not available."""
+        attention = ScaledDotProductAttention()
+        inputs = AttentionInput(
+            q=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            k=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            v=torch.randn(1, 1, 4, 2, device='cuda', dtype=torch.float16),
+            is_causal=True,
+        )
+        attention(inputs)
+        mock_pytorch_attn.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,15 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+try:
+    from flash_attn.flash_attn_interface import flash_attn_func
+    # To support इज़_causal, we need at least version 2.0.
+    from flash_attn import __version__ as flash_attn_version
+    FLASH_ATTENTION_AVAILABLE = True if flash_attn_version >= "2.0.0" else False
+except ImportError:
+    flash_attn_func = None
+    FLASH_ATTENTION_AVAILABLE = False
+
 
 @dataclass
 class AttentionInput:
@@ -41,9 +50,19 @@ class ScaledDotProductAttention(nn.Module):
         if inputs.is_causal and inputs.mask is not None:
             raise ValueError("`is_causal` and `mask` are mutually exclusive.")
 
-        # The built-in function is highly optimized and can use backends
-        # like FlashAttention if available.
-        # pylint: disable=not-callable
+        use_flash_attention = (
+            FLASH_ATTENTION_AVAILABLE and
+            inputs.mask is None and # Flash Attention has its own causal implementation
+            inputs.q.device.type == 'cuda' and
+            inputs.q.dtype in (torch.float16, torch.bfloat16)
+        )
+
+        if use_flash_attention:
+            return flash_attn_func(
+                inputs.q, inputs.k, inputs.v, causal=inputs.is_causal
+            )
+
+        # Fallback to the standard PyTorch implementation
         return F.scaled_dot_product_attention(
             inputs.q, inputs.k, inputs.v, attn_mask=inputs.mask, is_causal=inputs.is_causal
         )
