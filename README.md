@@ -104,3 +104,69 @@ python3 generate.py
 ```
 
 The script will load the selected model and its associated configuration to run the agentic generation loop.
+
+## Performance Optimization
+
+This project includes several advanced features to optimize performance for both training and inference on local hardware.
+
+### Hardware-Specific Scripts
+
+The `scripts/` directory contains convenient wrapper scripts to run training and generation with hardware-optimized settings.
+
+- **`train_cpu.sh`, `generate_cpu.sh`**: Runs on the CPU.
+- **`train_gpu.sh`, `generate_gpu.sh`**: Runs on a discrete NVIDIA GPU.
+- **`train_hybrid.sh`, `generate_hybrid.sh`**: Runs in a hybrid mode where the main model is on the GPU and the Long-Term Memory (LTM) is on the CPU.
+
+These scripts automatically pass the correct `--hardware-strategy` to the underlying Python scripts.
+
+*Example:*
+```bash
+# Train a model on the GPU
+./scripts/train_gpu.sh --model-name my-gpu-model
+
+# Generate text with the trained model
+./scripts/generate_gpu.sh --model-name my-gpu-model
+```
+
+### Parameter-Efficient Fine-Tuning (LoRA & QLoRA)
+
+LoRA (Low-Rank Adaptation) allows you to fine-tune the model by training only a small fraction of its parameters, significantly reducing memory requirements. QLoRA combines LoRA with 4-bit quantization for even greater memory savings.
+
+**How to use:**
+
+1.  **Enable LoRA in `config_train.json`**: Add or uncomment the `"lora"` section in your configuration file.
+    ```json
+    "lora": {
+      "r": 8,
+      "lora_alpha": 16,
+      "target_modules": ["qkv_proj", "w1", "w2", "w3", "gate"],
+      "lora_dropout": 0.05,
+      "bias": "none"
+    }
+    ```
+2.  **Enable QLoRA**: To use QLoRA, simply start the training script with the `--load-in-4bit` flag. This will load the base model in 4-bit and then apply the LoRA adapters.
+
+*Example (Training with QLoRA on GPU):*
+```bash
+./scripts/train_gpu.sh --model-name my-qlora-model --load-in-4bit
+```
+
+### CPU Quantization Workflow
+
+For users without a powerful GPU, this project provides a workflow to quantize a model for faster inference on the CPU.
+
+**Step 1: Train your model normally.**
+
+**Step 2: Run the optimization script.**
+The `optimize_and_run_cpu.sh` script automates the process. It takes your trained model, creates a quantized version, and then immediately starts a generation session with the optimized model.
+
+```bash
+./scripts/optimize_and_run_cpu.sh --model-name <your-model-name>
+```
+*Example:* `./scripts/optimize_and_run_cpu.sh --model-name my-first-model`
+
+This will create a new file `models/my-first-model/model_quantized_cpu.pt`. Subsequent generation runs can use this quantized model by adding the `--quantized` flag:
+
+```bash
+./scripts/generate_cpu.sh --model-name my-first-model --quantized
+```
