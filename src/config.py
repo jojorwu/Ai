@@ -224,12 +224,26 @@ class BaseConfig(BaseModel):
             data = json.load(f)
         return cls.model_validate(data)
 
+from dataclasses import dataclass
+
+
+@dataclass
+class DynamicParametersConfig:
+    """Configuration for dynamic parameter adjustment."""
+    complexity_metric: str = "surprise"
+    adjustment_strength: float = 0.1
+    min_top_k: int = 1
+    max_top_k: int = 50
+
+
 class TrainConfig(BaseConfig):
     """Configuration model for training."""
     evolution: EvolutionConfig
     optimizer: OptimizerConfig
     scheduler: SchedulerConfig
 
+
 class GenerateConfig(BaseConfig):
     """Configuration model for generation."""
     generation: GenerationConfig
+    dynamic_parameters: Optional[DynamicParametersConfig] = None

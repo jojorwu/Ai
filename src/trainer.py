@@ -89,6 +89,11 @@ class Trainer:
 
     def __init__(self, trainer_config: TrainerConfig):
         self._config = trainer_config
+        self.profiler = None
+
+    def set_profiler(self, profiler):
+        """Sets the profiler for the trainer."""
+        self.profiler = profiler
 
     def get_model(self) -> nn.Module:
         """Returns the underlying model."""

@@ -30,10 +30,11 @@ class Tokenizer:
             ))
         )
 
-        if os.path.isdir(source_path):
+        vocab_file_path = os.path.join(source_path, 'tokenizer_vocab.json')
+        if os.path.isfile(vocab_file_path):
+            self._load_vocab_from_file(vocab_file_path)
+        elif os.path.isdir(source_path):
             self._build_vocab_from_dir(source_path)
-        elif os.path.isfile(source_path) and source_path.endswith('.json'):
-            self._load_vocab_from_file(source_path)
         else:
             raise ValueError(
                 f"Invalid source_path: '{source_path}'. "
@@ -114,3 +115,10 @@ class Tokenizer:
         Special tokens are preserved in the string, which is important for the model's context.
         """
         return "".join([self.idx_to_char.get(token, '') for token in tokens])
+
+    def save_vocab(self, save_dir: str):
+        """Saves the vocabulary to a file in the specified directory."""
+        vocab_path = os.path.join(save_dir, "tokenizer_vocab.json")
+        with open(vocab_path, "w", encoding="utf-8") as f:
+            json.dump(self.char_to_idx, f, indent=4)
+        logging.info("Vocabulary saved to %s", vocab_path)

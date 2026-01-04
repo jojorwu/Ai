@@ -1,6 +1,7 @@
 """
 Main script for agent-centric training of the Transformer model using PyTorch.
 """
+import json
 import logging
 import os
 import shutil
@@ -13,11 +14,7 @@ from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.trainer import create_trainer, DataComponents
 from src.utils.cli import create_main_parser
-from src.utils.core import (
-    apply_cli_args_to_config,
-    main_entrypoint,
-    setup_logging,
-)
+from src.utils.core import main_entrypoint, setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
@@ -67,10 +64,21 @@ def setup_environment(args):
 
 
 def save_updated_config(config: TrainConfig, tokenizer: Tokenizer, model_dir: str):
-    """Saves the updated config with the correct vocab size."""
-    config.model.vocab_size = tokenizer.vocab_size
+    """
+    Saves a final, generation-ready config by merging training and generation settings.
+    """
+    # Load the base generation config to get the 'generation' section
+    with open("config_generate.json", "r", encoding="utf-8") as f:
+        gen_config_data = json.load(f)
+
+    # Create a serializable dictionary from the Pydantic model
+    final_config = config.model_dump()
+    final_config['generation'] = gen_config_data.get('generation')
+    final_config['dynamic_parameters'] = gen_config_data.get('dynamic_parameters')
+    final_config['model']['vocab_size'] = tokenizer.vocab_size
+
     with open(os.path.join(model_dir, "config.json"), "w", encoding="utf-8") as f:
-        f.write(config.model_dump_json(indent=4))
+        json.dump(final_config, f, indent=4)
 
 
 class TrainingState:
@@ -184,7 +192,11 @@ def main():
     args = parser.parse_args()
 
     config, model_dir, checkpoint_dir, resume_from_checkpoint = setup_environment(args)
-    apply_cli_args_to_config(args, config)
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
 
     accelerator = Accelerator(mixed_precision="fp16", log_with="wandb" if args.wandb else None)
     if accelerator.is_main_process and args.wandb:
@@ -202,11 +214,7 @@ def main():
     # Save config and tokenizer vocab only on new runs
     if not resume_from_checkpoint:
         save_updated_config(config, tokenizer, model_dir)
-        if os.path.exists(os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json')):
-            shutil.copy(
-                os.path.join(config.evolution.data_dir, 'tokenizer_vocab.json'),
-                model_dir,
-            )
+        tokenizer.save_vocab(model_dir)
 
     data_components = DataComponents(
         tokenizer=tokenizer, train_data=train_data, val_data=val_data
