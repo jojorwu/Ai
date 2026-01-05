@@ -41,8 +41,12 @@ class ModelConfig(BaseModel):
     gradient_checkpointing: bool = Field(
         False, description="Enable gradient checkpointing to save memory.")
     tie_word_embeddings: bool = Field(
-        True, description="Tie the weights of the token embeddings and the final output projection.")
-    model_type: str = Field("custom", description="Type of the model for peft compatibility.")
+        True,
+        description="Tie the weights of the token embeddings and the final output projection."
+    )
+    model_type: str = Field(
+        "custom", description="Type of the model for peft compatibility."
+    )
 
     def get(self, key: str, default: Any = None) -> Any:
         """Provides dictionary-like access for compatibility with peft."""
@@ -216,7 +220,9 @@ class LoraConfig(BaseModel):
         description="Names of the modules to apply LoRA to."
     )
     lora_dropout: float = Field(0.1, description="Dropout probability for LoRA layers.")
-    bias: str = Field("none", description="Bias type for LoRA. Can be 'none', 'all', or 'lora_only'.")
+    bias: str = Field(
+        "none", description="Bias type for LoRA. Can be 'none', 'all', or 'lora_only'."
+    )
 
 
 class HardwareConfig(BaseModel):

@@ -127,12 +127,12 @@ class Transformer(nn.Module):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def prepare_inputs_for_generation(self, **kwargs):
+    def prepare_inputs_for_generation(self, input_ids, **kwargs):
         """
         A dummy method to satisfy the peft library's API requirements.
         In this model, input preparation is handled internally.
         """
-        return kwargs
+        return {"input_ids": input_ids}
 
     def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> ModelLayers:
         """Initializes all layers of the model."""
@@ -210,8 +210,8 @@ class Transformer(nn.Module):
         ltm_state: torch.Tensor = None,
         dynamic_top_k: int = None,  # This is passed in from generation config
         ltm_override: nn.Module | None = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        **kwargs,  # Accept extra arguments for peft compatibility
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:  # pylint: disable=unused-argument
         """
         Performs the forward pass of the Transformer model.
 

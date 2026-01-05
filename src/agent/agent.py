@@ -38,6 +38,9 @@ class Agent:
         self.ltm_config = ltm_config
         self.ltm_optimizer = self._create_ltm_optimizer()
         self.metrics = AgentMetrics()
+        # Define loss functions once to avoid re-instantiation
+        self.policy_loss_fn = nn.CrossEntropyLoss()
+        self.value_loss_fn = nn.MSELoss()
 
     def _create_ltm_optimizer(self):
         if self.long_term_memory:
@@ -88,16 +91,14 @@ class Agent:
             x_batch, ltm_override=self.long_term_memory
         )
 
-        policy_loss_fn = nn.CrossEntropyLoss()
-        value_loss_fn = nn.MSELoss()
-        loss_policy = policy_loss_fn(
+        loss_policy = self.policy_loss_fn(
             logits.view(-1, logits.size(-1)), y_batch.view(-1)
         )
 
         # Calculate value loss (encouraging the model to predict high values)
         # We train the value head to predict 1.0 for any given sequence.
         target_values = torch.ones_like(values)
-        loss_value = value_loss_fn(values, target_values)
+        loss_value = self.value_loss_fn(values, target_values)
 
         # Total loss is what drives the LTM update
         total_loss = loss_policy + loss_value

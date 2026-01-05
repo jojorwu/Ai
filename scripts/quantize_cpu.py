@@ -6,6 +6,7 @@ import os
 
 import torch
 
+from src.config import BaseConfig
 from src.utils.cli import create_main_parser
 from src.utils.core import load_model_and_tokenizer, main_entrypoint, setup_logging
 
@@ -26,29 +27,26 @@ def main():
 
     setup_logging()
 
-    # --- Load Model ---
-    logging.info("Loading model '%s' for quantization...", args.model_name)
-    # Load the model without dispatching it to a device yet, ensuring it stays on CPU
-    config, model, _ = load_model_and_tokenizer(
-        args.model_name,
-        load_in_4bit=False,  # Quantization is a CPU feature, not 4-bit
-        quantized=False,     # Load the original, unquantized model
-        dispatch=False       # Do not dispatch to accelerator yet
-    )
-    model.to('cpu')
-    model.eval()
+    # --- Load Config and Model ---
+    logging.info("Loading and quantizing model '%s'...", args.model_name)
+    model_dir = os.path.join("models", args.model_name)
+    config_path = os.path.join(model_dir, "config.json")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
 
-    # --- Apply Dynamic Quantization ---
-    logging.info("Applying dynamic quantization...")
-    # `torch.quantization.quantize_dynamic` is a utility that automatically
-    # replaces specified layers (like Linear) with their quantized versions.
-    quantized_model = torch.quantization.quantize_dynamic(
-        model, {torch.nn.Linear}, dtype=torch.qint8
+    config = BaseConfig.from_json_file(config_path)
+
+    # The utility now handles quantization internally
+    quantized_model, _ = load_model_and_tokenizer(
+        model_name=args.model_name,
+        config=config,
+        load_in_4bit=False,
+        quantized=True,   # Enable quantization
+        dispatch=False,   # Keep on CPU
     )
-    logging.info("Quantization complete.")
+    logging.info("Model quantization complete.")
 
     # --- Save Quantized Model ---
-    model_dir = os.path.join("models", args.model_name)
     save_path = os.path.join(model_dir, "model_quantized_cpu.pt")
     torch.save(quantized_model.state_dict(), save_path)
     logging.info("Quantized model saved to: %s", save_path)

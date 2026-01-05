@@ -4,7 +4,6 @@ Main script for agent-centric training of the Transformer model using PyTorch.
 import json
 import logging
 import os
-import shutil
 
 import torch
 from accelerate import Accelerator
