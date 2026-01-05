@@ -84,7 +84,7 @@ echo ""
 echo "--------------------------------------------------"
 echo "Step 2: Running generation with optimized model..."
 echo "--------------------------------------------------"
-python3 "$SCRIPT_DIR/generate.py" --model-name "$MODEL_NAME" --hardware-strategy cpu --quantized "${OTHER_ARGS[@]}"
+python3 "$BASE_DIR/generate.py" --model-name "$MODEL_NAME" --hardware-strategy cpu --quantized "${OTHER_ARGS[@]}"
 
 echo "--------------------------------------------------"
 echo "Script finished."

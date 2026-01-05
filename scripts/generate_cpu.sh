@@ -13,4 +13,4 @@ if [ -d "$BASE_DIR/venv" ]; then
 fi
 
 # Run the generation script with CPU hardware strategy
-python3 "$SCRIPT_DIR/generate.py" --hardware-strategy cpu "$@"
+python3 "$BASE_DIR/generate.py" --hardware-strategy cpu "$@"

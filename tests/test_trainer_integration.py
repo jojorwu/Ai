@@ -54,7 +54,7 @@ class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-co
         Tests that a pre-training epoch and an evolution cycle both update the base model.
         """
         config, tokenizer, train_data, val_data = _create_test_config_and_data()
-        config.lora = None  # Disable LoRA for this test
+        config.lora = None # Explicitly disable LoRA for this test
         accelerator = Accelerator()
 
         data_components = DataComponents(

@@ -29,7 +29,6 @@ class Tokenizer:
                 self.special_tokens, key=len, reverse=True
             ))
         )
-
         vocab_file_path = os.path.join(source_path, 'tokenizer_vocab.json')
         if os.path.isfile(vocab_file_path):
             self._load_vocab_from_file(vocab_file_path)

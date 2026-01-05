@@ -95,10 +95,10 @@ class Transformer(nn.Module):
         self.rope_embeddings = self._init_rope_embeddings(config)
         self.layers = self._init_layers(config, load_in_4bit)
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
-        self.draft_model = self._create_draft_model(config, load_in_4bit)
+        self.draft_model = self._create_draft_model(load_in_4bit)
 
     def _create_draft_model(
-        self, config: TransformerConfig, load_in_4bit: bool
+        self, load_in_4bit: bool
     ) -> "Transformer|None":
         """
         Creates a smaller, faster 'draft' model for speculative decoding.
@@ -127,7 +127,7 @@ class Transformer(nn.Module):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def prepare_inputs_for_generation(self, *args, **kwargs):
+    def prepare_inputs_for_generation(self, **kwargs):
         """
         A dummy method to satisfy the peft library's API requirements.
         In this model, input preparation is handled internally.

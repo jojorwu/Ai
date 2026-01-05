@@ -15,4 +15,4 @@ fi
 # Run the training script with hybrid hardware strategy
 # For a potential speedup on supported hardware, uncomment the --torch_compile flag.
 # Note: This may increase initial startup time.
-python3 "$SCRIPT_DIR/train.py" --hardware-strategy hybrid "$@" # --torch_compile
+python3 "$BASE_DIR/train.py" --hardware-strategy hybrid "$@" # --torch_compile

@@ -2,6 +2,7 @@
 Pydantic models for strong typing and validation of the project configuration.
 """
 import json
+from dataclasses import dataclass
 from typing import Any, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
@@ -9,10 +10,9 @@ from pydantic import BaseModel, Field
 
 class LTMArchitectureConfig(BaseModel):
     """Configuration specific to the LTM architecture."""
-    d_hidden: Optional[int] = Field(
-        None, description="Dimensionality of the hidden layer in LTM.")
-    num_layers: Optional[int] = Field(None,
-                                          description="Number of layers in LTM.")
+    d_hidden: Optional[int] = Field(None, description="Dimensionality of the hidden layer in LTM.")
+    num_layers: Optional[int] = Field(None, description="Number of layers in LTM.")
+
 
 class ModelConfig(BaseModel):
     """Configuration for the Transformer model architecture."""
@@ -242,8 +242,6 @@ class BaseConfig(BaseModel):
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return cls.model_validate(data)
-
-from dataclasses import dataclass
 
 
 @dataclass

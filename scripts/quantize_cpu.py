@@ -29,7 +29,7 @@ def main():
     # --- Load Model ---
     logging.info("Loading model '%s' for quantization...", args.model_name)
     # Load the model without dispatching it to a device yet, ensuring it stays on CPU
-    model, _ = load_model_and_tokenizer(
+    config, model, _ = load_model_and_tokenizer(
         args.model_name,
         load_in_4bit=False,  # Quantization is a CPU feature, not 4-bit
         quantized=False,     # Load the original, unquantized model

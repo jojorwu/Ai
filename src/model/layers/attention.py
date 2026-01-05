@@ -13,7 +13,7 @@ try:
     from flash_attn.flash_attn_interface import flash_attn_func
     # To support इज़_causal, we need at least version 2.0.
     from flash_attn import __version__ as flash_attn_version
-    FLASH_ATTENTION_AVAILABLE = True if flash_attn_version >= "2.0.0" else False
+    FLASH_ATTENTION_AVAILABLE = flash_attn_version >= "2.0.0"
 except ImportError:
     flash_attn_func = None
     FLASH_ATTENTION_AVAILABLE = False
@@ -63,6 +63,7 @@ class ScaledDotProductAttention(nn.Module):
             )
 
         # Fallback to the standard PyTorch implementation
+        # pylint: disable=not-callable
         return F.scaled_dot_product_attention(
             inputs.q, inputs.k, inputs.v, attn_mask=inputs.mask, is_causal=inputs.is_causal
         )
