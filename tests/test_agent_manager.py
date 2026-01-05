@@ -19,19 +19,28 @@ class TestAgentManager(unittest.TestCase):
         """Set up a mock model and config for testing."""
         self.mock_config = TrainConfig.from_json('config_train.json')
         self.mock_model = MagicMock(spec=Transformer)
-        self.mock_model.config = self.mock_config.model  # Use the nested ModelConfig
 
-        # Create a mock for the 'layers' attribute, which in turn has a 'long_term_memory' attribute
+        # Configure the nested config object that the code expects.
+        self.mock_model.config = self.mock_config.model
+        self.mock_model.config.d_model = 64  # Set a specific dimension for mocks
+
+        # Mock the deeply nested layer structure.
+        mock_embedding_layer = MagicMock()
+        mock_embedding_layer.embedding.weight.dtype = torch.float32
         mock_layers = MagicMock()
+        mock_layers.embedding = mock_embedding_layer
+
+        # Mock the LTM with valid parameters to avoid optimizer errors.
         mock_ltm = MagicMock(spec=torch.nn.Module)
-        # Make parameters() return a non-empty list to avoid ValueError from Adam optimizer
         mock_ltm.parameters.return_value = [torch.nn.Parameter(torch.randn(1))]
         mock_layers.long_term_memory = mock_ltm
+
         self.mock_model.layers = mock_layers
         self.mock_model.device = 'cpu'
 
         self.mock_accelerator = MagicMock(spec=Accelerator)
         self.mock_accelerator.unwrap_model.return_value = self.mock_model
+        self.mock_accelerator.device = 'cpu'
 
 
     def test_merge_agents_averages_ltm_weights(self):
@@ -180,10 +189,15 @@ class TestAgentManager(unittest.TestCase):
         self.mock_model.forward.return_value = (None, torch.tensor([[0.8], [0.7]]), None)
         self.mock_model.layers.embedding.return_value = torch.randn(2, 10, 64)
 
-        # Call the private method. If the bug is present, this will likely
-        # raise a TypeError or AttributeError.
+        # Mock the new `compute_ltm_state` method on each agent
+        for agent in manager.agents:
+            agent.compute_ltm_state = MagicMock(
+                return_value=torch.randn(1, 1, self.mock_model.config.d_model)
+            )
+
+        # Call the private method.
         # pylint: disable=protected-access
-        avg_score = manager._batch_critique(dummy_sequence, mock_ltms)
+        avg_score = manager._batch_critique(dummy_sequence, manager.agents)
 
         # Assert that the score is a valid float, confirming the method ran successfully
         self.assertIsInstance(avg_score, float)

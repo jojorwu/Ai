@@ -117,6 +117,35 @@ class Agent:
 
         self.ltm_optimizer.zero_grad()
 
+    @torch.no_grad()
+    def compute_ltm_state(self, input_sequence: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the LTM state for a given input sequence.
+
+        This method encapsulates the process of creating a compressed representation
+        of a sequence by calculating its embedding and passing it through the
+        agent's unique LTM.
+
+        Args:
+            input_sequence: The input token IDs. Shape: (1, seq_len).
+
+        Returns:
+            The computed LTM state tensor. Shape: (1, 1, d_model).
+        """
+        if not self.long_term_memory:
+            return torch.zeros(
+                (1, 1, self.base_model.config.d_model),
+                device=self.base_model.device,
+                dtype=self.base_model.layers.embedding.embedding.weight.dtype,
+            )
+
+        h = self.base_model.layers.embedding(
+            input_sequence
+        ) * math.sqrt(self.base_model.config.d_model)
+        ltm_input = h.mean(dim=1, keepdim=True)
+        ltm_state, _ = self.long_term_memory(ltm_input)
+        return ltm_state
+
     def get_ltm_state(self) -> dict | None:
         """Returns the state_dict of this agent's LTM."""
         return self.long_term_memory.state_dict() if self.long_term_memory else None
