@@ -193,10 +193,9 @@ class AgentManager:
         if helper.agent_id == ctx.proposer.agent_id:
             return  # Avoid agent helping itself in a small population
 
-        # Generate a response from the helper agent
-        context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
-            helper.base_model.device
-        )
+        # Generate a response from the helper agent. The context is the full
+        # response from the proposer, which already includes the initial prompt.
+        context = ctx.response.to(helper.base_model.device)
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1] :]
 
@@ -304,10 +303,10 @@ class AgentManager:
                 )
 
             # A single, efficient forward pass on the base model using the batch of
-            # LTM states. The `ltm_override` mechanism allows us to evaluate all
-            # critics in parallel without needing to know the model's internal details.
+            # LTM states. The `ltm_state` parameter allows us to inject the pre-computed
+            # states from all critics, evaluating them in a single, efficient forward pass.
             _, values, _ = self.base_model.forward(
-                full_sequence, ltm_override=ltm_states
+                full_sequence, ltm_state=ltm_states
             )
 
         return values.mean().item()

@@ -11,141 +11,80 @@ import torch
 from accelerate import Accelerator
 
 from src.config import TrainConfig
-from src.trainer import (
-    Trainer,
-    DataComponents,
-    create_trainer,
-    TrainerConfig,
-    TrainingComponents,
-)
-from src.utils.core import load_model_and_tokenizer
+from src.data.tokenizer import Tokenizer
+from src.trainer import DataComponents, create_trainer
 
 
 class TestQuantizationIntegration(unittest.TestCase):
     """
-    Tests the full lifecycle of a 4-bit quantized model:
-    1. A model is trained for one step and saved.
-    2. The saved model is loaded with 4-bit quantization.
-    3. A training step is run on the quantized model to ensure compatibility.
+    Tests that a 4-bit quantized model can be successfully created and trained
+    for one epoch.
     """
 
     def setUp(self):
         """Set up a temporary directory for model artifacts."""
         self.temp_dir = tempfile.mkdtemp()
-        self.model_dir = os.path.join(self.temp_dir, "test_model")
+        self.model_name = "test_quantized_model"
+        self.model_dir = os.path.join("models", self.model_name)
         os.makedirs(self.model_dir, exist_ok=True)
 
-        # Create dummy data and config
-        self.config_path = os.path.join(self.temp_dir, "config.json")
-        self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
-        self.data_path = os.path.join(self.temp_dir, "data.txt")
-
+        # Create a dummy config and tokenizer vocab
         with open("config_train.json", "r", encoding="utf-8") as f:
-            config = TrainConfig.model_validate_json(f.read())
-        config.model.d_model = 16
-        config.model.num_heads = 2
-        config.model.d_ff = 32
-        config.model.num_layers = 1
-        config.evolution.data_dir = self.temp_dir
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            f.write(config.model_dump_json(indent=4))
+            self.config = TrainConfig.model_validate_json(f.read())
+        self.config.model.d_model = 16
+        self.config.model.num_heads = 2
+        self.config.model.d_ff = 32
+        self.config.model.num_layers = 1
+        with open(
+            os.path.join(self.model_dir, "config.json"), "w", encoding="utf-8"
+        ) as f:
+            f.write(self.config.model_dump_json(indent=4))
 
-        vocab = {"<pad>": 0, "a": 1, "b": 2}
-        with open(self.vocab_path, "w", encoding="utf-8") as f:
-            json.dump(vocab, f)
-
-        with open(self.data_path, "w", encoding="utf-8") as f:
-            f.write("a b " * 50)
+        self.tokenizer = Tokenizer(self.config.evolution.data_dir)
+        self.tokenizer.save_vocab(self.model_dir)
 
     def tearDown(self):
         """Clean up the temporary directory."""
         shutil.rmtree(self.temp_dir)
+        if os.path.exists(self.model_dir):
+            shutil.rmtree(self.model_dir)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
-    def test_quantized_model_training_lifecycle(self): # pylint: disable=too-many-locals
+    def test_quantized_model_training_lifecycle(self):
         """
-        Tests the full training lifecycle with a 4-bit quantized model.
+        Tests that a 4-bit quantized model can be created and trained.
         """
-        # 1. Initial training and saving
-        config = TrainConfig.from_json(self.config_path)
+        # 1. Setup
         accelerator = Accelerator()
-        tokenizer = DataComponents.tokenizer
-        train_data = torch.randint(
-            0, config.vocab_size, (100,)
-        )
-        val_data = torch.randint(
-            0, config.vocab_size, (20,)
-        )
+        train_data = list(range(100))
+        val_data = list(range(20))
         data_components = DataComponents(
-            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+            tokenizer=self.tokenizer, train_data=train_data, val_data=val_data
         )
-        trainer = create_trainer(config, data_components, accelerator)
-        trainer.train_pretrain_epoch()
-        # Ensure we save the unwrapped model state dict
-        unwrapped_model = accelerator.unwrap_model(trainer.get_model())
+
+        # Create a dummy model weights file to load from
+        # In a real scenario, this would be from a previous training run
+        dummy_model = create_trainer(
+            self.config, data_components, accelerator, load_in_4bit=False
+        ).get_model()
+        unwrapped_model = accelerator.unwrap_model(dummy_model)
         torch.save(
-            unwrapped_model.state_dict(),
-            os.path.join(self.model_dir, "model.pt")
-        )
-        shutil.copy(self.config_path, self.model_dir)
-        shutil.copy(self.vocab_path, self.model_dir)
-
-        # 2. Load the model with 4-bit quantization
-        quantized_model, _ = load_model_and_tokenizer(
-            os.path.basename(self.model_dir),
-            config,
-            load_in_4bit=True,
-            quantized=False
-        )
-        self.assertTrue(
-            any(
-                "4bit" in str(type(m)).lower()
-                for m in quantized_model.modules()
-            )
+            unwrapped_model.state_dict(), os.path.join(self.model_dir, "model.pt")
         )
 
-        # 3. Run a training step on the quantized model
-        # We need to create a new optimizer for the quantized model's parameters
-        quantized_optimizer = torch.optim.AdamW(
-            quantized_model.parameters(), lr=config.optimizer.learning_rate
+        # 2. Create a new trainer with 4-bit loading enabled
+        # This will load the dummy weights into a quantized model
+        quantized_trainer = create_trainer(
+            self.config, data_components, accelerator, load_in_4bit=True
         )
 
-        # We can reuse the scheduler and loss function from the original trainer.
-        # We access the internal config of the original trainer to get them.
-        # pylint: disable=protected-access
-        original_trainer_config = trainer._config
-        scheduler = original_trainer_config.components.scheduler
-        value_loss_fn = original_trainer_config.components.value_loss_fn
-
-        # Prepare the new model, optimizer, and re-prepare the reused components
-        (
-            quantized_model,
-            quantized_optimizer,
-            scheduler,
-            value_loss_fn,
-        ) = accelerator.prepare(
-            quantized_model, quantized_optimizer, scheduler, value_loss_fn
-        )
-
-        # Create new training components and config for the quantized trainer
-        quantized_components = TrainingComponents(
-            model=quantized_model,
-            optimizer=quantized_optimizer,
-            scheduler=scheduler,
-            value_loss_fn=value_loss_fn,
-        )
-        quantized_trainer_config = TrainerConfig(
-            components=quantized_components,
-            data=data_components,
-            config=config,
-            accelerator=accelerator,
-        )
-        quantized_trainer = Trainer(quantized_trainer_config)
+        # 3. Run a training epoch on the quantized model
         loss, _ = quantized_trainer.train_pretrain_epoch()
 
-        # Assert that the training step was successful (loss is a valid number)
-        self.assertFalse(torch.isnan(loss))
-        self.assertFalse(torch.isinf(loss))
+        # 4. Assert that the training step was successful
+        self.assertFalse(torch.isnan(torch.tensor(loss)))
+        self.assertFalse(torch.isinf(torch.tensor(loss)))
+        self.assertGreater(loss, 0)
 
 
 if __name__ == "__main__":

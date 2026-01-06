@@ -34,7 +34,9 @@
     "early_stopping_patience": 3,
     "best_model_path": "best_model.npz",
     "moe_aux_loss_coeff": 0.01,
-    "label_smoothing": 0.0
+    "label_smoothing": 0.0,
+    "agent_specialization_steps": 10,
+    "evaluation_data_size": 200
   },
   "optimizer": {
     "learning_rate": 0.0001,

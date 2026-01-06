@@ -148,9 +148,17 @@ class EvolutionConfig(BaseModel):
     best_model_path: str = Field("best_model.npz",
                                  description="Path to save the best model.")
     moe_aux_loss_coeff: float = Field(
-        0.01, description="Coefficient for the MoE auxiliary loss.")
+        0.01, description="Coefficient for the MoE auxiliary loss."
+    )
     label_smoothing: float = Field(
-        0.0, description="Value for label smoothing (0.0 means disabled).")
+        0.0, description="Value for label smoothing (0.0 means disabled)."
+    )
+    agent_specialization_steps: int = Field(
+        10, description="Number of training steps for each agent during specialization."
+    )
+    evaluation_data_size: int = Field(
+        50, description="Number of validation samples to use for collaborative evaluation."
+    )
 
 
 class OptimizerConfig(BaseModel):

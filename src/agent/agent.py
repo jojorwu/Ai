@@ -172,11 +172,40 @@ class Agent:
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
+        # Ensure the prompt fits within the model's context window by truncating from the left.
+        max_len = self.base_model.config.max_seq_len
+        if prompt_tokens.size(1) > max_len:
+            prompt_tokens = prompt_tokens[:, -max_len:]
+
+        # Dynamically calculate how many new tokens can be generated without exceeding max_seq_len.
+        available_space = max_len - prompt_tokens.size(1)
+        tokens_to_generate = min(max_new_tokens, available_space)
+
+        if tokens_to_generate <= 0:
+            # If there's no space to generate, return the (truncated) prompt.
+            return prompt_tokens
+
         sampling_config = SamplingConfig(temperature=0.7, top_k=50)
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=tokens_to_generate,
             sampling_config=sampling_config,
             ltm_override=self.long_term_memory,
         )
-        return self.base_model.generate(generate_input)
+
+        # Consume the generator to get the full response
+        generated_chunks = []
+        for chunk, _ in self.base_model.generate(generate_input):
+            generated_chunks.append(chunk)
+
+        if not generated_chunks:
+            return prompt_tokens  # Return the prompt if nothing was generated
+
+        full_response = torch.cat(generated_chunks, dim=1)
+
+        # The generator can overshoot the target number of tokens due to chunking.
+        # We must truncate the response to ensure it's exactly the requested length.
+        if full_response.size(1) > tokens_to_generate:
+            full_response = full_response[:, :tokens_to_generate]
+
+        return torch.cat((prompt_tokens, full_response), dim=1)

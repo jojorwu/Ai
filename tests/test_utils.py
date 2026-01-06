@@ -74,8 +74,7 @@ def run_peft_model_test(
     input_ids = torch.tensor([[0, 1, 2]], device=accelerator.device)
     labels = torch.tensor([[1, 2, 0]], device=accelerator.device)
 
-    # pylint: disable=protected-access
-    optimizer = trainer._config.components.optimizer
+    optimizer = trainer.optimizer
 
     logits, _, _ = model(input_ids=input_ids)
 
