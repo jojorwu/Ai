@@ -227,7 +227,8 @@ class Transformer(nn.Module):
 
         Returns:
             A tuple containing:
-            - logits: The output logits for next token prediction. Shape: (batch_size, seq_len, vocab_size).
+            - logits: The output logits for next token prediction.
+                      Shape: (batch_size, seq_len, vocab_size).
             - value: The predicted value from the value head. Shape: (batch_size, 1).
             - total_aux_loss: The auxiliary load balancing loss from the MoE layers.
         """
@@ -346,7 +347,8 @@ class Transformer(nn.Module):
         """
         Calculates the 'surprise' metric for the LTM update mechanism.
 
-        "Surprise" is a heuristic used to decide when to update the Long-Term Memory.
+        "Surprise" is a heuristic used to decide when to update the Long-Term
+        Memory.
         It's defined as the norm of the gradients of the LTM's parameters with respect
         to the value head's output. A high surprise value indicates that a small change
         in the LTM would have a large impact on the predicted value, suggesting that the
