@@ -14,7 +14,6 @@ from src.config.core import TrainConfig
 from src.training.trainer import (
     DataComponents,
     Trainer,
-    TrainerConfig,
     TrainingComponents,
     create_trainer,
 )
@@ -134,13 +133,10 @@ class TestQuantizationIntegration(unittest.TestCase):
             scheduler=scheduler,
             value_loss_fn=value_loss_fn,
         )
-        quantized_trainer_config = TrainerConfig(
-            components=quantized_components,
-            data=data_components,
-            config=config,
-            accelerator=accelerator,
+        # Directly create a new trainer with the quantized components
+        quantized_trainer = create_trainer(
+            config, data_components, accelerator, load_in_4bit=True
         )
-        quantized_trainer = Trainer(quantized_trainer_config)
         loss, _ = quantized_trainer.train_pretrain_epoch()
 
         # Assert that the training step was successful (loss is a valid number)
