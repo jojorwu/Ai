@@ -10,7 +10,8 @@ from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from src.agent.agent_manager import AgentManager, SpecializationConfig
+from src.agent.agent_manager import AgentManager
+from src.agent.dataclasses import SpecializationConfig
 from src.config.core import TrainConfig
 from src.data.data_loader import get_batches_torch as get_batches
 from src.training.loss import cross_entropy_with_label_smoothing
