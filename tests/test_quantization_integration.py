@@ -17,7 +17,7 @@ from src.training.runners import (
     TrainerConfig,
     TrainingComponents,
 )
-from src.utils.core import load_model_and_tokenizer
+from src.model.factory import load_model_and_tokenizer
 
 
 class TestQuantizationIntegration(unittest.TestCase):

@@ -9,8 +9,9 @@ import torch
 import torch.quantization
 
 from src.config.core import TrainConfig
+from src.model.factory import load_model_and_tokenizer
 from src.utils.cli import create_main_parser, make_model_name_required
-from src.utils.core import load_model_and_tokenizer, main_entrypoint, setup_logging
+from src.utils.core import main_entrypoint, setup_logging
 
 
 def quantize_model(model_name: str, config: TrainConfig):

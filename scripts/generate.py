@@ -16,8 +16,8 @@ from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
 from src.model.complexity_manager import ComplexityManager
+from src.model.factory import load_model_and_tokenizer
 from src.utils.core import (
-    load_model_and_tokenizer,
     main_entrypoint,
     setup_logging,
 )
