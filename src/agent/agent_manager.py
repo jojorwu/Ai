@@ -40,6 +40,18 @@ class IndependentResponseContext:
     scores: dict
     response: torch.Tensor
 
+
+@dataclass
+class CritiqueScoringContext:
+    """Context for applying critique-based scores."""
+    scores: dict
+    avg_critique_score: float
+    success_reward: float
+    failure_penalty: float
+    agents_to_reward: List[Agent]
+    agents_to_penalize: List[Agent]
+
+
 class AgentManager:
     """
     Manages the creation, specialization, and evaluation of a population of agents.
@@ -191,100 +203,104 @@ class AgentManager:
         }
         return scores, tokens
 
+    def _get_critics(self, proposer: Agent, agents_to_exclude: List[Agent]) -> List[Agent]:
+        """
+        Selects agents from the population to act as critics.
+
+        This method returns a list of agents that are not in the `agents_to_exclude`
+        list. If no such agents are available, it returns a list containing only
+        the `proposer` as a fallback.
+
+        Args:
+            proposer: The agent who initiated the action, used as a fallback critic.
+            agents_to_exclude: A list of agents to exclude from the critic pool.
+
+        Returns:
+            A list of critic agents.
+        """
+        exclude_ids = {agent.agent_id for agent in agents_to_exclude}
+        critics = [
+            agent for agent in self.agents if agent.agent_id not in exclude_ids
+        ]
+        # As a fallback, if no other critics are available, the proposer critiques itself.
+        return critics or [proposer]
+
+    def _apply_critique_based_scores(self, csc: CritiqueScoringContext):
+        """
+        Applies rewards or penalties to agents based on a critique score.
+
+        If the critique score is above a success threshold, a scaled reward is given
+        to the agents to reward. Otherwise, a scaled penalty is applied to the
+        agents to penalize.
+
+        Args:
+            csc: The context object containing all scoring parameters.
+        """
+        if csc.avg_critique_score > self.SUCCESS_THRESHOLD:
+            reward = csc.success_reward * csc.avg_critique_score
+            for agent in csc.agents_to_reward:
+                csc.scores[agent.agent_id] += reward
+        else:
+            penalty = csc.failure_penalty * (1 - csc.avg_critique_score)
+            for agent in csc.agents_to_penalize:
+                csc.scores[agent.agent_id] += penalty
+
     def _handle_collaboration_request(self, ctx: CollaborationContext):
         """
         Manages the 'ask for help' scenario in collaborative evaluation.
-
-        The agent that asked for help (proposer) is rewarded. Another agent (helper)
-        is chosen to provide a response. This response is then critiqued by all other
-        agents. The helper and proposer are both rewarded or penalized based on the
-        quality of the help provided, as judged by the critics.
-
-        Args:
-            ctx: The context object containing all necessary information for this interaction.
         """
-        # 1. Reward the proposing agent for asking for help. This encourages
-        # agents to recognize their limitations, a key collaborative skill.
         ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
 
-        # 2. Select a different agent to act as the "helper". To ensure fairness
-        # and diversity, the next agent in the list is chosen.
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
-            return  # Avoid an agent helping itself in very small populations.
+            return
 
-        # 3. The helper generates a response based on the original prompt plus
-        # the proposer's initial response (which included the <ASK_FOR_HELP> token).
         context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
             helper.base_model.device
         )
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1] :]
 
-        # 4. All other agents in the population (excluding the proposer and helper)
-        # act as "critics" to evaluate the quality of the help provided.
-        critics = [
-            a
-            for a in self.agents
-            if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
-        ] or [ctx.proposer]  # Fallback to the proposer if no other critics.
+        critics = self._get_critics(ctx.proposer, [ctx.proposer, helper])
         critic_ltms = [c.long_term_memory for c in critics]
 
-        # 5. The critics evaluate the complete interaction (context + helper's response)
-        # in a single batched operation for efficiency.
         full_critique_sequence = torch.cat([context, new_helper_tokens], dim=1)
         avg_critique_score = self._batch_critique(
             full_critique_sequence.expand(len(critics), -1), critic_ltms
         )
-
-        # 6. Reward or penalize both the helper and the original proposer based
-        # on the critics' evaluation.
-        if avg_critique_score > self.SUCCESS_THRESHOLD:
-            reward = self.REWARD_GOOD_HELP * avg_critique_score
-            ctx.scores[helper.agent_id] += reward
-            ctx.scores[ctx.proposer.agent_id] += reward  # Proposer also rewarded for good question
-        else:
-            penalty = self.PENALTY_BAD_HELP * (1 - avg_critique_score)
-            ctx.scores[helper.agent_id] += penalty
+        csc = CritiqueScoringContext(
+            scores=ctx.scores,
+            avg_critique_score=avg_critique_score,
+            success_reward=self.REWARD_GOOD_HELP,
+            failure_penalty=self.PENALTY_BAD_HELP,
+            agents_to_reward=[helper, ctx.proposer],
+            agents_to_penalize=[helper],
+        )
+        self._apply_critique_based_scores(csc)
 
     def _handle_independent_response(self, ctx: IndependentResponseContext):
         """
         Manages the 'independent response' scenario in collaborative evaluation.
-
-        The agent's response is evaluated by all other agents in the population
-        (the 'critics'). The proposing agent is then rewarded or penalized based
-        on the average critique score, encouraging high-quality, independent solutions.
-
-        Args:
-            ctx: The context object containing all necessary information for this interaction.
         """
-        # 1. All other agents in the population act as "critics". This peer-review
-        # mechanism is central to the collaborative evaluation.
-        critics = (
-            [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
-            or [ctx.proposer]  # Fallback: proposer critiques itself if no others.
-        )
+        critics = self._get_critics(ctx.proposer, [ctx.proposer])
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
 
-        # 2. The full sequence (prompt + new response tokens) is prepared for the
-        # critics. It's expanded to match the number of critics for a batched pass.
-        full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
-            len(critics), -1
-        )
+        full_sequence = torch.cat(
+            [ctx.prompt_tokens, new_response_tokens], dim=1
+        ).expand(len(critics), -1)
         critic_ltms = [critic.long_term_memory for critic in critics]
 
-        # 3. The `_batch_critique` method is called to get a collective, averaged
-        # evaluation from all critics.
         avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
 
-        # 4. The proposing agent is rewarded for a successful independent response or
-        # penalized for a poor one, based on the collective judgment of its peers.
-        if avg_critique_score > self.SUCCESS_THRESHOLD:
-            reward = self.REWARD_INDEPENDENT_SUCCESS * avg_critique_score
-            ctx.scores[ctx.proposer.agent_id] += reward
-        else:
-            penalty = self.PENALTY_INDEPENDENT_FAILURE * (1 - avg_critique_score)
-            ctx.scores[ctx.proposer.agent_id] += penalty
+        csc = CritiqueScoringContext(
+            scores=ctx.scores,
+            avg_critique_score=avg_critique_score,
+            success_reward=self.REWARD_INDEPENDENT_SUCCESS,
+            failure_penalty=self.PENALTY_INDEPENDENT_FAILURE,
+            agents_to_reward=[ctx.proposer],
+            agents_to_penalize=[ctx.proposer],
+        )
+        self._apply_critique_based_scores(csc)
 
     def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
         """
