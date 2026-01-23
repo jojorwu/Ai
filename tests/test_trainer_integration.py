@@ -7,7 +7,8 @@ import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
-from src.training.trainer import create_trainer, DataComponents
+from src.training.trainer import create_trainer
+from src.training.runners import DataComponents
 
 
 def _create_test_config_and_data():

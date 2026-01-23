@@ -11,7 +11,8 @@ from accelerate import Accelerator
 from src.config.core import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
-from src.training.trainer import create_trainer, DataComponents
+from src.training.trainer import create_trainer
+from src.training.runners import DataComponents
 from src.utils.cli import create_main_parser
 from src.utils.core import main_entrypoint, setup_logging
 

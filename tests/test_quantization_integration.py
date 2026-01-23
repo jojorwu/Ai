@@ -11,10 +11,9 @@ import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
-from src.training.trainer import (
-    Trainer,
+from src.training.trainer import Trainer, create_trainer
+from src.training.runners import (
     DataComponents,
-    create_trainer,
     TrainerConfig,
     TrainingComponents,
 )
