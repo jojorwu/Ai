@@ -4,29 +4,25 @@ This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
 import logging
-import os
 from dataclasses import dataclass
 from typing import List
 
 import torch
 from accelerate import Accelerator
 
+from src.agent.tools import execute_tool, parse_tool_call
 from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
-from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
-                           Transformer)
 from src.model.complexity_manager import ComplexityManager
 from src.model.factory import load_model_and_tokenizer
-from src.utils.core import (
-    main_entrypoint,
-    setup_logging,
+from src.model.model import (
+    GenerateInput,
+    SamplingConfig,
+    SpeculativeConfig,
+    Transformer,
 )
-from src.utils.cli import (
-    create_main_parser,
-    select_model_interactively,
-    apply_cli_args_to_config,
-)
-from src.agent.tools import execute_tool, parse_tool_call
+from src.utils.core import main_entrypoint, setup_logging
+from src.utils.setup import setup_from_args
 
 
 @dataclass
@@ -124,28 +120,17 @@ def run_agent_loop(
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
-    parser = create_main_parser()
-    args = parser.parse_args()
-
-    model_name = args.model_name or select_model_interactively()
-    if not model_name:
-        return
-
-    model_dir = os.path.join('models', model_name)
-    config_path = os.path.join(model_dir, 'config.json')
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(
-            f"Config file not found for model '{model_name}' at {config_path}"
-        )
-
-    config = GenerateConfig.from_json(config_path)
-    apply_cli_args_to_config(args, config)
-
+    app_setup = setup_from_args(GenerateConfig)
     accelerator = Accelerator()
+
     model, tokenizer = load_model_and_tokenizer(
-        model_name, config, args.load_in_4bit, args.quantized
+        app_setup.model_name,
+        app_setup.config,
+        app_setup.args.load_in_4bit,
+        app_setup.args.quantized,
     )
-    run_agent_loop(model, tokenizer, config, accelerator)
+
+    run_agent_loop(model, tokenizer, app_setup.config, accelerator)
 
 if __name__ == "__main__":
     main()

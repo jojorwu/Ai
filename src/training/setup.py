@@ -18,17 +18,6 @@ from src.utils.cli import apply_cli_args_to_config
 from src.utils.core import setup_logging
 
 
-@dataclass
-class SetupConfig:
-    """Configuration for the training setup process."""
-
-    model_name: str
-    resume_from: Optional[str]
-    wandb: bool
-    load_in_4bit: bool
-    args: argparse.Namespace
-
-
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
     """Initializes tokenizer and loads data."""
     tokenizer = Tokenizer(tokenizer_path)
@@ -41,11 +30,11 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     return tokenizer, data_tokens[:split_idx], data_tokens[split_idx:]
 
 
-def setup_environment(setup_config: SetupConfig):
+def setup_environment(args: argparse.Namespace):
     """Sets up directories, logging, and configuration."""
-    model_dir = os.path.join("models", setup_config.model_name)
+    model_dir = os.path.join("models", args.model_name)
     checkpoint_dir = os.path.join(model_dir, "checkpoints")
-    resume_from = setup_config.resume_from
+    resume_from = args.resume_from
 
     if resume_from:
         config_path = os.path.join("models", resume_from, "config.json")
@@ -55,7 +44,7 @@ def setup_environment(setup_config: SetupConfig):
         logging.info(
             "Resuming training from '%s'. New model and logs will be in '%s'.",
             resume_from,
-            setup_config.model_name,
+            args.model_name,
         )
     else:
         if os.path.exists(model_dir):
@@ -65,7 +54,7 @@ def setup_environment(setup_config: SetupConfig):
         config_path = "config_train.json"
         log_path = os.path.join(model_dir, "training.log")
         setup_logging(log_path)
-        logging.info("Starting new training run: '%s'.", setup_config.model_name)
+        logging.info("Starting new training run: '%s'.", args.model_name)
 
     config = TrainConfig.from_json(config_path)
     return config, model_dir, checkpoint_dir, resume_from
@@ -90,7 +79,7 @@ class TrainingEnvironment:
 
 
 def prepare_training_environment(
-    setup_config: SetupConfig,
+    args: argparse.Namespace,
 ) -> TrainingEnvironment:
     """
     Orchestrates the setup of the entire training environment.
@@ -104,18 +93,18 @@ def prepare_training_environment(
     6. Saving the final configuration.
 
     Args:
-        setup_config: Configuration object for the setup process.
+        args: Parsed command-line arguments.
 
     Returns:
         A TrainingEnvironment object containing all necessary components.
     """
-    config, model_dir, checkpoint_dir, resume_from = setup_environment(setup_config)
-    apply_cli_args_to_config(setup_config.args, config)
+    config, model_dir, checkpoint_dir, resume_from = setup_environment(args)
+    apply_cli_args_to_config(args, config)
 
     accelerator = Accelerator(
-        mixed_precision="fp16", log_with="wandb" if setup_config.wandb else None
+        mixed_precision="fp16", log_with="wandb" if args.wandb else None
     )
-    if accelerator.is_main_process and setup_config.wandb:
+    if accelerator.is_main_process and args.wandb:
         accelerator.init_trackers(
             project_name="transformer-project", config=config.model_dump()
         )
