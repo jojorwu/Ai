@@ -76,100 +76,6 @@ def save_updated_config(config: TrainConfig, tokenizer: Tokenizer, model_dir: st
     with open(os.path.join(model_dir, "config.json"), "w", encoding="utf-8") as f:
         f.write(config.model_dump_json(indent=4))
 
-
-class TrainingState:
-    """A simple class to hold and manage the training state like epoch."""
-    def __init__(self, epoch=0):
-        self.epoch = epoch
-
-    def state_dict(self):
-        """Returns the state of the training."""
-        return {'epoch': self.epoch}
-
-    def load_state_dict(self, state_dict):
-        """Loads the training state."""
-        self.epoch = state_dict['epoch']
-
-def run_training_loop(trainer, config, checkpoint_dir, accelerator, args): # pylint: disable=too-many-locals
-    """Executes the main training loop."""
-    if accelerator.is_main_process:
-        logging.info("Starting training loop...")
-
-    best_val_loss = float('inf')
-    epochs_no_improve = 0
-    total_epochs = (
-        config.evolution.pretrain_epochs + config.evolution.evolution_epochs
-    )
-    # This state will be managed by Accelerator
-    training_state = TrainingState()
-    accelerator.register_for_checkpointing(training_state)
-
-    if accelerator.is_main_process and args.resume_from:
-        try:
-            checkpoint_path = os.path.join('models', args.resume_from, 'checkpoints')
-            accelerator.load_state(checkpoint_path)
-            logging.info(
-                "Successfully loaded checkpoint. Starting from epoch %d.",
-                training_state.epoch
-            )
-        except FileNotFoundError:
-            logging.warning("Checkpoint not found at the specified path. Starting from scratch.")
-
-
-    start_epoch = training_state.epoch
-    for epoch in range(start_epoch, total_epochs):
-        training_state.epoch = epoch
-        is_pretrain = epoch < config.evolution.pretrain_epochs
-        phase = "Pre-training" if is_pretrain else "Evolution"
-        phase_epoch = epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
-        total_phase_epochs = (
-            config.evolution.pretrain_epochs
-            if is_pretrain
-            else config.evolution.evolution_epochs
-        )
-        logging.info(
-            "\n--- %s Epoch %d/%d ---", phase, phase_epoch + 1, total_phase_epochs
-        )
-
-        if is_pretrain:
-            avg_loss, epoch_time = trainer.train_pretrain_epoch()
-            if accelerator.is_main_process:
-                accelerator.log({
-                    "avg_loss": avg_loss,
-                    "epoch_time": epoch_time,
-                    "learning_rate": trainer.get_learning_rate()
-                }, step=epoch)
-            logging.info("    - Average Loss: %.4f", avg_loss)
-        else:
-            epoch_time = trainer.run_evolution_cycle()
-            if accelerator.is_main_process:
-                accelerator.log({"epoch_time": epoch_time}, step=epoch)
-
-        val_loss = trainer.run_validation()
-        if accelerator.is_main_process:
-            accelerator.log({"val_loss": val_loss}, step=epoch)
-        logging.info(
-            "    - Validation Loss: %.4f, Epoch Time: %.2fs", val_loss, epoch_time
-        )
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            epochs_no_improve = 0
-            accelerator.save_state(checkpoint_dir)
-            logging.info(
-                "    - New best checkpoint saved (Val Loss: %.4f)", best_val_loss
-            )
-        else:
-            epochs_no_improve += 1
-            logging.info(
-                "    - No improvement in validation loss for %d epochs.",
-                epochs_no_improve,
-            )
-
-        if epochs_no_improve >= config.evolution.early_stopping_patience:
-            logging.warning("Early stopping triggered.")
-            break
-
 @main_entrypoint
 def main():
     """Main training script."""
@@ -215,7 +121,7 @@ def main():
         config, data_components, accelerator, args.load_in_4bit
     )
 
-    run_training_loop(trainer, config, checkpoint_dir, accelerator, args)
+    trainer.train(checkpoint_dir, args.resume_from)
 
     # Save the final, unwrapped model for easy inference
     unwrapped_model = accelerator.unwrap_model(trainer.get_model())
