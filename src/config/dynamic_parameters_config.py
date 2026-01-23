@@ -4,8 +4,8 @@ Pydantic models for text generation configuration.
 from pydantic import BaseModel, Field
 
 
-class GenerationConfig(BaseModel):
-    """Configuration for the text generation process."""
+class DynamicParametersConfig(BaseModel):
+    """Configuration for the dynamic parameters of the text generation process."""
     start_text: str = Field(...,
                             description="Initial text for generation.")
     max_len: int = Field(...,
