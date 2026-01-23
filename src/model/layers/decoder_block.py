@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from bitsandbytes.nn import Linear4bit
 
-from src.config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
+from src.config.model_config import (DecoderBlockConfig, FeedForwardConfig, MoEConfig,
                         MultiHeadAttentionConfig)
 from src.model.layers.dropout import Dropout
 from src.model.layers.feed_forward import FeedForward

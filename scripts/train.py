@@ -8,7 +8,7 @@ import shutil
 import torch
 from accelerate import Accelerator
 
-from src.config import TrainConfig
+from src.config.core import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.training.trainer import create_trainer, DataComponents

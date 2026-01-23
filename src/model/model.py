@@ -11,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 from bitsandbytes.nn import Linear4bit
 
-from src.config import DecoderBlockConfig, TransformerConfig
+from src.config.model_config import DecoderBlockConfig, TransformerConfig
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 from src.model.layers.embedding import Embedding
 from src.model.layers.gating import GatingNetwork

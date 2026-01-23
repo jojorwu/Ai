@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.config import MultiHeadAttentionConfig
+from src.config.model_config import MultiHeadAttentionConfig
 from src.model.layers.multi_head_attention import MultiHeadAttention
 from src.model.layers.rotary_embedding import precompute_rope_embeddings
 

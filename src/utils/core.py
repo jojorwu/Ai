@@ -10,7 +10,8 @@ import torch
 from accelerate import dispatch_model
 
 
-from src.config import BaseConfig, TransformerConfig
+from src.config.core import BaseConfig
+from src.config.model_config import TransformerConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
 from src.utils.device_manager import DeviceManager

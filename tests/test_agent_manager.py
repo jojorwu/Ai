@@ -8,7 +8,7 @@ import torch
 from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
-from src.config import TrainConfig
+from src.config.core import TrainConfig
 from src.model.model import Transformer
 
 

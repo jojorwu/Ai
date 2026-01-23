@@ -2,7 +2,7 @@
 Manages device placement for the Transformer model.
 """
 import torch
-from src.config import HardwareConfig
+from src.config.core import HardwareConfig
 
 
 class DeviceManager:

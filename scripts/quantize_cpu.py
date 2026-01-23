@@ -7,7 +7,7 @@ import os
 import torch
 import torch.quantization
 
-from src.config import TrainConfig
+from src.config.core import TrainConfig
 from src.utils.core import load_model_and_tokenizer
 
 

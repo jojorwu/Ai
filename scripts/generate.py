@@ -11,7 +11,7 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from src.config import GenerateConfig
+from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)

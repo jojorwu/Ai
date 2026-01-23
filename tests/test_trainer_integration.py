@@ -6,7 +6,7 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from src.config import TrainConfig
+from src.config.core import TrainConfig
 from src.training.trainer import create_trainer, DataComponents
 
 

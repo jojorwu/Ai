@@ -11,7 +11,8 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.agent.agent_manager import AgentManager, SpecializationConfig
-from src.config import TrainConfig, TransformerConfig
+from src.config.core import TrainConfig
+from src.config.model_config import TransformerConfig
 from src.data.data_loader import \
     get_batches_torch as get_batches  # Assuming a torch version exists
 from src.model.loss import cross_entropy_with_label_smoothing
