@@ -15,6 +15,107 @@ from .runners import (DataComponents, EvolutionRunner, PretrainingRunner,
                       TrainerConfig, TrainingComponents, ValidationRunner)
 
 
+class TrainingLoop:
+    """Encapsulates the main training loop logic."""
+
+    def __init__(self, trainer: "Trainer", config: TrainConfig):
+        self.trainer = trainer
+        self.config = config
+        self.accelerator = trainer._config.accelerator
+
+    def run(self, checkpoint_dir: str, resume_from: str | None):
+        if self.accelerator.is_main_process:
+            logging.info("Starting training loop...")
+
+        best_val_loss = float("inf")
+        epochs_no_improve = 0
+        total_epochs = (
+            self.config.evolution.pretrain_epochs + self.config.evolution.evolution_epochs
+        )
+        training_state = TrainingState()
+        self.accelerator.register_for_checkpointing(training_state)
+
+        if self.accelerator.is_main_process and resume_from:
+            checkpoint_path = os.path.join("models", resume_from, "checkpoints")
+            try:
+                self.accelerator.load_state(checkpoint_path)
+                logging.info(
+                    "Successfully loaded checkpoint. Starting from epoch %d.",
+                    training_state.epoch,
+                )
+            except FileNotFoundError as e:
+                logging.error(
+                    "Checkpoint directory not found at '%s'. Please check the path.",
+                    checkpoint_path,
+                )
+                raise e
+
+        start_epoch = training_state.epoch
+        for epoch in range(start_epoch, total_epochs):
+            training_state.epoch = epoch
+            is_pretrain = epoch < self.config.evolution.pretrain_epochs
+            phase = "Pre-training" if is_pretrain else "Evolution"
+            phase_epoch = (
+                epoch if is_pretrain else epoch - self.config.evolution.pretrain_epochs
+            )
+            total_phase_epochs = (
+                self.config.evolution.pretrain_epochs
+                if is_pretrain
+                else self.config.evolution.evolution_epochs
+            )
+            logging.info(
+                "\n--- %s Epoch %d/%d ---",
+                phase,
+                phase_epoch + 1,
+                total_phase_epochs,
+            )
+
+            if is_pretrain:
+                avg_loss, epoch_time = self.trainer.train_pretrain_epoch()
+                if self.accelerator.is_main_process:
+                    self.accelerator.log(
+                        {
+                            "avg_loss": avg_loss,
+                            "epoch_time": epoch_time,
+                            "learning_rate": self.trainer.get_learning_rate(),
+                        },
+                        step=epoch,
+                    )
+                logging.info("    - Average Loss: %.4f", avg_loss)
+            else:
+                epoch_time = self.trainer.run_evolution_cycle()
+                if self.accelerator.is_main_process:
+                    self.accelerator.log({"epoch_time": epoch_time}, step=epoch)
+
+            val_loss = self.trainer.run_validation()
+            if self.accelerator.is_main_process:
+                self.accelerator.log({"val_loss": val_loss}, step=epoch)
+            logging.info(
+                "    - Validation Loss: %.4f, Epoch Time: %.2fs",
+                val_loss,
+                epoch_time,
+            )
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                epochs_no_improve = 0
+                self.accelerator.save_state(checkpoint_dir)
+                logging.info(
+                    "    - New best checkpoint saved (Val Loss: %.4f)",
+                    best_val_loss,
+                )
+            else:
+                epochs_no_improve += 1
+                logging.info(
+                    "    - No improvement in validation loss for %d epochs.",
+                    epochs_no_improve,
+                )
+
+            if epochs_no_improve >= self.config.evolution.early_stopping_patience:
+                logging.warning("Early stopping triggered.")
+                break
+
+
 def create_trainer(
     config: TrainConfig,
     data_components: "DataComponents",
@@ -101,100 +202,7 @@ class Trainer:
         """Delegates the evolution cycle to the EvolutionRunner."""
         return self._evolution_runner.run()
 
-    def train(
-        self, checkpoint_dir: str, resume_from: str | None
-    ):  # pylint: disable=too-many-locals
+    def train(self, checkpoint_dir: str, resume_from: str | None):
         """Executes the main training loop."""
-        accelerator = self._config.accelerator
-        config = self._config.config
-
-        if accelerator.is_main_process:
-            logging.info("Starting training loop...")
-
-        best_val_loss = float("inf")
-        epochs_no_improve = 0
-        total_epochs = (
-            config.evolution.pretrain_epochs + config.evolution.evolution_epochs
-        )
-        training_state = TrainingState()
-        accelerator.register_for_checkpointing(training_state)
-
-        if accelerator.is_main_process and resume_from:
-            checkpoint_path = os.path.join("models", resume_from, "checkpoints")
-            try:
-                accelerator.load_state(checkpoint_path)
-                logging.info(
-                    "Successfully loaded checkpoint. Starting from epoch %d.",
-                    training_state.epoch,
-                )
-            except FileNotFoundError as e:
-                logging.error(
-                    "Checkpoint directory not found at '%s'. Please check the path.",
-                    checkpoint_path,
-                )
-                raise e
-
-        start_epoch = training_state.epoch
-        for epoch in range(start_epoch, total_epochs):
-            training_state.epoch = epoch
-            is_pretrain = epoch < config.evolution.pretrain_epochs
-            phase = "Pre-training" if is_pretrain else "Evolution"
-            phase_epoch = (
-                epoch if is_pretrain else epoch - config.evolution.pretrain_epochs
-            )
-            total_phase_epochs = (
-                config.evolution.pretrain_epochs
-                if is_pretrain
-                else config.evolution.evolution_epochs
-            )
-            logging.info(
-                "\n--- %s Epoch %d/%d ---",
-                phase,
-                phase_epoch + 1,
-                total_phase_epochs,
-            )
-
-            if is_pretrain:
-                avg_loss, epoch_time = self.train_pretrain_epoch()
-                if accelerator.is_main_process:
-                    accelerator.log(
-                        {
-                            "avg_loss": avg_loss,
-                            "epoch_time": epoch_time,
-                            "learning_rate": self.get_learning_rate(),
-                        },
-                        step=epoch,
-                    )
-                logging.info("    - Average Loss: %.4f", avg_loss)
-            else:
-                epoch_time = self.run_evolution_cycle()
-                if accelerator.is_main_process:
-                    accelerator.log({"epoch_time": epoch_time}, step=epoch)
-
-            val_loss = self.run_validation()
-            if accelerator.is_main_process:
-                accelerator.log({"val_loss": val_loss}, step=epoch)
-            logging.info(
-                "    - Validation Loss: %.4f, Epoch Time: %.2fs",
-                val_loss,
-                epoch_time,
-            )
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                epochs_no_improve = 0
-                accelerator.save_state(checkpoint_dir)
-                logging.info(
-                    "    - New best checkpoint saved (Val Loss: %.4f)",
-                    best_val_loss,
-                )
-            else:
-                epochs_no_improve += 1
-                logging.info(
-                    "    - No improvement in validation loss for %d epochs.",
-                    epochs_no_improve,
-                )
-
-            if epochs_no_improve >= config.evolution.early_stopping_patience:
-                logging.warning("Early stopping triggered.")
-                break
+        loop = TrainingLoop(self, self._config.config)
+        loop.run(checkpoint_dir, resume_from)
