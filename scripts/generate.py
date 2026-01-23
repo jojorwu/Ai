@@ -15,17 +15,18 @@ from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
-from src.utils.cli import create_main_parser
 from src.model.complexity_manager import ComplexityManager
 from src.utils.core import (
     load_model_and_tokenizer,
     main_entrypoint,
-    parse_tool_call,
-    select_model_interactively,
     setup_logging,
+)
+from src.utils.cli import (
+    create_main_parser,
+    select_model_interactively,
     apply_cli_args_to_config,
 )
-from src.agent.tools import execute_tool
+from src.agent.tools import execute_tool, parse_tool_call
 
 
 @dataclass
