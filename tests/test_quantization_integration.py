@@ -11,11 +11,12 @@ import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
-from src.training.trainer import Trainer, create_trainer
-from src.training.runners import (
+from src.training.trainer import (
     DataComponents,
+    Trainer,
     TrainerConfig,
     TrainingComponents,
+    create_trainer,
 )
 from src.model.factory import load_model_and_tokenizer
 

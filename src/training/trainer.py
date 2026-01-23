@@ -3,6 +3,7 @@ PyTorch implementation of the Trainer class, which encapsulates the core trainin
 """
 import logging
 import os
+from dataclasses import dataclass
 
 from torch import nn
 from torch.optim import Adam
@@ -11,8 +12,31 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from src.config.core import TrainConfig
 from src.config.model_config import TransformerConfig
 from src.model.model import Transformer
-from .runners import (DataComponents, EvolutionRunner, PretrainingRunner,
-                      TrainerConfig, TrainingComponents, ValidationRunner)
+from .runners import (EvolutionRunner, PretrainingRunner, ValidationRunner)
+
+
+@dataclass
+class TrainingComponents:
+    """Core components for training."""
+    model: nn.Module
+    optimizer: Adam
+    scheduler: CosineAnnealingLR
+    value_loss_fn: nn.Module
+
+@dataclass
+class DataComponents:
+    """Data-related components for training."""
+    tokenizer: 'Tokenizer'
+    train_data: list
+    val_data: list
+
+@dataclass
+class TrainerConfig:
+    """Configuration for the Trainer, adapted for PyTorch."""
+    components: TrainingComponents
+    data: DataComponents
+    config: TrainConfig
+    accelerator: 'Accelerator'
 
 
 class TrainingLoop:
@@ -178,9 +202,35 @@ class Trainer:
 
     def __init__(self, trainer_config: TrainerConfig):
         self._config = trainer_config
-        self._validation_runner = ValidationRunner(trainer_config)
-        self._pretraining_runner = PretrainingRunner(trainer_config)
-        self._evolution_runner = EvolutionRunner(trainer_config)
+        components = trainer_config.components
+        data = trainer_config.data
+        config = trainer_config.config
+
+        self._validation_runner = ValidationRunner(
+            model=components.model,
+            val_data=data.val_data,
+            tokenizer=data.tokenizer,
+            evolution_config=config.evolution,
+            accelerator=trainer_config.accelerator,
+        )
+        self._pretraining_runner = PretrainingRunner(
+            accelerator=trainer_config.accelerator,
+            model=components.model,
+            optimizer=components.optimizer,
+            scheduler=components.scheduler,
+            train_data=data.train_data,
+            tokenizer=data.tokenizer,
+            evolution_config=config.evolution,
+            optimizer_config=config.optimizer,
+        )
+        self._evolution_runner = EvolutionRunner(
+            accelerator=trainer_config.accelerator,
+            model=components.model,
+            train_data=data.train_data,
+            val_data=data.val_data,
+            tokenizer=data.tokenizer,
+            evolution_config=config.evolution,
+        )
 
     def get_model(self) -> nn.Module:
         """Returns the underlying model."""
