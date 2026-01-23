@@ -120,18 +120,19 @@ class Trainer:
         accelerator.register_for_checkpointing(training_state)
 
         if accelerator.is_main_process and resume_from:
+            checkpoint_path = os.path.join("models", resume_from, "checkpoints")
             try:
-                checkpoint_path = os.path.join("models", resume_from, "checkpoints")
                 accelerator.load_state(checkpoint_path)
                 logging.info(
                     "Successfully loaded checkpoint. Starting from epoch %d.",
                     training_state.epoch,
                 )
-            except FileNotFoundError:
-                logging.warning(
-                    "Checkpoint not found at '%s'. Starting from scratch.",
+            except FileNotFoundError as e:
+                logging.error(
+                    "Checkpoint directory not found at '%s'. Please check the path.",
                     checkpoint_path,
                 )
+                raise e
 
         start_epoch = training_state.epoch
         for epoch in range(start_epoch, total_epochs):
