@@ -58,6 +58,14 @@ class AgentManager:
         num_agents: int,
         accelerator: Accelerator,
     ):
+        """
+        Initializes the AgentManager.
+
+        Args:
+            base_model: The base Transformer model to be shared among agents.
+            num_agents: The number of agents to create in the population.
+            accelerator: The Accelerator object for distributed training.
+        """
         self.base_model = accelerator.unwrap_model(base_model)
         self.num_agents = num_agents
         self.agents: List[Agent] = []
@@ -65,7 +73,13 @@ class AgentManager:
         self.fork_agents()
 
     def fork_agents(self):
-        """Creates (clones) a population of agents from the base model."""
+        """
+        Creates a population of agents by cloning the base model.
+
+        Each agent shares the weights of the base model but will have its own
+        unique Long-Term Memory (LTM) module. This method populates the
+        `self.agents` list.
+        """
         logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
             agent = Agent(self.base_model, agent_id=f"agent_{i}")
@@ -79,12 +93,14 @@ class AgentManager:
 
         This process allows each agent to develop a specialized Long-Term Memory (LTM)
         based on its unique experiences, fostering diversity in the agent population.
-        The training is done for a fixed number of steps per agent.
+        The training is done for a fixed number of steps per agent, and only the
+        LTM weights are updated.
 
         Args:
             spec_config: A dataclass containing the configuration for specialization,
-                         including the dataset and training parameters.
-            device: The device to perform the training on.
+                         including the full dataset and training parameters like
+                         batch size and steps per agent.
+            device: The device (e.g., 'cuda' or 'cpu') to perform the training on.
         """
         if not spec_config.full_data:
             return
@@ -121,11 +137,12 @@ class AgentManager:
 
         This is achieved by averaging the weights (state_dict) of the Long-Term
         Memory (LTM) modules from the provided list of 'best' agents. The resulting
-        averaged LTM state is then loaded into the base model, effectively
+        averaged LTM state is then loaded into the base model's LTM, effectively
         assimilating the collective knowledge of the top performers.
 
         Args:
-            best_agents: A list of the top-performing Agent objects.
+            best_agents: A list of the top-performing Agent objects from which
+                         to merge LTM states.
         """
         if not best_agents:
             return
@@ -186,36 +203,42 @@ class AgentManager:
         Args:
             ctx: The context object containing all necessary information for this interaction.
         """
-        # Reward the agent for asking for help, as it's a desirable collaborative behavior.
+        # 1. Reward the proposing agent for asking for help. This encourages
+        # agents to recognize their limitations, a key collaborative skill.
         ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
 
-        # Select the next agent in the list as the helper
+        # 2. Select a different agent to act as the "helper". To ensure fairness
+        # and diversity, the next agent in the list is chosen.
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
-            return  # Avoid agent helping itself in a small population
+            return  # Avoid an agent helping itself in very small populations.
 
-        # Generate a response from the helper agent
+        # 3. The helper generates a response based on the original prompt plus
+        # the proposer's initial response (which included the <ASK_FOR_HELP> token).
         context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
             helper.base_model.device
         )
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1] :]
 
-        # All other agents act as critics
+        # 4. All other agents in the population (excluding the proposer and helper)
+        # act as "critics" to evaluate the quality of the help provided.
         critics = [
             a
             for a in self.agents
             if a.agent_id not in [ctx.proposer.agent_id, helper.agent_id]
-        ] or [ctx.proposer]  # If no other critics, proposer critiques
+        ] or [ctx.proposer]  # Fallback to the proposer if no other critics.
         critic_ltms = [c.long_term_memory for c in critics]
 
-        # Get the average critique score for the helper's response
+        # 5. The critics evaluate the complete interaction (context + helper's response)
+        # in a single batched operation for efficiency.
         full_critique_sequence = torch.cat([context, new_helper_tokens], dim=1)
         avg_critique_score = self._batch_critique(
             full_critique_sequence.expand(len(critics), -1), critic_ltms
         )
 
-        # Reward or penalize based on the critique
+        # 6. Reward or penalize both the helper and the original proposer based
+        # on the critics' evaluation.
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_GOOD_HELP * avg_critique_score
             ctx.scores[helper.agent_id] += reward
@@ -235,23 +258,27 @@ class AgentManager:
         Args:
             ctx: The context object containing all necessary information for this interaction.
         """
-        # All other agents in the population act as critics.
+        # 1. All other agents in the population act as "critics". This peer-review
+        # mechanism is central to the collaborative evaluation.
         critics = (
             [a for a in self.agents if a.agent_id != ctx.proposer.agent_id]
-            or [ctx.proposer]  # If no other critics, proposer critiques itself
+            or [ctx.proposer]  # Fallback: proposer critiques itself if no others.
         )
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
 
-        # Prepare for batch critique
+        # 2. The full sequence (prompt + new response tokens) is prepared for the
+        # critics. It's expanded to match the number of critics for a batched pass.
         full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
             len(critics), -1
         )
         critic_ltms = [critic.long_term_memory for critic in critics]
 
-        # Get the average critique score
+        # 3. The `_batch_critique` method is called to get a collective, averaged
+        # evaluation from all critics.
         avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
 
-        # Reward or penalize the proposer based on the critique
+        # 4. The proposing agent is rewarded for a successful independent response or
+        # penalized for a poor one, based on the collective judgment of its peers.
         if avg_critique_score > self.SUCCESS_THRESHOLD:
             reward = self.REWARD_INDEPENDENT_SUCCESS * avg_critique_score
             ctx.scores[ctx.proposer.agent_id] += reward
@@ -275,24 +302,37 @@ class AgentManager:
             The average value score from all critic agents.
         """
         with torch.no_grad():
-            # Manually compute embeddings and LTM states to create a batch
+            # Step 1: Compute token embeddings for the entire batch of sequences.
+            # The embedding output is scaled by sqrt(d_model) as is standard.
             h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
                 self.base_model.config.model.d_model
             )
 
+            # Step 2: Pre-allocate a tensor for the LTM states. This allows us to
+            # build the batch of LTM states efficiently.
             ltm_states = torch.zeros(
                 (len(critic_ltms), 1, h.size(2)), device=h.device, dtype=h.dtype
             )
+
+            # Step 3: Iterate through each critic's LTM to compute its unique
+            # LTM state based on the sequence. This is necessary because each
+            # agent has a different LTM.
             for i, ltm in enumerate(critic_ltms):
                 if ltm:
-                    # Each LTM processes its corresponding sequence embedding
+                    # The LTM state is computed from the mean of the sequence embeddings,
+                    # providing a compressed summary for the critic.
                     ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
                     ltm_states[i], _ = ltm(ltm_input)
 
-            # A single forward pass with the batched LTM states
+            # Step 4: Perform a single, batched forward pass on the base model.
+            # The `ltm_state` argument is a batch of LTM states, one for each
+            # critic. This is highly efficient as it avoids looping and running
+            # the model for each critic individually.
             _, values, _ = self.base_model.forward(
                 full_sequence, ltm_state=ltm_states
             )
+        # Step 5: The final critique score is the average of the value predictions
+        # from all critics in the batch.
         return values.mean().item()
 
     def _finalize_evaluation(self, scores, top_k):
