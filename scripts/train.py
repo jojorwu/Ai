@@ -6,7 +6,7 @@ import os
 
 import torch
 
-from src.training.setup import prepare_training_environment
+from src.training.setup import SetupConfig, prepare_training_environment
 from src.training.trainer import create_trainer
 from src.utils.cli import create_main_parser, make_model_name_required
 from src.utils.core import main_entrypoint
@@ -25,13 +25,20 @@ def main():
     make_model_name_required(parser)
     args = parser.parse_args()
 
-    env = prepare_training_environment(args)
+    setup_config = SetupConfig(
+        model_name=args.model_name,
+        resume_from=args.resume_from,
+        wandb=args.wandb,
+        load_in_4bit=args.load_in_4bit,
+        args=args,
+    )
+    env = prepare_training_environment(setup_config)
 
     trainer = create_trainer(
-        env.config, env.data_components, env.accelerator, args.load_in_4bit
+        env.config, env.data_components, env.accelerator, setup_config.load_in_4bit
     )
 
-    trainer.train(env.checkpoint_dir, args.resume_from)
+    trainer.train(env.checkpoint_dir, setup_config.resume_from)
 
     # Save the final, unwrapped model for easy inference
     unwrapped_model = env.accelerator.unwrap_model(trainer.get_model())
