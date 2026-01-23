@@ -13,8 +13,12 @@ from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.training.trainer import create_trainer
 from src.training.runners import DataComponents
-from src.utils.cli import create_main_parser
-from src.utils.core import main_entrypoint, setup_logging
+from src.utils.cli import create_main_parser, make_model_name_required
+from src.utils.core import (
+    main_entrypoint,
+    setup_logging,
+    apply_cli_args_to_config,
+)
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
@@ -173,19 +177,11 @@ def main():
     parser.add_argument(
         '--wandb', action='store_true', help="Enable Weights & Biases logging."
     )
-    # Require model-name for training
-    for action in parser._actions:  # pylint: disable=protected-access
-        if action.dest == 'model_name':
-            action.required = True
-            break
+    make_model_name_required(parser)
     args = parser.parse_args()
 
     config, model_dir, checkpoint_dir, resume_from_checkpoint = setup_environment(args)
-    if args.hardware_strategy:
-        config.hardware.strategy = args.hardware_strategy
-        logging.info(
-            "Overriding hardware strategy with '%s'", args.hardware_strategy
-        )
+    apply_cli_args_to_config(args, config)
 
     accelerator = Accelerator(mixed_precision="fp16", log_with="wandb" if args.wandb else None)
     if accelerator.is_main_process and args.wandb:
@@ -196,7 +192,7 @@ def main():
 
     tokenizer, train_data, val_data = load_and_prepare_data(
         config.evolution.data_dir,
-        config.evolution.data_dir,
+        model_dir,
         config.evolution.validation_split,
     )
 

@@ -1,20 +1,22 @@
 """
 Utility functions for the Transformer application.
 """
+import argparse
 import json
 import logging
 import os
 import re
-from typing import Tuple
+from typing import Tuple, Union
+
 import torch
 from accelerate import dispatch_model
 
-
-from src.config.core import BaseConfig
+from src.config.core import GenerateConfig, TrainConfig
 from src.config.model_config import TransformerConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
 from src.utils.device_manager import DeviceManager
+
 
 def setup_logging(log_path: str = None):
     """
@@ -112,11 +114,32 @@ def main_entrypoint(main_func):
 
     return wrapper
 
+
+def apply_cli_args_to_config(
+    args: argparse.Namespace, config: Union[TrainConfig, GenerateConfig]
+):
+    """
+    Overrides configuration fields based on command-line arguments.
+
+    Args:
+        args: Parsed arguments from argparse.
+        config: The configuration object to modify.
+    """
+    if args.hardware_strategy:
+        config.hardware.strategy = args.hardware_strategy
+        logging.info(
+            "Overriding hardware strategy with '%s'", args.hardware_strategy
+        )
+    if args.torch_compile:
+        config.hardware.torch_compile = True
+        logging.info("Enabling torch.compile.")
+
+
 def load_model_and_tokenizer(
     model_name: str,
-    config: "BaseConfig",
-    load_in_4bit: bool,
-    quantized: bool,
+    config: Union[TrainConfig, GenerateConfig],
+    load_in_4bit: bool = False,
+    quantized: bool = False,
     dispatch: bool = True,
 ):
     """Loads a model and tokenizer from a given model name."""
@@ -129,7 +152,6 @@ def load_model_and_tokenizer(
     model_dir = os.path.join("models", model_name)
     tokenizer = Tokenizer(model_dir)
 
-    # Use the vocab size from the config if available, otherwise from the tokenizer
     vocab_size = config.model.vocab_size or tokenizer.vocab_size
     transformer_config = TransformerConfig(
         vocab_size=vocab_size,
@@ -139,18 +161,23 @@ def load_model_and_tokenizer(
         tokenizer=tokenizer,
     )
     device_manager = DeviceManager(config.hardware)
-    if device_manager.should_disable_4bit():
-        if load_in_4bit:
-            logging.warning("4-bit quantization is not supported on this hardware, disabling.")
-            load_in_4bit = False
+    if device_manager.should_disable_4bit() and load_in_4bit:
+        logging.warning("4-bit quantization is not supported on this hardware, disabling.")
+        load_in_4bit = False
 
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
-    weights_path = os.path.join(model_dir, "best_model.pt")
+
+    # Determine weights path
+    weights_path = None
+    if isinstance(config, TrainConfig):
+        weights_path = config.evolution.weights_path
+    if not weights_path or not os.path.exists(weights_path):
+        weights_path = os.path.join(model_dir, "best_model.pt")
     if not os.path.exists(weights_path):
         weights_path = os.path.join(model_dir, "model.pt")
 
     if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"No weights file found in {model_dir}")
+        raise FileNotFoundError(f"No weights file found in {model_dir} or specified in config.")
 
     model.load_state_dict(torch.load(weights_path, map_location="cpu"))
 

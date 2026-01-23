@@ -3,55 +3,55 @@
 This script loads a trained model, applies dynamic quantization for CPU,
 and saves the quantized model.
 """
+import logging
 import os
 import torch
 import torch.quantization
 
 from src.config.core import TrainConfig
-from src.utils.core import load_model_and_tokenizer
+from src.utils.cli import create_main_parser, make_model_name_required
+from src.utils.core import load_model_and_tokenizer, main_entrypoint, setup_logging
 
 
-def quantize_model(model_path: str, config_path: str, output_path: str):
+def quantize_model(model_name: str, config: TrainConfig):
     """
     Loads a model, applies dynamic quantization, and saves the quantized model.
 
     Args:
-        model_path: Path to the trained model's state_dict.
-        config_path: Path to the model's configuration JSON file.
-        output_path: Path to save the quantized model.
+        model_name (str): The name of the model to quantize.
+        config (TrainConfig): The training configuration.
     """
-    # Load the main configuration
-    config = TrainConfig.from_json(config_path)
-    # The load_model_and_tokenizer function already handles the quantization
-    # when the 'quantized' flag is set to True.
+    logging.info("Loading model '%s' for quantization...", model_name)
+    # Use dispatch=False to ensure the model stays on the CPU
     model, _ = load_model_and_tokenizer(
-        os.path.basename(os.path.dirname(model_path)),
-        config,
-        load_in_4bit=False,
-        quantized=True,
-        dispatch=False
+        model_name, config, load_in_4bit=False, quantized=True, dispatch=False
     )
+    logging.info("Model loaded and quantized successfully.")
 
-    # Save the quantized model state dictionary
+    model_dir = os.path.join('models', model_name)
+    output_path = os.path.join(model_dir, 'model_quantized_cpu.pt')
+
     torch.save(model.state_dict(), output_path)
-    print(f"Quantized model saved to {output_path}")
+    logging.info("Quantized model saved to %s", output_path)
+
+
+@main_entrypoint
+def main():
+    """Main function to handle model quantization."""
+    setup_logging()
+    parser = create_main_parser()
+    make_model_name_required(parser)
+    args = parser.parse_args()
+
+    model_dir = os.path.join('models', args.model_name)
+    config_path = os.path.join(model_dir, 'config.json')
+
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found at {config_path}")
+
+    config = TrainConfig.from_json(config_path)
+    quantize_model(args.model_name, config)
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Quantize a trained Transformer model for CPU."
-    )
-    parser.add_argument(
-        "model_path", type=str, help="Path to the trained model's state_dict."
-    )
-    parser.add_argument(
-        "config_path", type=str, help="Path to the model's configuration JSON file."
-    )
-    parser.add_argument(
-        "output_path", type=str, help="Path to save the quantized model."
-    )
-    args = parser.parse_args()
-
-    quantize_model(args.model_path, args.config_path, args.output_path)
+    main()

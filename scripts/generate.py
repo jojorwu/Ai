@@ -17,9 +17,14 @@ from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
                            Transformer)
 from src.utils.cli import create_main_parser
 from src.model.complexity_manager import ComplexityManager
-from src.utils.core import (load_model_and_tokenizer, main_entrypoint,
-                          parse_tool_call, select_model_interactively,
-                          setup_logging)
+from src.utils.core import (
+    load_model_and_tokenizer,
+    main_entrypoint,
+    parse_tool_call,
+    select_model_interactively,
+    setup_logging,
+    apply_cli_args_to_config,
+)
 from src.agent.tools import execute_tool
 
 
@@ -119,9 +124,6 @@ def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
     parser = create_main_parser()
-    parser.add_argument(
-        '--quantized', action='store_true', help="Load a quantized model for CPU."
-    )
     args = parser.parse_args()
 
     model_name = args.model_name or select_model_interactively()
@@ -136,11 +138,7 @@ def main():
         )
 
     config = GenerateConfig.from_json(config_path)
-    if args.hardware_strategy:
-        config.hardware.strategy = args.hardware_strategy
-        logging.info(
-            "Overriding hardware strategy with '%s'", args.hardware_strategy
-        )
+    apply_cli_args_to_config(args, config)
 
     accelerator = Accelerator()
     model, tokenizer = load_model_and_tokenizer(

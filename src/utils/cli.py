@@ -3,6 +3,22 @@ Command-line interface (CLI) utilities for the project.
 """
 import argparse
 
+def make_model_name_required(parser: argparse.ArgumentParser):
+    """
+    Makes the '--model-name' argument required in the provided parser.
+
+    Args:
+        parser (argparse.ArgumentParser): The parser to modify.
+    """
+    # Find the action for --model-name and set 'required' to True
+    for action in parser._actions:  # pylint: disable=protected-access
+        if action.dest == 'model_name':
+            action.required = True
+            return
+    # This should not happen if the main parser is used correctly
+    raise ValueError("--model-name argument not found in the parser.")
+
+
 def create_main_parser():
     """
     Creates an ArgumentParser with common arguments for training and generation.
@@ -28,5 +44,21 @@ def create_main_parser():
         type=str,
         choices=['unified', 'discrete', 'hybrid'],
         help="Override the hardware strategy from the config."
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config_train.json',
+        help="Path to the configuration file."
+    )
+    parser.add_argument(
+        '--quantized',
+        action='store_true',
+        help="Load a quantized version of the model for CPU."
+    )
+    parser.add_argument(
+        '--torch_compile',
+        action='store_true',
+        help="Enable torch.compile for the model (GPU only)."
     )
     return parser
