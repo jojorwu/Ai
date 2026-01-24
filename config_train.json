@@ -9,7 +9,20 @@
     "dropout_rate": 0.1,
     "num_experts": 8,
     "top_k_experts": 2,
-    "gradient_checkpointing": false
+    "gradient_checkpointing": false,
+    "ltm": {
+      "d_hidden": 128,
+      "num_layers": 2,
+      "surprise_threshold": 1.0,
+      "optimizer": {
+        "learning_rate": 1e-05,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "epsilon": 1e-08,
+        "weight_decay": 0.01,
+        "max_norm": 1.0
+      }
+    }
   },
   "vision": {
     "image_size": [
@@ -45,13 +58,16 @@
     "max_norm": 1.0
   },
   "ltm": {
+    "d_hidden": 128,
+    "num_layers": 2,
     "surprise_threshold": 1.0,
     "optimizer": {
       "learning_rate": 0.00001,
       "beta1": 0.9,
       "beta2": 0.999,
       "epsilon": 1E-8,
-      "weight_decay": 0.01
+      "weight_decay": 0.01,
+      "max_norm": 1.0
     }
   },
   "scheduler": {

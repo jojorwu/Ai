@@ -2,65 +2,62 @@
 Unit tests for the AgentManager class.
 """
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import torch
 from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
-from src.config.core import TrainConfig
+from src.config.model_config import TransformerConfig
 from src.model.model import Transformer
+from tests.test_utils import create_test_config_and_data
 
 
 class TestAgentManager(unittest.TestCase):
     """Tests for the AgentManager."""
 
-    def setUp(self):
-        """Set up a mock model and config for testing."""
-        self.mock_config = TrainConfig.from_json('config_train.json')
-        self.mock_model = MagicMock(spec=Transformer)
-        self.mock_model.config = self.mock_config
-
-        # Create a mock for the 'layers' attribute, which in turn has a 'long_term_memory' attribute
-        mock_layers = MagicMock()
-        mock_ltm = MagicMock(spec=torch.nn.Module)
-        # Make parameters() return a non-empty list to avoid ValueError from Adam optimizer
-        mock_ltm.parameters.return_value = [torch.nn.Parameter(torch.randn(1))]
-        mock_layers.long_term_memory = mock_ltm
-        self.mock_model.layers = mock_layers
-        self.mock_model.device = 'cpu'
-
-        self.mock_accelerator = MagicMock(spec=Accelerator)
-        self.mock_accelerator.unwrap_model.return_value = self.mock_model
-
-
     def test_merge_agents_averages_ltm_weights(self):
         """Test that merge_agents correctly averages the LTM weights."""
+        config, tokenizer, _, _ = create_test_config_and_data()
+        transformer_config = TransformerConfig(
+            vocab_size=tokenizer.vocab_size,
+            model=config.model,
+            vision=config.vision,
+            ltm=config.ltm,
+            tokenizer=tokenizer,
+        )
+        model = Transformer(transformer_config)
+        accelerator = Accelerator()
+        model = accelerator.prepare(model)
+
         manager = AgentManager(
-            self.mock_model, num_agents=2, accelerator=self.mock_accelerator
+            model, num_agents=2, accelerator=accelerator
         )
 
-        # Create mock LTM states for two agents
-        ltm_state_1 = {'weight': torch.tensor([1.0, 2.0, 3.0])}
-        ltm_state_2 = {'weight': torch.tensor([3.0, 4.0, 5.0])}
+        # Get the structure of the LTM state_dict from the base model
+        unwrapped_model = accelerator.unwrap_model(model)
+        ltm_state_structure = unwrapped_model.layers.long_term_memory.state_dict()
 
+        # Create two mock states with this structure and known values
+        with torch.no_grad():
+            ltm_state_1 = {k: v.clone() for k, v in ltm_state_structure.items()}
+            ltm_state_2 = {k: v.clone() for k, v in ltm_state_structure.items()}
+            # Modify a specific weight tensor for the test
+            # Get a real key from the state dict to avoid hardcoding
+            key_to_test = next(iter(ltm_state_structure.keys()))
+            ltm_state_1[key_to_test].fill_(1.0)
+            ltm_state_2[key_to_test].fill_(3.0)
+
+        # Mock the agents to return these controlled states
         manager.agents[0].get_ltm_state = MagicMock(return_value=ltm_state_1)
         manager.agents[1].get_ltm_state = MagicMock(return_value=ltm_state_2)
 
-        # The base model's LTM should be updated with the average
-        expected_avg_state = {'weight': torch.tensor([2.0, 3.0, 4.0])}
-
-        # Mock the load_state_dict method to check what it's called with
-        self.mock_model.layers.long_term_memory.load_state_dict = MagicMock()
-
-        # Call the method to be tested
         manager.merge_agents(manager.agents)
 
-        # Verify that load_state_dict was called with the correct average
-        args, _ = self.mock_model.layers.long_term_memory.load_state_dict.call_args
-        loaded_state = args[0]
-
-        self.assertTrue(torch.equal(loaded_state['weight'], expected_avg_state['weight']))
+        # Verify that the base model's LTM weights are the average
+        unwrapped_model = accelerator.unwrap_model(model)
+        merged_weight = unwrapped_model.layers.long_term_memory.state_dict()[key_to_test]
+        self.assertTrue(torch.all(torch.eq(merged_weight, 2.0)))
 
 
 if __name__ == '__main__':
