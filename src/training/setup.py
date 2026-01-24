@@ -15,7 +15,7 @@ from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
 from src.training.runners import DataComponents
 from src.utils.cli import apply_cli_args_to_config
-from src.utils.core import setup_logging
+from src.utils.setup import setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):

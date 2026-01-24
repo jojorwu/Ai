@@ -2,6 +2,7 @@
 Utilities for setting up the application environment from command-line arguments.
 """
 import argparse
+import logging
 import os
 from dataclasses import dataclass
 from typing import Type, Union
@@ -54,3 +55,19 @@ def setup_from_args(
     apply_cli_args_to_config(args, config)
 
     return AppSetup(args=args, config=config, model_name=model_name)
+
+
+def setup_logging(log_path: str = None):
+    """
+    Configures logging to file and console.
+    If log_path is None, only logs to console.
+    """
+    handlers = [logging.StreamHandler()]
+    if log_path:
+        handlers.append(logging.FileHandler(log_path))
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=handlers
+    )
+    logging.getLogger().setLevel(logging.INFO)

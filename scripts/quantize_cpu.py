@@ -13,7 +13,7 @@ from src.config.core import TrainConfig
 from src.model.factory import load_model_and_tokenizer
 from src.utils.cli import make_model_name_required
 from src.utils.cli import main_entrypoint
-from src.utils.core import setup_logging
+from src.utils.setup import setup_logging
 from src.utils.setup import setup_from_args
 
 
