@@ -10,15 +10,14 @@ import unittest
 import torch
 from accelerate import Accelerator
 
-from src.config import TrainConfig
-from src.trainer import (
-    Trainer,
+from src.config.core import TrainConfig
+from src.training.trainer import (
     DataComponents,
-    create_trainer,
-    TrainerConfig,
+    Trainer,
     TrainingComponents,
+    create_trainer,
 )
-from src.utils.core import load_model_and_tokenizer
+from src.model.factory import load_model_and_tokenizer
 
 
 class TestQuantizationIntegration(unittest.TestCase):
@@ -134,13 +133,10 @@ class TestQuantizationIntegration(unittest.TestCase):
             scheduler=scheduler,
             value_loss_fn=value_loss_fn,
         )
-        quantized_trainer_config = TrainerConfig(
-            components=quantized_components,
-            data=data_components,
-            config=config,
-            accelerator=accelerator,
+        # Directly create a new trainer with the quantized components
+        quantized_trainer = create_trainer(
+            config, data_components, accelerator, load_in_4bit=True
         )
-        quantized_trainer = Trainer(quantized_trainer_config)
         loss, _ = quantized_trainer.train_pretrain_epoch()
 
         # Assert that the training step was successful (loss is a valid number)

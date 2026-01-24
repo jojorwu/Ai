@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.config import MoEConfig
+from src.config.model_config import MoEConfig
 from src.model.layers.moe import MixtureOfExperts
 
 

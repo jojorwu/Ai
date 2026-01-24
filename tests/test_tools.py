@@ -4,7 +4,7 @@ Unit tests for the tools library.
 import unittest
 from unittest.mock import MagicMock
 
-from src.utils import tools
+from src.agent import tools
 
 class TestTools(unittest.TestCase):
     """Tests for the tools."""

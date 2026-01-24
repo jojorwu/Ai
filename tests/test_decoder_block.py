@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import torch
 
-from src.config import DecoderBlockConfig
+from src.config.model_config import DecoderBlockConfig
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 
 

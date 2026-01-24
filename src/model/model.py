@@ -11,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 from bitsandbytes.nn import Linear4bit
 
-from src.config import DecoderBlockConfig, TransformerConfig
+from src.config.model_config import DecoderBlockConfig, TransformerConfig
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 from src.model.layers.embedding import Embedding
 from src.model.layers.gating import GatingNetwork
@@ -91,110 +91,101 @@ class Transformer(nn.Module):
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
         super().__init__()
         self.config = config
-        self.rope_embeddings = self._init_rope_embeddings(config)
-        self.layers = self._init_layers(config, load_in_4bit)
-        self.layers.embedding.weight = self.layers.embedding.embedding.weight
-        self.draft_model = self._create_draft_model(config, load_in_4bit)
+        self._config = config  # Keep a copy of the full config
+        self.load_in_4bit = load_in_4bit
 
-    def _create_draft_model(
-        self, config: TransformerConfig, load_in_4bit: bool
-    ) -> "Transformer|None":
+        self.rope_embeddings = self._init_rope_embeddings()
+        self.layers = self._init_layers()
+        self.draft_model = self._init_draft_model()
+
+        # Weight tying: share weights between embedding and policy head
+        self.layers.embedding.weight = self.layers.embedding.embedding.weight
+
+    def _init_rope_embeddings(self) -> RopeEmbeddings:
+        """Initializes and registers Rotary Positional Embeddings (RoPE)."""
+        d_k = self.config.model.d_model // self.config.model.num_heads
+        rope_cos, rope_sin = precompute_rope_embeddings(
+            d_k, self.config.model.max_seq_len
+        )
+        self.register_buffer("rope_cos_buf", rope_cos.clone())
+        self.register_buffer("rope_sin_buf", rope_sin.clone())
+        return RopeEmbeddings(cos=self.rope_cos_buf, sin=self.rope_sin_buf)
+
+    def _init_layers(self) -> ModelLayers:
+        """Initializes all layers of the model."""
+        ltm = self._init_ltm()
+        decoder_config = self._create_decoder_block_config(ltm)
+        value_head_linear_class = Linear4bit if self.load_in_4bit else Linear
+
+        layers_dict = {
+            "embedding": Embedding(self.config.vocab_size, self.config.model.d_model),
+            "long_term_memory": ltm,
+            "gating_network": GatingNetwork(
+                d_model=self.config.model.d_model,
+                num_layers=self.config.model.num_layers,
+                num_experts=self.config.model.num_experts,
+            ),
+            "decoder": nn.ModuleList(
+                [
+                    DecoderBlock(decoder_config)
+                    for _ in range(self.config.model.num_layers)
+                ]
+            ),
+            "final_norm": RMSNorm(self.config.model.d_model),
+            "value_head": ValueHead(
+                self.config.model.d_model, linear_class=value_head_linear_class
+            ),
+        }
+        return ModelLayers(layers_dict)
+
+    def _init_ltm(self) -> LongTermMemory | None:
+        """Initializes the Long-Term Memory (LTM) module if configured."""
+        cfg = self.config.model.ltm
+        if cfg.d_hidden and cfg.num_layers:
+            return LongTermMemory(
+                d_model=self.config.model.d_model,
+                d_hidden=cfg.d_hidden,
+                num_layers=cfg.num_layers,
+            )
+        return None
+
+    def _create_decoder_block_config(self, ltm: nn.Module) -> DecoderBlockConfig:
+        """Helper method to create the DecoderBlockConfig."""
+        model_cfg = self.config.model
+        return DecoderBlockConfig(
+            d_model=model_cfg.d_model,
+            num_heads=model_cfg.num_heads,
+            d_ff=model_cfg.d_ff,
+            dropout_rate=model_cfg.dropout_rate,
+            num_kv_heads=model_cfg.num_kv_heads,
+            rotary_emb=(self.rope_embeddings.cos, self.rope_embeddings.sin),
+            num_layers=model_cfg.num_layers,
+            long_term_memory=ltm,
+            num_experts=model_cfg.num_experts,
+            top_k_experts=model_cfg.top_k_experts,
+            load_in_4bit=self.load_in_4bit,
+        )
+
+    def _init_draft_model(self) -> "Transformer|None":
         """
         Creates a smaller, faster 'draft' model for speculative decoding.
-        This model is created once during initialization to avoid the expensive
-        `copy.deepcopy()` operation during generation.
-
-        The draft model has fewer layers, making it faster but less accurate.
-        If the base model is already too small, no draft model is created.
         """
-        if config.model.num_layers < 2:
-            return None # Don't create a draft model for very small models.
+        if self.config.model.num_layers < 2:
+            return None
 
-        draft_config_dict = config.model_dump()
-        # Reduce the number of layers for the draft model, e.g., by half.
+        draft_config_dict = self._config.model_dump()
         draft_config_dict["model"]["num_layers"] //= 2
-
         draft_config = TransformerConfig(**draft_config_dict)
 
         logging.info(
             "Creating a draft model with %d layers.",
             draft_config.model.num_layers,
         )
-        return Transformer(draft_config, load_in_4bit)
+        return Transformer(draft_config, self.load_in_4bit)
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
-    def _init_layers(self, config: TransformerConfig, load_in_4bit: bool) -> ModelLayers:
-        """Initializes all layers of the model."""
-        ltm = self._init_ltm(config)
-        decoder_config = self._create_block_config(config, ltm, load_in_4bit)
-        value_head_linear_class = Linear4bit if load_in_4bit else Linear
-
-        embedding = Embedding(config.vocab_size, config.model.d_model)
-        gating_network = GatingNetwork(
-            d_model=config.model.d_model,
-            num_layers=config.model.num_layers,
-            num_experts=config.model.num_experts,
-        )
-        decoder = nn.ModuleList(
-            [DecoderBlock(decoder_config) for _ in range(config.model.num_layers)]
-        )
-        final_norm = RMSNorm(config.model.d_model)
-        value_head = ValueHead(
-            config.model.d_model, linear_class=value_head_linear_class
-        )
-
-        layers_dict = {
-            "embedding": embedding,
-            "long_term_memory": ltm,
-            "gating_network": gating_network,
-            "decoder": decoder,
-            "final_norm": final_norm,
-            "value_head": value_head,
-        }
-        return ModelLayers(layers_dict)
-
-    def _init_ltm(self, config: TransformerConfig) -> LongTermMemory | None:
-        """Initializes the Long-Term Memory (LTM) module if configured."""
-        if config.model.ltm.d_hidden and config.model.ltm.num_layers:
-            return LongTermMemory(
-                d_model=config.model.d_model,
-                d_hidden=config.model.ltm.d_hidden,
-                num_layers=config.model.ltm.num_layers,
-            )
-        return None
-
-    def _init_rope_embeddings(self, config: TransformerConfig) -> RopeEmbeddings:
-        """Initializes and registers Rotary Positional Embeddings (RoPE)."""
-        d_k = config.model.d_model // config.model.num_heads
-        rope_cos, rope_sin = precompute_rope_embeddings(
-            d_k, config.model.max_seq_len
-        )
-        # Clone tensors to ensure they have separate memory storage, avoiding
-        # issues with safetensors saving shared tensors.
-        self.register_buffer("rope_cos_buf", rope_cos.clone())
-        self.register_buffer("rope_sin_buf", rope_sin.clone())
-        return RopeEmbeddings(cos=self.rope_cos_buf, sin=self.rope_sin_buf)
-
-    def _create_block_config(
-        self, config: TransformerConfig, ltm: nn.Module, load_in_4bit: bool
-    ) -> DecoderBlockConfig:
-        """Helper method to create the DecoderBlockConfig."""
-        return DecoderBlockConfig(
-            d_model=config.model.d_model,
-            num_heads=config.model.num_heads,
-            d_ff=config.model.d_ff,
-            dropout_rate=config.model.dropout_rate,
-            num_kv_heads=config.model.num_kv_heads,
-            rotary_emb=(self.rope_embeddings.cos, self.rope_embeddings.sin),
-            num_layers=config.model.num_layers,
-            long_term_memory=ltm,
-            num_experts=config.model.num_experts,
-            top_k_experts=config.model.top_k_experts,
-            load_in_4bit=load_in_4bit,
-        )
 
     def forward(  # pylint: disable=too-many-locals
         self,
@@ -227,7 +218,8 @@ class Transformer(nn.Module):
 
         Returns:
             A tuple containing:
-            - logits: The output logits for next token prediction. Shape: (batch_size, seq_len, vocab_size).
+            - logits: The output logits for next token prediction.
+                      Shape: (batch_size, seq_len, vocab_size).
             - value: The predicted value from the value head. Shape: (batch_size, 1).
             - total_aux_loss: The auxiliary load balancing loss from the MoE layers.
         """
@@ -346,7 +338,8 @@ class Transformer(nn.Module):
         """
         Calculates the 'surprise' metric for the LTM update mechanism.
 
-        "Surprise" is a heuristic used to decide when to update the Long-Term Memory.
+        "Surprise" is a heuristic used to decide when to update the Long-Term
+        Memory.
         It's defined as the norm of the gradients of the LTM's parameters with respect
         to the value head's output. A high surprise value indicates that a small change
         in the LTM would have a large impact on the predicted value, suggesting that the

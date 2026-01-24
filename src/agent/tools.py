@@ -5,7 +5,9 @@ Each tool should be a function with type annotations and a docstring.
 import json
 import logging
 import os
+import re
 import subprocess
+from typing import Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -154,6 +156,31 @@ def execute_shell_command(command: str) -> str:
         return "Error: Command timed out after 10 seconds."
     except OSError as e:
         return f"An unexpected error occurred: {e}"
+
+
+# --- Tool Parsing ---
+
+def parse_tool_call(text: str) -> Tuple[str | None, dict | None]:
+    """
+    Searches for and parses a tool call within <TOOL_CALL> tags in the given text.
+    Returns the tool name and arguments if found, otherwise (None, None).
+    """
+    pattern = r"<TOOL_CALL>(.*?)</TOOL_CALL>"
+    match = re.search(pattern, text, re.DOTALL)
+    if not match:
+        return None, None
+
+    tool_call_json = match.group(1).strip()
+    try:
+        tool_call = json.loads(tool_call_json)
+        tool_name = tool_call.get("tool")
+        args = tool_call.get("args", {})
+        if isinstance(tool_name, str) and isinstance(args, dict):
+            return tool_name, args
+    except (json.JSONDecodeError, AttributeError) as e:
+        logging.error("Failed to parse tool call: %s\nContent: %s", e, tool_call_json)
+
+    return None, None
 
 
 # --- Tool Registry ---
