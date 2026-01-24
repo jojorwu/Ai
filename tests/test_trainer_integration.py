@@ -7,8 +7,8 @@ import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
-from src.training.trainer import DataComponents, create_trainer
-from tests.test_utils import create_test_config_and_data
+from src.training.trainer import create_trainer
+from tests.test_utils import create_test_config_and_data, MockTokenizer
 
 
 class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-code
@@ -23,10 +23,13 @@ class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-co
         config, tokenizer, train_data, val_data = create_test_config_and_data()
         accelerator = Accelerator()
 
-        data_components = DataComponents(
-            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+        trainer = create_trainer(
+            config=config,
+            tokenizer=MockTokenizer(),
+            train_data=train_data,
+            val_data=val_data,
+            accelerator=accelerator,
         )
-        trainer = create_trainer(config, data_components, accelerator)
         model = trainer.get_model()
         unwrapped_model = model.module if hasattr(model, "module") else model
 

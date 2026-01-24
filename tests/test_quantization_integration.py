@@ -12,12 +12,10 @@ from accelerate import Accelerator
 
 from src.config.core import TrainConfig
 from src.training.trainer import (
-    DataComponents,
-    Trainer,
-    TrainingComponents,
     create_trainer,
 )
 from src.model.factory import load_model_and_tokenizer
+from tests.test_utils import MockTokenizer
 
 
 class TestQuantizationIntegration(unittest.TestCase):
@@ -68,17 +66,20 @@ class TestQuantizationIntegration(unittest.TestCase):
         # 1. Initial training and saving
         config = TrainConfig.from_json(self.config_path)
         accelerator = Accelerator()
-        tokenizer = DataComponents.tokenizer
+        tokenizer = MockTokenizer()
         train_data = torch.randint(
-            0, config.vocab_size, (100,)
+            0, tokenizer.vocab_size, (100,)
         )
         val_data = torch.randint(
-            0, config.vocab_size, (20,)
+            0, tokenizer.vocab_size, (20,)
         )
-        data_components = DataComponents(
-            tokenizer=tokenizer, train_data=train_data, val_data=val_data
+        trainer = create_trainer(
+            config=config,
+            tokenizer=tokenizer,
+            train_data=train_data,
+            val_data=val_data,
+            accelerator=accelerator,
         )
-        trainer = create_trainer(config, data_components, accelerator)
         trainer.train_pretrain_epoch()
         # Ensure we save the unwrapped model state dict
         unwrapped_model = accelerator.unwrap_model(trainer.get_model())
@@ -112,9 +113,8 @@ class TestQuantizationIntegration(unittest.TestCase):
         # We can reuse the scheduler and loss function from the original trainer.
         # We access the internal config of the original trainer to get them.
         # pylint: disable=protected-access
-        original_trainer_config = trainer._config
-        scheduler = original_trainer_config.components.scheduler
-        value_loss_fn = original_trainer_config.components.value_loss_fn
+        scheduler = trainer.scheduler
+        value_loss_fn = trainer.value_loss_fn
 
         # Prepare the new model, optimizer, and re-prepare the reused components
         (
@@ -126,16 +126,14 @@ class TestQuantizationIntegration(unittest.TestCase):
             quantized_model, quantized_optimizer, scheduler, value_loss_fn
         )
 
-        # Create new training components and config for the quantized trainer
-        quantized_components = TrainingComponents(
-            model=quantized_model,
-            optimizer=quantized_optimizer,
-            scheduler=scheduler,
-            value_loss_fn=value_loss_fn,
-        )
         # Directly create a new trainer with the quantized components
         quantized_trainer = create_trainer(
-            config, data_components, accelerator, load_in_4bit=True
+            config=config,
+            tokenizer=tokenizer,
+            train_data=train_data,
+            val_data=val_data,
+            accelerator=accelerator,
+            load_in_4bit=True
         )
         loss, _ = quantized_trainer.train_pretrain_epoch()
 
