@@ -13,7 +13,6 @@ from accelerate import Accelerator
 from src.config.core import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
-from src.training.runners import DataComponents
 from src.utils.cli import apply_cli_args_to_config
 from src.utils.setup import setup_logging
 
@@ -82,7 +81,9 @@ class TrainingEnvironment:
 
     config: TrainConfig
     accelerator: Accelerator
-    data_components: DataComponents
+    tokenizer: Tokenizer
+    train_data: list
+    val_data: list
     checkpoint_dir: str
     model_dir: str
 
@@ -132,14 +133,12 @@ def prepare_training_environment(
         if os.path.exists(tokenizer_vocab_path):
             shutil.copy(tokenizer_vocab_path, model_dir)
 
-    data_components = DataComponents(
-        tokenizer=tokenizer, train_data=train_data, val_data=val_data
-    )
-
     return TrainingEnvironment(
         config=config,
         accelerator=accelerator,
-        data_components=data_components,
+        tokenizer=tokenizer,
+        train_data=train_data,
+        val_data=val_data,
         checkpoint_dir=checkpoint_dir,
         model_dir=model_dir,
     )

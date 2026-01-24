@@ -32,7 +32,12 @@ def main():
     env = prepare_training_environment(app_setup.args)
 
     trainer = create_trainer(
-        env.config, env.data_components, env.accelerator, app_setup.args.load_in_4bit
+        config=env.config,
+        tokenizer=env.tokenizer,
+        train_data=env.train_data,
+        val_data=env.val_data,
+        accelerator=env.accelerator,
+        load_in_4bit=app_setup.args.load_in_4bit,
     )
 
     trainer.train(env.checkpoint_dir, app_setup.args.resume_from)
