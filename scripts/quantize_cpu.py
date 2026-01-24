@@ -5,12 +5,16 @@ and saves the quantized model.
 """
 import logging
 import os
+
 import torch
 import torch.quantization
 
 from src.config.core import TrainConfig
-from src.utils.cli import create_main_parser, make_model_name_required
-from src.utils.core import load_model_and_tokenizer, main_entrypoint, setup_logging
+from src.model.factory import load_model_and_tokenizer
+from src.utils.cli import make_model_name_required
+from src.utils.cli import main_entrypoint
+from src.utils.setup import setup_logging
+from src.utils.setup import setup_from_args
 
 
 def quantize_model(model_name: str, config: TrainConfig):
@@ -39,18 +43,8 @@ def quantize_model(model_name: str, config: TrainConfig):
 def main():
     """Main function to handle model quantization."""
     setup_logging()
-    parser = create_main_parser()
-    make_model_name_required(parser)
-    args = parser.parse_args()
-
-    model_dir = os.path.join('models', args.model_name)
-    config_path = os.path.join(model_dir, 'config.json')
-
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found at {config_path}")
-
-    config = TrainConfig.from_json(config_path)
-    quantize_model(args.model_name, config)
+    app_setup = setup_from_args(TrainConfig, make_model_name_required)
+    quantize_model(app_setup.model_name, app_setup.config)
 
 
 if __name__ == "__main__":

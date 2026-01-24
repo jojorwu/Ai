@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .generation_config import GenerationConfig
+from .dynamic_parameters_config import DynamicParametersConfig
 from .model_config import ModelConfig, VisionConfig
 from .training_config import EvolutionConfig, LTMConfig, OptimizerConfig, SchedulerConfig
 
@@ -45,4 +45,4 @@ class TrainConfig(BaseConfig):
 
 class GenerateConfig(BaseConfig):
     """Configuration model for generation."""
-    generation: GenerationConfig
+    generation: DynamicParametersConfig

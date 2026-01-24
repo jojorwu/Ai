@@ -45,13 +45,16 @@
     "max_norm": 1.0
   },
   "ltm": {
+    "d_hidden": 128,
+    "num_layers": 2,
     "surprise_threshold": 1.0,
     "optimizer": {
       "learning_rate": 0.00001,
       "beta1": 0.9,
       "beta2": 0.999,
       "epsilon": 1E-8,
-      "weight_decay": 0.01
+      "weight_decay": 0.01,
+      "max_norm": 1.0
     }
   },
   "scheduler": {

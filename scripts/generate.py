@@ -3,149 +3,39 @@ Main agent script for interacting with the Transformer model using PyTorch.
 This script manages the "thought -> tool -> observation" loop,
 allowing the model to use tools to complete tasks.
 """
-import logging
-import os
-from dataclasses import dataclass
-from typing import List
-
-import torch
 from accelerate import Accelerator
 
 from src.config.core import GenerateConfig
-from src.data.tokenizer import Tokenizer
-from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
-                           Transformer)
-from src.model.complexity_manager import ComplexityManager
-from src.utils.core import (
-    load_model_and_tokenizer,
-    main_entrypoint,
-    setup_logging,
-)
-from src.utils.cli import (
-    create_main_parser,
-    select_model_interactively,
-    apply_cli_args_to_config,
-)
-from src.agent.tools import execute_tool, parse_tool_call
+from src.model.factory import load_model_and_tokenizer
+from src.utils.cli import main_entrypoint
+from src.utils.setup import setup_logging
+from src.utils.setup import setup_from_args
 
 
-@dataclass
-class AgentState:
-    """Keeps track of the agent's state during a conversation."""
-    conversation_history_tokens: List[int]
-    complexity_manager: ComplexityManager = None
 
-def _initialize_agent_state(config, tokenizer):
-    """Initializes the agent's state."""
-    start_text = config.generation.start_text
-    logging.info("Initial task: %s", start_text)
-    complexity_manager = ComplexityManager(
-        config.dynamic_parameters
-    ) if config.dynamic_parameters else None
-    return AgentState(
-        conversation_history_tokens=tokenizer.encode(f"<THINK>{start_text}"),
-        complexity_manager=complexity_manager
-    )
-
-def _generate_model_response(model, accelerator, agent_state, config):
-    """Generates a response from the model."""
-    input_tokens = torch.tensor(
-        [agent_state.conversation_history_tokens], device=accelerator.device
-    )
-    dynamic_top_k = agent_state.complexity_manager.get_top_k(
-    ) if agent_state.complexity_manager else None
-    if dynamic_top_k:
-        logging.info(
-            "Complexity: %s, Dynamic top_k: %d",
-            agent_state.complexity_manager.current_complexity, dynamic_top_k
-        )
-
-    sampling_config = SamplingConfig(
-        temperature=config.generation.temperature,
-        top_k=config.generation.top_k,
-        dynamic_top_k=dynamic_top_k,
-    )
-    speculative_config = SpeculativeConfig(
-        speculative_steps=config.generation.speculative_steps
-    )
-    gen_input = GenerateInput(
-        start_tokens=input_tokens,
-        max_new_tokens=config.generation.max_len,
-        sampling_config=sampling_config,
-        speculative_config=speculative_config,
-    )
-
-    newly_generated_tokens = []
-    unwrapped_model = accelerator.unwrap_model(model)
-    for chunk, surprise in unwrapped_model.generate(gen_input):
-        newly_generated_tokens.extend(chunk[0].tolist())
-        if agent_state.complexity_manager:
-            agent_state.complexity_manager.update_surprise(surprise)
-    return newly_generated_tokens
-
-def _process_tool_call(agent_state, tokenizer):
-    """Processes a tool call if one is present in the conversation history."""
-    full_history_text = tokenizer.decode(agent_state.conversation_history_tokens)
-    tool_name, args = parse_tool_call(full_history_text)
-    if tool_name and args is not None:
-        tool_output = execute_tool(tool_name, args)
-        logging.info("Output of tool '%s':\n%s", tool_name, tool_output)
-        tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
-        agent_state.conversation_history_tokens.extend(
-            tokenizer.encode(tool_output_formatted)
-        )
-        return True
-    return False
-
-def run_agent_loop(
-    model: Transformer, tokenizer: Tokenizer, config: GenerateConfig, accelerator: Accelerator
-):
-    """Runs the main agent loop."""
-    agent_state = _initialize_agent_state(config, tokenizer)
-
-    for turn in range(config.generation.max_turns):
-        logging.info("\n--- Iteration %d ---", turn + 1)
-        newly_generated_tokens = _generate_model_response(
-            model, accelerator, agent_state, config
-        )
-        generated_text = tokenizer.decode(newly_generated_tokens)
-        logging.info("Model generated:\n%s", generated_text)
-        agent_state.conversation_history_tokens.extend(newly_generated_tokens)
-
-        if not _process_tool_call(agent_state, tokenizer):
-            logging.info("\n--- Final Answer ---")
-            final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
-            print(final_answer)
-            break
-    else:
-        logging.warning("Maximum number of iterations reached.")
+from src.agent.executor import AgentExecutor
 
 @main_entrypoint
 def main():
     """Main agent loop for the PyTorch model."""
     setup_logging()
-    parser = create_main_parser()
-    args = parser.parse_args()
-
-    model_name = args.model_name or select_model_interactively()
-    if not model_name:
-        return
-
-    model_dir = os.path.join('models', model_name)
-    config_path = os.path.join(model_dir, 'config.json')
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(
-            f"Config file not found for model '{model_name}' at {config_path}"
-        )
-
-    config = GenerateConfig.from_json(config_path)
-    apply_cli_args_to_config(args, config)
-
+    app_setup = setup_from_args(GenerateConfig)
     accelerator = Accelerator()
+
     model, tokenizer = load_model_and_tokenizer(
-        model_name, config, args.load_in_4bit, args.quantized
+        app_setup.model_name,
+        app_setup.config,
+        app_setup.args.load_in_4bit,
+        app_setup.args.quantized,
     )
-    run_agent_loop(model, tokenizer, config, accelerator)
+
+    executor = AgentExecutor(
+        model=model,
+        tokenizer=tokenizer,
+        config=app_setup.config,
+        accelerator=accelerator,
+    )
+    executor.run()
 
 if __name__ == "__main__":
     main()

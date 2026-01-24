@@ -1,5 +1,5 @@
 """
-Utility functions for the Transformer application.
+Factory functions for creating model-related components.
 """
 import logging
 import os
@@ -8,48 +8,10 @@ from typing import Union
 import torch
 from accelerate import dispatch_model
 
-from src.config.core import GenerateConfig, TrainConfig
+from src.config.core import GenerateConfig, HardwareConfig, TrainConfig
 from src.config.model_config import TransformerConfig
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
-from src.utils.device_manager import DeviceManager
-
-
-def setup_logging(log_path: str = None):
-    """
-    Configures logging to file and console.
-    If log_path is None, only logs to console.
-    """
-    handlers = [logging.StreamHandler()]
-    if log_path:
-        handlers.append(logging.FileHandler(log_path))
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        handlers=handlers
-    )
-    logging.getLogger().setLevel(logging.INFO)
-
-
-def main_entrypoint(main_func):
-    """
-    Decorator to wrap main functions with common exception handling.
-    """
-
-    def wrapper():
-        try:
-            main_func()
-        except FileNotFoundError as e:
-            logging.error("File not found: %s", e)
-        except (ValueError, TypeError) as e:
-            logging.error("Configuration or value error: %s", e)
-        except KeyboardInterrupt:
-            logging.info("\nExecution interrupted by user.")
-        except Exception as e:
-            logging.error("An unexpected error occurred: %s", e, exc_info=True)
-            raise
-
-    return wrapper
 
 
 def load_model_and_tokenizer(
@@ -114,3 +76,35 @@ def load_model_and_tokenizer(
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
+
+class DeviceManager:
+    """
+    Manages device placement for the Transformer model based on hardware
+    availability and configuration.
+    """
+
+    def __init__(self, config: HardwareConfig):
+        self.config = config
+        self.cuda_available = torch.cuda.is_available()
+        self.mps_available = torch.backends.mps.is_available()
+
+    def get_device_map(self) -> dict:
+        """
+        Determenos the appropriate device map for `accelerate`.
+
+        Returns:
+            A dictionary representing the device map.
+        """
+        if self.config.strategy == "hybrid" and self.cuda_available:
+            # Hybrid strategy: LTM on CPU, rest on GPU
+            return {"layers.long_term_memory": "cpu", "": "cuda:0"}
+
+        # Default to the configured device for other strategies
+        return {"": self.config.device}
+
+    def should_disable_4bit(self) -> bool:
+        """
+        Determines if 4-bit quantization should be disabled.
+        4-bit is only supported on CUDA.
+        """
+        return not self.cuda_available
