@@ -51,7 +51,16 @@ def setup_environment(args: argparse.Namespace):
             raise FileExistsError(f"Model directory '{model_dir}' already exists.")
         os.makedirs(model_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
-        config_path = "config_train.json"
+
+        # Make training run self-contained by copying the config
+        root_config_path = "config_train.json"
+        if not os.path.exists(root_config_path):
+            raise FileNotFoundError(
+                f"Root config file '{root_config_path}' not found."
+            )
+        config_path = os.path.join(model_dir, "config.json")
+        shutil.copy(root_config_path, config_path)
+
         log_path = os.path.join(model_dir, "training.log")
         setup_logging(log_path)
         logging.info("Starting new training run: '%s'.", args.model_name)
