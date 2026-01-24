@@ -21,7 +21,8 @@ from src.model.model import (
     SpeculativeConfig,
     Transformer,
 )
-from src.utils.core import main_entrypoint, setup_logging
+from src.utils.cli import main_entrypoint
+from src.utils.core import setup_logging
 from src.utils.setup import setup_from_args
 
 
