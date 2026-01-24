@@ -8,6 +8,7 @@ import torch
 from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
+from src.agent.evaluator import CollaborativeEvaluator
 from src.config.model_config import TransformerConfig
 from src.model.model import Transformer
 from tests.test_utils import create_test_config_and_data
@@ -29,9 +30,10 @@ class TestAgentManager(unittest.TestCase):
         model = Transformer(transformer_config)
         accelerator = Accelerator()
         model = accelerator.prepare(model)
+        evaluator = CollaborativeEvaluator(agents=[], base_model=model)
 
         manager = AgentManager(
-            model, num_agents=2, accelerator=accelerator
+            model, num_agents=2, accelerator=accelerator, evaluator=evaluator
         )
 
         # Get the structure of the LTM state_dict from the base model

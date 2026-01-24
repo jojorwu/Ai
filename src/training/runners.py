@@ -12,6 +12,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.agent.agent_manager import AgentManager
 from src.agent.dataclasses import SpecializationConfig
+from src.agent.evaluator import CollaborativeEvaluator
 from src.config.core import TrainConfig
 from src.data.data_loader import get_batches_torch as get_batches
 from src.training.loss import cross_entropy_with_label_smoothing
@@ -41,11 +42,16 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         logging.info("--- Starting new evolution cycle ---")
         start_time = time.time()
         device = self.accelerator.device
+        evaluator = CollaborativeEvaluator(
+            agents=[], base_model=self.model
+        )
         agent_manager = AgentManager(
             base_model=self.model,
             num_agents=self.evolution_config.num_agents,
             accelerator=self.accelerator,
+            evaluator=evaluator,
         )
+        evaluator.agents = agent_manager.agents
         logging.info("Specializing %d agents...", self.evolution_config.num_agents)
         spec_config = SpecializationConfig(
             full_data=self.train_data,

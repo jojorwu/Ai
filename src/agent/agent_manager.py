@@ -27,6 +27,7 @@ class AgentManager:
         base_model: Transformer,
         num_agents: int,
         accelerator: Accelerator,
+        evaluator: CollaborativeEvaluator,
     ):
         """
         Initializes the AgentManager.
@@ -40,6 +41,7 @@ class AgentManager:
         self.num_agents = num_agents
         self.agents: List[Agent] = []
         self.accelerator = accelerator
+        self.evaluator = evaluator
         self.fork_agents()
 
     def fork_agents(self):
@@ -146,7 +148,6 @@ class AgentManager:
         """
         Delegates the collaborative evaluation to the CollaborativeEvaluator.
         """
-        evaluator = CollaborativeEvaluator(self.agents, self.base_model)
-        return evaluator.collaborative_evaluation(
+        return self.evaluator.collaborative_evaluation(
             evaluation_data, tokenizer, top_k, device
         )
