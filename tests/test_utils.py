@@ -32,6 +32,9 @@ def create_test_config_and_data():
     config.evolution.evolution_epochs = 1
     config.evolution.num_agents = 2
     config.evolution.num_survivors = 1
+    config.model.ltm.d_hidden = 16
+    config.model.ltm.num_layers = 1
+    config.model.vocab_size = 50
 
     tokenizer = MockTokenizer()
     vocab_size = tokenizer.vocab_size

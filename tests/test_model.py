@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
+from src.config.core import TrainConfig
 from src.config.model_config import (TransformerConfig, ModelConfig,
                                      VisionConfig, LTMArchitectureConfig)
 from src.model.model import Transformer
@@ -16,22 +17,13 @@ class TestTransformer(unittest.TestCase):
 
     def setUp(self):
         """Set up a mock model and config for testing."""
+        config = TrainConfig.from_json('config_train.json')
+        config.model.vocab_size = 50
         self.config = TransformerConfig(
-            vocab_size=100,
-            model=ModelConfig(
-                d_model=64,
-                num_layers=12,
-                num_heads=4,
-                num_kv_heads=2,
-                d_ff=128,
-                max_seq_len=128,
-                dropout_rate=0.1,
-                num_experts=8,
-                top_k_experts=2,
-                ltm=LTMArchitectureConfig(d_hidden=32, num_layers=1),
-            ),
-            vision=VisionConfig(),
-            ltm=None,
+            vocab_size=config.model.vocab_size,
+            model=config.model,
+            vision=config.vision,
+            ltm=config.ltm,
             tokenizer=None,
         )
         self.model = Transformer(self.config)
@@ -125,7 +117,7 @@ class TestTransformer(unittest.TestCase):
         with patch.object(
             self.model.layers.gating_network,
             'forward',
-            return_value=(torch.tensor([12]), torch.tensor([5])) # Mock: use 12 layers, 5 experts
+            return_value=(torch.tensor([4]), torch.tensor([5])) # Mock: use 4 layers, 5 experts
         ) as mock_gate:
             with patch(
                 'src.model.model.DecoderBlock.forward',
