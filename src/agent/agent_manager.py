@@ -11,8 +11,9 @@ from accelerate import Accelerator
 from torch import nn
 
 from src.agent.agent import Agent
-from src.agent.dataclasses import SpecializationConfig
+from src.agent.dataclasses import LTMConfig, SpecializationConfig
 from src.agent.evaluator import CollaborativeEvaluator
+from src.agent.trainer import AgentTrainer
 from src.data.data_loader import get_batches_torch
 from src.model.model import Transformer
 
@@ -42,37 +43,31 @@ class AgentManager:
         self.agents: List[Agent] = []
         self.accelerator = accelerator
         self.evaluator = evaluator
+        self.ltm_config = LTMConfig(
+            learning_rate=self.base_model.config.ltm.optimizer.learning_rate,
+            surprise_threshold=self.base_model.config.ltm.surprise_threshold,
+        )
         self.fork_agents()
 
     def fork_agents(self):
         """
         Creates a population of agents by cloning the base model.
-
-        Each agent shares the weights of the base model but will have its own
-        unique Long-Term Memory (LTM) module. This method populates the
-        `self.agents` list.
+        Each agent shares the base model's weights but has a unique LTM.
         """
         logging.info("Cloning %d agents from the base model...", self.num_agents)
         for i in range(self.num_agents):
-            agent = Agent(self.base_model, agent_id=f"agent_{i}")
+            agent = Agent(
+                base_model=self.base_model,
+                ltm_config=self.ltm_config,
+                agent_id=f"agent_{i}",
+            )
             self.agents.append(agent)
         logging.info("Agents cloned successfully.")
 
     def specialize_agents_on_dataset(self, spec_config: SpecializationConfig, device):
         """
         Conducts a "specialization" phase where each agent is trained on a
-        unique subset of the data.
-
-        This process allows each agent to develop a specialized Long-Term Memory (LTM)
-        based on its unique experiences, fostering diversity in the agent population.
-        The training is done for a fixed number of steps per agent, and only the
-        LTM weights are updated.
-
-        Args:
-            spec_config: A dataclass containing the configuration for specialization,
-                         including the full dataset and training parameters like
-                         batch size and steps per agent.
-            device: The device (e.g., 'cuda' or 'cpu') to perform the training on.
+        unique subset of the data, managed by its own AgentTrainer.
         """
         if not spec_config.full_data:
             return
@@ -80,6 +75,7 @@ class AgentManager:
         data_chunks = torch.tensor_split(data_tensor, self.num_agents)
         logging.info("Specializing agents on different data subsets...")
         for i, agent in enumerate(self.agents):
+            agent_trainer = AgentTrainer(agent)
             agent_data = data_chunks[i].tolist()
             if not agent_data or len(agent_data) < spec_config.seq_len + 1:
                 logging.info("  - Skipping %s, not enough data.", agent.agent_id)
@@ -94,7 +90,7 @@ class AgentManager:
             for x_batch, y_batch, _ in batch_generator:
                 if steps_done >= spec_config.steps_per_agent:
                     break
-                agent.experience(x_batch, y_batch)
+                agent_trainer.experience(x_batch, y_batch)
                 steps_done += 1
             if steps_done < spec_config.steps_per_agent:
                 logging.warning(

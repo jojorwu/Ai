@@ -6,7 +6,12 @@ from typing import List
 
 import torch
 
-from src.agent.agent import Agent
+
+@dataclass
+class LTMConfig:
+    """Configuration for the agent's Long-Term Memory."""
+    learning_rate: float
+    surprise_threshold: float
 
 
 @dataclass
@@ -23,7 +28,7 @@ class SpecializationConfig:
 class CollaborationContext:
     """Context for handling a collaboration request."""
 
-    proposer: Agent
+    proposer: 'Agent'
     prompt_tokens: torch.Tensor
     scores: dict
     proposer_index: int
@@ -34,7 +39,7 @@ class CollaborationContext:
 class IndependentResponseContext:
     """Context for handling an independent response."""
 
-    proposer: Agent
+    proposer: 'Agent'
     prompt_tokens: torch.Tensor
     scores: dict
     response: torch.Tensor
@@ -48,5 +53,5 @@ class CritiqueScoringContext:
     avg_critique_score: float
     success_reward: float
     failure_penalty: float
-    agents_to_reward: List[Agent]
-    agents_to_penalize: List[Agent]
+    agents_to_reward: List['Agent']
+    agents_to_penalize: List['Agent']

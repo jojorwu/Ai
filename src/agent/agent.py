@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
+from src.agent.dataclasses import LTMConfig
 from src.model.model import GenerateInput, SamplingConfig, Transformer
 
 
@@ -26,9 +27,15 @@ class Agent:
     The agent shares the base model's weights but has a unique LTM.
     """
 
-    def __init__(self, base_model: Transformer, agent_id: str | None = None):
+    def __init__(
+        self,
+        base_model: Transformer,
+        ltm_config: LTMConfig,
+        agent_id: str | None = None,
+    ):
         self.agent_id = agent_id or str(uuid.uuid4())
         self.base_model = base_model
+        self.ltm_config = ltm_config
         self.long_term_memory = (
             copy.deepcopy(base_model.layers.long_term_memory)
             if base_model.layers.long_term_memory
@@ -38,7 +45,7 @@ class Agent:
         if self.long_term_memory:
             self.ltm_optimizer = Adam(
                 self.long_term_memory.parameters(),
-                lr=self.base_model.config.ltm.optimizer.learning_rate,
+                lr=self.ltm_config.learning_rate,
             )
         else:
             self.ltm_optimizer = None
@@ -46,73 +53,6 @@ class Agent:
         self.policy_loss_fn = nn.CrossEntropyLoss()
         self.value_loss_fn = nn.MSELoss()  # Used to push value towards 1.0
         self.metrics = AgentMetrics()
-
-    def _update_ltm_and_calc_surprise(self) -> float:
-        """
-        Calculates the gradient norm for LTM parameters ("surprise") and,
-        if it exceeds a threshold, performs an optimizer step.
-        """
-        if not self.long_term_memory:
-            return 0.0
-
-        grad_tensors = [
-            p.grad.detach().flatten()
-            for p in self.long_term_memory.parameters()
-            if p.grad is not None
-        ]
-
-        if not grad_tensors:
-            return 0.0
-
-        surprise = torch.norm(torch.cat(grad_tensors)).item()
-        self.metrics.total_surprise += surprise
-
-        if surprise > self.base_model.config.ltm.surprise_threshold:
-            self.ltm_optimizer.step()
-
-        return surprise
-
-    def experience(self, x_batch: torch.Tensor, y_batch: torch.Tensor):
-        """
-        The process of an agent gaining "experience" in a batch training mode.
-        This method updates the agent's LTM based on the surprise metric.
-        """
-        if not self.long_term_memory or self.ltm_optimizer is None:
-            return
-
-        self.base_model.train()
-        self.long_term_memory.train()
-        self.ltm_optimizer.zero_grad()
-
-        logits, values, aux_loss = self.base_model.forward(
-            x_batch, ltm_override=self.long_term_memory
-        )
-
-        loss_policy = self.policy_loss_fn(
-            logits.view(-1, logits.size(-1)), y_batch.view(-1)
-        )
-
-        # Calculate value loss (encouraging the model to predict high values)
-        # We train the value head to predict 1.0 for any given sequence.
-        target_values = torch.ones_like(values)
-        loss_value = self.value_loss_fn(values, target_values)
-
-        # Total loss is what drives the LTM update
-        total_loss = loss_policy + loss_value
-        if aux_loss is not None:
-            total_loss += aux_loss
-
-        # Backward pass to compute gradients for LTM
-        total_loss.backward()
-
-        # Update LTM based on surprise
-        self._update_ltm_and_calc_surprise()
-
-        # Update metrics
-        self.metrics.value_score_sum += torch.mean(values).item()
-        self.metrics.experience_count += 1
-
-        self.ltm_optimizer.zero_grad()
 
     def get_ltm_state(self) -> dict | None:
         """Returns the state_dict of this agent's LTM."""
