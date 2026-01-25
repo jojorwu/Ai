@@ -11,7 +11,7 @@ from src.config.core import TrainConfig
 from src.training.setup import prepare_training_environment
 from src.training.trainer import create_trainer
 from src.utils.cli import make_model_name_required
-from src.utils.cli import main_entrypoint
+from src.utils.decorators import main_entrypoint
 from src.utils.setup import setup_from_args
 
 

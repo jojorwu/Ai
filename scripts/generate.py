@@ -7,7 +7,7 @@ from accelerate import Accelerator
 
 from src.config.core import GenerateConfig
 from src.model.factory import load_model_and_tokenizer
-from src.utils.cli import main_entrypoint
+from src.utils.decorators import main_entrypoint
 from src.utils.setup import setup_logging
 from src.utils.setup import setup_from_args
 
