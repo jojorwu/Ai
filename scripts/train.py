@@ -23,6 +23,7 @@ def add_training_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--wandb", action="store_true", help="Enable Weights & Biases logging."
     )
+    make_model_name_required(parser)
 
 
 @main_entrypoint
