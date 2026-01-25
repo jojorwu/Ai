@@ -4,7 +4,7 @@ PyTorch implementation of the Trainer class, which encapsulates the core trainin
 import logging
 import os
 from dataclasses import dataclass
-
+import torch
 from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -244,7 +244,16 @@ class Trainer:
         """Delegates the evolution cycle to the EvolutionRunner."""
         return self._evolution_runner.run()
 
-    def train(self, checkpoint_dir: str, resume_from: str | None):
-        """Executes the main training loop."""
+    def save_final_model(self, model_dir: str):
+        """Saves the final, unwrapped model for easy inference."""
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        output_path = os.path.join(model_dir, "model.pt")
+        torch.save(unwrapped_model.state_dict(), output_path)
+        logging.info("\nTraining complete! Final model saved to: %s", output_path)
+
+    def train(self, checkpoint_dir: str, model_dir: str, resume_from: str | None):
+        """Executes the main training loop and saves the final model."""
         loop = TrainingLoop(self, self.config)
         loop.run(checkpoint_dir, resume_from)
+        if self.accelerator.is_main_process:
+            self.save_final_model(model_dir)

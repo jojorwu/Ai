@@ -41,16 +41,7 @@ def main():
         load_in_4bit=app_setup.args.load_in_4bit,
     )
 
-    trainer.train(env.checkpoint_dir, app_setup.args.resume_from)
-
-    # Save the final, unwrapped model for easy inference
-    unwrapped_model = env.accelerator.unwrap_model(trainer.get_model())
-    torch.save(
-        unwrapped_model.state_dict(), os.path.join(env.model_dir, "model.pt")
-    )
-    logging.info(
-        "\nTraining complete! Final model saved to: %s", env.model_dir
-    )
+    trainer.train(env.checkpoint_dir, env.model_dir, app_setup.args.resume_from)
 
 
 if __name__ == "__main__":
