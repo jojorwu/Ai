@@ -11,8 +11,8 @@ from src.config.core import GenerateConfig, TrainConfig
 from src.utils.cli import (
     apply_cli_args_to_config,
     create_main_parser,
-    select_model_interactively,
 )
+from src.utils.interaction import select_model_interactively
 
 
 @dataclass
