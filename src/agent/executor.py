@@ -21,14 +21,12 @@ from src.model.model import (
 )
 
 
-@dataclass
-class AgentState:
-    """Keeps track of the agent's state during a conversation."""
-    conversation_history_tokens: List[int]
-    complexity_manager: ComplexityManager = None
-
-
 class AgentExecutor:
+    @dataclass
+    class AgentState:
+        """Keeps track of the agent's state during a conversation."""
+        conversation_history_tokens: List[int]
+        complexity_manager: ComplexityManager = None
     """
     Handles the main execution loop of the agent, including the
     "thought -> tool -> observation" cycle.
