@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from bitsandbytes.nn import Linear4bit
 from torch import nn
 
-from src.config.model_config import DecoderBlockConfig, TransformerConfig
+from src.config.core import DecoderBlockConfig, TransformerConfig
 from src.model.layers.decoder_block import DecoderBlock
 from src.model.layers.embedding import Embedding
 from src.model.layers.gating import GatingNetwork

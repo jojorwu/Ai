@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.config.model_config import TransformerConfig
+from src.config.core import TransformerConfig
 from src.model.generation import GenerationMixin
 from src.model.initializer import ModelInitializer
 from src.model.structures import ModelLayers, RopeEmbeddings

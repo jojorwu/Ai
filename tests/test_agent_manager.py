@@ -9,7 +9,7 @@ from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
 from src.agent.evaluator import CollaborativeEvaluator
-from src.config.model_config import TransformerConfig
+from src.config.core import TransformerConfig
 from src.model.model import Transformer
 from tests.test_utils import create_test_config_and_data
 

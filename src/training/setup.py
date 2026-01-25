@@ -17,9 +17,10 @@ from src.utils.cli import apply_cli_args_to_config
 from src.utils.setup import setup_logging
 
 
-def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
-    """Initializes tokenizer and loads data."""
-    tokenizer = Tokenizer(tokenizer_path)
+def load_and_prepare_data(
+    data_dir: str, tokenizer: Tokenizer, validation_split: float
+):
+    """Loads and splits the data."""
     multimodal_data = load_multimodal_data_from_directory(data_dir)
     if not multimodal_data:
         raise ValueError(f"No data found in {data_dir}")
@@ -141,9 +142,10 @@ def prepare_training_environment(
             project_name="transformer-project", config=config.model_dump()
         )
 
+    # Initialize tokenizer from the source data directory, not the model output directory
     tokenizer, train_data, val_data = load_and_prepare_data(
         config.evolution.data_dir,
-        paths.model_dir,
+        Tokenizer(config.evolution.data_dir),
         config.evolution.validation_split,
     )
 

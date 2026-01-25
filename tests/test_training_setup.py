@@ -30,6 +30,12 @@ class TestTrainingSetup(unittest.TestCase):
             original_cwd = os.getcwd()
             os.chdir(temp_dir)
             try:
+                # Create a dummy tokenizer file for the Tokenizer to load
+                data_dir = "data"
+                os.makedirs(data_dir, exist_ok=True)
+                with open(os.path.join(data_dir, "tokenizer_vocab.json"), "w") as f:
+                    f.write('{"<unk>": 0, "a": 1, "b": 2}')
+
                 shutil.copy(os.path.join(original_cwd, "config_train.json"), "config_train.json")
 
                 args = argparse.Namespace(

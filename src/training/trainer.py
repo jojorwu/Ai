@@ -9,8 +9,7 @@ from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from src.config.core import TrainConfig
-from src.config.model_config import TransformerConfig
+from src.config.core import TrainConfig, TransformerConfig
 from src.model.model import Transformer
 from .runners import (EvolutionRunner, PretrainingRunner, ValidationRunner)
 
