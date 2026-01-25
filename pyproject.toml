@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transformer-project"
+version = "0.1"
+dependencies = [
+    "pydantic",
+    "PyPDF2",
+    "python-docx",
+    "Pillow",
+    "torch",
+    "bitsandbytes",
+    "accelerate",
+    "wandb",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
