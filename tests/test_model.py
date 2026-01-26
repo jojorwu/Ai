@@ -16,7 +16,7 @@ class TestTransformer(unittest.TestCase):
 
     def setUp(self):
         """Set up a mock model and config for testing."""
-        config = TrainConfig.from_json('config_train.json')
+        config = TrainConfig.from_json('config/config_train.json')
         config.model.vocab_size = 50
         self.config = TransformerConfig(
             vocab_size=config.model.vocab_size,

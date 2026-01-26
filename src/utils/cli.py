@@ -74,7 +74,7 @@ def create_main_parser():
     parser.add_argument(
         '--config',
         type=str,
-        default='config_train.json',
+        default='config/config_train.json',
         help="Path to the configuration file."
     )
     parser.add_argument(

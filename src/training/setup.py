@@ -68,7 +68,7 @@ def setup_paths_and_logging(model_name: str, resume_from: Optional[str]) -> RunP
         os.makedirs(model_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-        root_config_path = "config_train.json"
+        root_config_path = "config/config_train.json"
         if not os.path.exists(root_config_path):
             raise FileNotFoundError(f"Root config file '{root_config_path}' not found.")
         config_path = os.path.join(model_dir, "config.json")

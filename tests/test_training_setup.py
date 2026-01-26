@@ -36,7 +36,8 @@ class TestTrainingSetup(unittest.TestCase):
                 with open(os.path.join(data_dir, "tokenizer_vocab.json"), "w") as f:
                     f.write('{"<unk>": 0, "a": 1, "b": 2}')
 
-                shutil.copy(os.path.join(original_cwd, "config_train.json"), "config_train.json")
+                os.makedirs("config")
+                shutil.copy(os.path.join(original_cwd, "config/config_train.json"), "config/config_train.json")
 
                 args = argparse.Namespace(
                     model_name="test-model",

@@ -37,7 +37,7 @@ class TestQuantizationIntegration(unittest.TestCase):
         self.vocab_path = os.path.join(self.temp_dir, "tokenizer_vocab.json")
         self.data_path = os.path.join(self.temp_dir, "data.txt")
 
-        with open("config_train.json", "r", encoding="utf-8") as f:
+        with open("config/config_train.json", "r", encoding="utf-8") as f:
             config = TrainConfig.model_validate_json(f.read())
         config.model.d_model = 16
         config.model.num_heads = 2
