@@ -8,7 +8,7 @@ from accelerate import Accelerator
 
 from src.config.core import TrainConfig
 from src.training.trainer import create_trainer
-from tests.test_utils import create_test_config_and_data, MockTokenizer
+from tests.test_utils import create_full_test_config_and_data, MockTokenizer
 
 
 class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-code
@@ -20,7 +20,7 @@ class TestTrainerIntegration(unittest.TestCase):  # pylint: disable=duplicate-co
         """
         Tests that a pre-training epoch and an evolution cycle both update the base model.
         """
-        config, tokenizer, train_data, val_data = create_test_config_and_data()
+        config, tokenizer, train_data, val_data = create_full_test_config_and_data()
         accelerator = Accelerator()
 
         trainer = create_trainer(

@@ -9,8 +9,8 @@ import torch
 from src.agent.agent import Agent
 from src.agent.dataclasses import LTMConfig
 from src.agent.evaluator import CollaborativeEvaluator
-from src.config.core import TrainConfig
 from src.model.model import Transformer
+from tests.test_utils import create_test_config
 
 
 class TestCollaborativeEvaluator(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestCollaborativeEvaluator(unittest.TestCase):
 
     def setUp(self):
         """Set up a mock model and config for testing."""
-        self.mock_config = TrainConfig.from_json('config_train.json')
+        self.mock_config = create_test_config()
         self.mock_model = MagicMock(spec=Transformer)
         self.mock_model.config = self.mock_config
 

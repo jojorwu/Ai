@@ -11,7 +11,7 @@ from src.agent.agent_manager import AgentManager
 from src.agent.evaluator import CollaborativeEvaluator
 from src.config.core import TransformerConfig
 from src.model.model import Transformer
-from tests.test_utils import create_test_config_and_data
+from tests.test_utils import create_test_config, MockTokenizer
 
 
 class TestAgentManager(unittest.TestCase):
@@ -19,7 +19,8 @@ class TestAgentManager(unittest.TestCase):
 
     def test_merge_agents_averages_ltm_weights(self):
         """Test that merge_agents correctly averages the LTM weights."""
-        config, tokenizer, _, _ = create_test_config_and_data()
+        config = create_test_config()
+        tokenizer = MockTokenizer()
         transformer_config = TransformerConfig(
             vocab_size=tokenizer.vocab_size,
             model=config.model,

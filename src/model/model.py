@@ -149,11 +149,12 @@ class Transformer(nn.Module, GenerationMixin):
 
         # The generation configuration (via ComplexityManager) can override the
         # dynamically selected top-k value for MoE.
-        final_dynamic_top_k_tensor = (
-            dynamic_top_k if dynamic_top_k is not None else moe_top_k
-        )
-        # For the MoE layer, we also need a single integer.
-        final_dynamic_top_k = int(torch.max(final_dynamic_top_k_tensor).item())
+        if dynamic_top_k is not None:
+            final_dynamic_top_k = dynamic_top_k
+        elif isinstance(moe_top_k, torch.Tensor):
+            final_dynamic_top_k = int(moe_top_k.max().item())
+        else:
+            final_dynamic_top_k = moe_top_k
 
         # 4. Pass through the dynamically selected number of decoder blocks.
         # The model only computes the number of layers determined by the GatingNetwork,
