@@ -1,69 +1,24 @@
 """
 Core Pydantic models for project configuration.
 """
+import argparse
 import json
+import logging
 from typing import Any, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 
-class DynamicParametersConfig(BaseModel):
-    """Configuration for the dynamic parameters of the text generation process."""
-    start_text: str = Field(...,
-                            description="Initial text for generation.")
-    max_len: int = Field(...,
-                         description="Maximum length of the generated text.")
-    temperature: float = Field(..., description="Temperature for sampling.")
-    top_k: int = Field(..., description="Top-k for sampling.")
-    top_p: float = Field(..., description="Top-p (nucleus) for sampling.")
-    speculative_steps: int = Field(...,
-                                   description="Number of speculative steps.")
-    value_threshold: float = Field(
-        ..., description="Value threshold for accepting speculative generation.")
-    max_thought_len: int = Field(...,
-                                 description="Maximum length of 'thoughts'.")
-    max_retries: int = Field(
-        ..., description="Maximum number of retries on failed speculation.")
-    max_turns: int = Field(
-        10, description="Maximum number of iterations in the agent loop.")
-    context_window_size: int = Field(
-        2048, description="The number of tokens to retain in history.")
-
-
-class LTMArchitectureConfig(BaseModel):
-    """Configuration specific to the LTM architecture."""
-    d_hidden: Optional[int] = Field(
-        None, description="Dimensionality of the hidden layer in LTM.")
-    num_layers: Optional[int] = Field(None,
-                                          description="Number of layers in LTM.")
-
-
-class ModelConfig(BaseModel):
-    """Configuration for the Transformer model architecture."""
-    vocab_size: Optional[int] = Field(
-        None, description="Size of the vocabulary.")
-    d_model: int = Field(...,
-                         description="Dimensionality of the model's vectors.")
-    num_layers: int = Field(
-        ..., description="Number of layers in the encoder and decoder.")
-    num_heads: int = Field(...,
-                           description="Number of heads in Multi-Head Attention.")
-    num_kv_heads: int = Field(
-        ...,
-        description="Number of heads for Key/Value in Grouped-Query Attention.")
-    d_ff: int = Field(..., description="Dimensionality in Feed-Forward layers.")
-    max_seq_len: int = Field(..., description="Maximum sequence length.")
-    dropout_rate: float = Field(..., description="Dropout probability.")
-    ltm: LTMArchitectureConfig = Field(
-        default_factory=LTMArchitectureConfig,
-        description="Configuration for the Long-Term Memory module."
-    )
-    num_experts: Optional[int] = Field(
-        None, description="Number of 'experts' in the MoE layer.")
-    top_k_experts: Optional[int] = Field(
-        None, description="Number of 'experts' to select for each token.")
-    gradient_checkpointing: bool = Field(
-        False, description="Enable gradient checkpointing to save memory.")
+class TransformerConfig(BaseModel):
+    """Configuration for the Transformer model."""
+    vocab_size: int
+    model: 'ModelConfig'
+    vision: 'VisionConfig'
+    ltm: Optional['LTMConfig'] = None
+    tokenizer: Optional[Any] = None
+    class Config:  # pylint: disable=too-few-public-methods
+        """Pydantic config."""
+        arbitrary_types_allowed = True
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -74,18 +29,6 @@ class MultiHeadAttentionConfig(BaseModel):
     rotary_emb: Optional[Tuple[Any, Any]] = None
     bias: bool = False
     num_layers: int = 1
-
-
-class TransformerConfig(BaseModel):
-    """Configuration for the Transformer model."""
-    vocab_size: int
-    model: ModelConfig
-    vision: 'VisionConfig'
-    ltm: Optional['LTMConfig'] = None
-    tokenizer: Optional[Any] = None
-    class Config:  # pylint: disable=too-few-public-methods
-        """Pydantic config."""
-        arbitrary_types_allowed = True
 
 
 class MoEConfig(BaseModel):
@@ -123,6 +66,65 @@ class DecoderBlockConfig(BaseModel):
         arbitrary_types_allowed = True
 
 
+class DynamicParametersConfig(BaseModel):
+    """Configuration for the dynamic parameters of the text generation process."""
+    start_text: str = Field(...,
+                            description="Initial text for generation.")
+    max_len: int = Field(...,
+                         description="Maximum length of the generated text.")
+    temperature: float = Field(..., description="Temperature for sampling.")
+    top_k: int = Field(..., description="Top-k for sampling.")
+    top_p: float = Field(..., description="Top-p (nucleus) for sampling.")
+    speculative_steps: int = Field(...,
+                                   description="Number of speculative steps.")
+    value_threshold: float = Field(
+        ..., description="Value threshold for accepting speculative generation.")
+    max_thought_len: int = Field(...,
+                                 description="Maximum length of 'thoughts'.")
+    max_retries: int = Field(
+        ..., description="Maximum number of retries on failed speculation.")
+    max_turns: int = Field(
+        10, description="Maximum number of iterations in the agent loop.")
+    context_window_size: int = Field(
+        2048, description="The number of tokens to retain in history.")
+
+
+class LTMArchitectureConfig(BaseModel):
+    """Configuration specific to the LTM architecture."""
+    d_hidden: int | None = Field(
+        None, description="Dimensionality of the hidden layer in LTM.")
+    num_layers: int | None = Field(None,
+                                       description="Number of layers in LTM.")
+
+
+class ModelConfig(BaseModel):
+    """Configuration for the Transformer model architecture."""
+    vocab_size: int | None = Field(
+        None, description="Size of the vocabulary.")
+    d_model: int = Field(...,
+                         description="Dimensionality of the model's vectors.")
+    num_layers: int = Field(
+        ..., description="Number of layers in the encoder and decoder.")
+    num_heads: int = Field(...,
+                           description="Number of heads in Multi-Head Attention.")
+    num_kv_heads: int = Field(
+        ...,
+        description="Number of heads for Key/Value in Grouped-Query Attention.")
+    d_ff: int = Field(..., description="Dimensionality in Feed-Forward layers.")
+    max_seq_len: int = Field(..., description="Maximum sequence length.")
+    dropout_rate: float = Field(..., description="Dropout probability.")
+    ltm: LTMArchitectureConfig = Field(
+        default_factory=LTMArchitectureConfig,
+        description="Configuration for the Long-Term Memory module."
+    )
+    num_experts: int | None = Field(
+        None, description="Number of 'experts' in the MoE layer.")
+    top_k_experts: int | None = Field(
+        None, description="Number of 'experts' to select for each token.")
+    gradient_checkpointing: bool = Field(
+        False, description="Enable gradient checkpointing to save memory.")
+
+
 class VisionConfig(BaseModel):
     """Configuration for the Vision Encoder."""
     image_size: tuple[int, int] = Field(
@@ -152,8 +154,8 @@ class EvolutionConfig(BaseModel):
     data_dir: str = Field(..., description="Directory with training data.")
     weights_path: str = Field(...,
                               description="Path to save the final model weights.")
-    checkpoint_path: Optional[str] = Field(None,
-                                           description="Path to save checkpoints.")
+    checkpoint_path: str | None = Field(None,
+                                            description="Path to save checkpoints.")
     early_stopping_patience: int = Field(
         3, description="Epochs without improvement for early stopping.")
     best_model_path: str = Field("best_model.npz",
@@ -222,6 +224,21 @@ class BaseConfig(BaseModel):
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return cls.model_validate(data)
+
+    def apply_cli_args(self, args: argparse.Namespace):
+        """
+        Overrides configuration fields based on command-line arguments.
+        Args:
+            args: Parsed arguments from argparse.
+        """
+        if args.hardware_strategy:
+            self.hardware.strategy = args.hardware_strategy
+            logging.info(
+                "Overriding hardware strategy with '%s'", args.hardware_strategy
+            )
+        if args.torch_compile:
+            self.hardware.torch_compile = True
+            logging.info("Enabling torch.compile.")
 
 
 class TrainConfig(BaseConfig):

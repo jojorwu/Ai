@@ -4,29 +4,6 @@ Command-line interface (CLI) utilities for the project.
 import argparse
 import logging
 import os
-from typing import Union
-
-from src.config.core import GenerateConfig, TrainConfig
-
-
-def apply_cli_args_to_config(
-    args: argparse.Namespace, config: Union[TrainConfig, GenerateConfig]
-):
-    """
-    Overrides configuration fields based on command-line arguments.
-
-    Args:
-        args: Parsed arguments from argparse.
-        config: The configuration object to modify.
-    """
-    if args.hardware_strategy:
-        config.hardware.strategy = args.hardware_strategy
-        logging.info(
-            "Overriding hardware strategy with '%s'", args.hardware_strategy
-        )
-    if args.torch_compile:
-        config.hardware.torch_compile = True
-        logging.info("Enabling torch.compile.")
 
 
 def make_model_name_required(parser: argparse.ArgumentParser):
@@ -88,5 +65,3 @@ def create_main_parser():
         help="Enable torch.compile for the model (GPU only)."
     )
     return parser
-
-
