@@ -1,7 +1,7 @@
 """
 Dataclasses for the model module.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import torch
 from torch import nn
 
@@ -36,33 +36,3 @@ class ModelLayers(nn.Module):
         raise NotImplementedError(
             "ModelLayers is a container and does not implement a forward pass."
         )
-
-
-@dataclass
-class SamplingConfig:
-    """Configuration for sampling."""
-    temperature: float = 1.0
-    top_k: int = 0
-    top_p: float = 0.9
-    dynamic_top_k: int = None
-
-
-@dataclass
-class SpeculativeConfig:
-    """Configuration for speculative decoding."""
-    speculative_steps: int = 5
-    value_threshold: float = -1.0
-    max_retries: int = 3
-
-
-@dataclass
-class GenerateInput:
-    """Datacaclass for storing inputs to the generate method."""
-
-    start_tokens: torch.Tensor
-    max_new_tokens: int
-    sampling_config: SamplingConfig = field(default_factory=SamplingConfig)
-    speculative_config: SpeculativeConfig = field(default_factory=SpeculativeConfig)
-    ltm_override: nn.Module | None = None
-    kv_cache: 'KVCache' = None
-    draft_cache: 'KVCache' = None

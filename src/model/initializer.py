@@ -44,12 +44,32 @@ class ModelInitializer:
         return RopeEmbeddings(cos=self.model.rope_cos_buf, sin=self.model.rope_sin_buf)
 
     def init_layers(self) -> ModelLayers:
-        """Initializes all layers of the model."""
+        """
+        Initializes all layers of the model, organizing them into core and head layers.
+        """
         ltm = self._init_ltm()
-        decoder_config = self._create_decoder_block_config(ltm)
-        value_head_linear_class = Linear4bit if self.load_in_4bit else Linear
+        layers_dict = {}
 
-        layers_dict = {
+        # 1. Initialize core input and routing layers
+        layers_dict.update(self._init_core_layers(ltm))
+
+        # 2. Initialize the stack of decoder blocks
+        decoder_config = self._create_decoder_block_config(ltm)
+        layers_dict["decoder"] = nn.ModuleList(
+            [
+                DecoderBlock(decoder_config)
+                for _ in range(self.config.model.num_layers)
+            ]
+        )
+
+        # 3. Initialize output and value heads
+        layers_dict.update(self._init_head_layers())
+
+        return ModelLayers(layers_dict)
+
+    def _init_core_layers(self, ltm: LongTermMemory | None) -> dict:
+        """Initializes input, memory, and gating layers."""
+        return {
             "embedding": Embedding(self.config.vocab_size, self.config.model.d_model),
             "long_term_memory": ltm,
             "gating_network": GatingNetwork(
@@ -57,18 +77,17 @@ class ModelInitializer:
                 num_layers=self.config.model.num_layers,
                 num_experts=self.config.model.num_experts,
             ),
-            "decoder": nn.ModuleList(
-                [
-                    DecoderBlock(decoder_config)
-                    for _ in range(self.config.model.num_layers)
-                ]
-            ),
+        }
+
+    def _init_head_layers(self) -> dict:
+        """Initializes final normalization and prediction heads."""
+        value_head_linear_class = Linear4bit if self.load_in_4bit else Linear
+        return {
             "final_norm": RMSNorm(self.config.model.d_model),
             "value_head": ValueHead(
                 self.config.model.d_model, linear_class=value_head_linear_class
             ),
         }
-        return ModelLayers(layers_dict)
 
     def _init_ltm(self) -> LongTermMemory | None:
         """Initializes the Long-Term Memory (LTM) module if configured."""

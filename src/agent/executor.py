@@ -14,12 +14,8 @@ from src.agent.tools import ToolRegistry, parse_tool_call
 from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.complexity_manager import ComplexityManager
-from src.model.model import Transformer
-from src.model.structures import (
-    GenerateInput,
-    SamplingConfig,
-    SpeculativeConfig,
-)
+from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
+                             Transformer)
 
 
 class AgentExecutor:

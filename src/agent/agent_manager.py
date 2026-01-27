@@ -13,6 +13,7 @@ from torch import nn
 from src.agent.agent import Agent
 from src.agent.dataclasses import LTMConfig, SpecializationConfig
 from src.agent.evaluator import CollaborativeEvaluator
+from src.agent.evolution import EvolutionaryOrchestrator
 from src.agent.factory import AgentFactory
 from src.agent.specializer import AgentSpecializer
 from src.model.model import Transformer
@@ -63,44 +64,9 @@ class AgentManager:
 
     def merge_agents(self, best_agents: List[Agent]):
         """
-        Merges the knowledge of the best-performing agents into the base model.
-
-        This is achieved by averaging the weights (state_dict) of the Long-Term
-        Memory (LTM) modules from the provided list of 'best' agents. The resulting
-        averaged LTM state is then loaded into the base model's LTM, effectively
-        assimilating the collective knowledge of the top performers.
-
-        Args:
-            best_agents: A list of the top-performing Agent objects from which
-                         to merge LTM states.
+        Delegates the merging of agent knowledge to the EvolutionaryOrchestrator.
         """
-        if not best_agents:
-            return
-        ltm_states = [a.get_ltm_state() for a in best_agents if a.get_ltm_state()]
-        if not ltm_states:
-            logging.warning("None of the best agents had a valid LTM state.")
-            return
-
-        # Initialize a dictionary for the averaged state with zero-tensors.
-        # This avoids modifying any of the original state_dicts.
-        avg_state = {
-            key: torch.zeros_like(tensor, device="cpu")
-            for key, tensor in ltm_states[0].items()
-        }
-        for state in ltm_states:
-            for key, tensor in state.items():
-                avg_state[key] += tensor.to("cpu")
-        for key in avg_state:
-            avg_state[key] /= len(ltm_states)
-
-        model_to_update = (
-            self.base_model.module
-            if hasattr(self.base_model, "module")
-            else self.base_model
-        )
-        if model_to_update.layers.long_term_memory:
-            model_to_update.layers.long_term_memory.load_state_dict(avg_state)
-            logging.info("Base model's LTM has been updated with merged weights.")
+        EvolutionaryOrchestrator.merge_population(best_agents, self.base_model)
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """

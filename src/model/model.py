@@ -14,19 +14,43 @@ from src.config.core import TransformerConfig
 from src.model.generation import GenerationMixin
 from src.model.generator import TextGenerator
 from src.model.initializer import ModelInitializer
-from src.model.structures import (
-    GenerateInput,
-    ModelLayers,
-    RopeEmbeddings,
-    SamplingConfig,
-    SpeculativeConfig,
-)
+from src.model.structures import ModelLayers, RopeEmbeddings
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
 from src.model.layers.embedding import Embedding
 from src.model.layers.gating import GatingNetwork
 from src.model.layers.long_term_memory import LongTermMemory
 from src.model.layers.rms_norm import RMSNorm
 from src.model.layers.value_head import ValueHead
+
+
+@dataclass
+class SamplingConfig:
+    """Configuration for sampling."""
+    temperature: float = 1.0
+    top_k: int = 0
+    top_p: float = 0.9
+    dynamic_top_k: int = None
+
+
+@dataclass
+class SpeculativeConfig:
+    """Configuration for speculative decoding."""
+    speculative_steps: int = 5
+    value_threshold: float = -1.0
+    max_retries: int = 3
+
+
+@dataclass
+class GenerateInput:
+    """Datacaclass for storing inputs to the generate method."""
+
+    start_tokens: torch.Tensor
+    max_new_tokens: int
+    sampling_config: SamplingConfig = field(default_factory=SamplingConfig)
+    speculative_config: SpeculativeConfig = field(default_factory=SpeculativeConfig)
+    ltm_override: nn.Module | None = None
+    kv_cache: 'KVCache' = None
+    draft_cache: 'KVCache' = None
 
 
 class Transformer(nn.Module, GenerationMixin):
