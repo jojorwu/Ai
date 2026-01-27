@@ -142,6 +142,10 @@ def create_trainer(
         model, optimizer, scheduler, value_loss_fn
     )
 
+    if config.hardware.torch_compile:
+        logging.info("Enabling torch.compile for the model.")
+        model = torch.compile(model)
+
     validation_runner = ValidationRunner(
         model=model,
         val_data=val_data,

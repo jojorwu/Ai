@@ -67,7 +67,7 @@ class GenerationMixin:
             return 0.0
 
         long_term_memory.zero_grad()
-        value.backward(retain_graph=True)
+        value.backward(retain_graph=False)
         grad_tensors = [
             p.grad.detach()
             for p in long_term_memory.parameters()
@@ -85,13 +85,37 @@ class GenerationMixin:
     def _generate_speculative_chunk(
         self, draft_model: "Transformer", tokens: torch.Tensor, inputs: "GenerateInput"
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Generates a small 'draft' chunk of tokens using a faster, smaller model."""
+        """
+        Generates a small 'draft' chunk of tokens using a faster, smaller model,
+        optimized with a KV cache.
+        """
+        from src.model.layers.kv_cache import KVCache, KVCacheConfig
+
+        # Initialize KV Cache for the draft model for efficient generation
+        d_k = draft_model.config.model.d_model // draft_model.config.model.num_heads
+        draft_cache_config = KVCacheConfig(
+            num_layers=draft_model.config.model.num_layers,
+            batch_size=tokens.shape[0],
+            num_kv_heads=draft_model.config.model.num_kv_heads,
+            d_k=d_k,
+            max_seq_len=draft_model.config.model.max_seq_len,
+        )
+        draft_cache = KVCache(
+            draft_cache_config,
+            device=tokens.device,
+            dtype=self.layers.embedding.weight.dtype
+        )
+
         draft_tokens = tokens
         with torch.no_grad():
-            for _ in range(inputs.speculative_config.speculative_steps):
-                draft_logits, _, _ = draft_model(
-                    draft_tokens[:, -self.config.model.max_seq_len :]
-                )
+            # 1. Initial forward pass to populate the KV cache with the prompt.
+            # We only need the last max_seq_len tokens.
+            prefix = tokens[:, -draft_model.config.model.max_seq_len:]
+            draft_logits, _, _ = draft_model(prefix, kv_cache=draft_cache)
+
+            # 2. Iteratively generate speculative tokens.
+            for i in range(inputs.speculative_config.speculative_steps):
+                # Use the last logit to sample the next token.
                 next_token = self._sample_from_logits(
                     draft_logits[:, -1, :],
                     inputs.sampling_config.temperature,
@@ -99,6 +123,12 @@ class GenerationMixin:
                     inputs.sampling_config.top_p,
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
+
+                # 3. Update the KV cache with the new token for the next iteration,
+                # but only if we're not at the last speculative step.
+                if i < inputs.speculative_config.speculative_steps - 1:
+                    draft_logits, _, _ = draft_model(next_token, kv_cache=draft_cache)
+
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
     def _validate_and_accept_chunk(

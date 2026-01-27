@@ -86,6 +86,7 @@ class Transformer(nn.Module, GenerationMixin):
         ltm_state: torch.Tensor = None,
         dynamic_top_k: int = None,  # This is passed in from generation config
         ltm_override: nn.Module | None = None,
+        kv_cache: 'KVCache' = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Performs the forward pass of the Transformer model.
@@ -165,6 +166,7 @@ class Transformer(nn.Module, GenerationMixin):
             block_input = ForwardPassInput(
                 x=h,
                 ltm_state=ltm_state,
+                kv_cache=kv_cache,
                 layer_idx=i,
                 dynamic_top_k=final_dynamic_top_k,
             )
@@ -190,87 +192,108 @@ class Transformer(nn.Module, GenerationMixin):
         # Value head: projects the final hidden state of the last token to a
         # single scalar value, predicting the "usefulness" of the sequence.
         value = self.layers.value_head(h[:, -1, :])
+
+        # Increment the KV cache position if it's being used.
+        if kv_cache is not None:
+            kv_cache.increment_pos(x.shape[1])
+
         return logits, value, total_aux_loss
 
     def generate(
         self, inputs: GenerateInput
     ) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
-        Generates a sequence of tokens using speculative decoding.
-
-        This method accelerates generation by using a smaller, faster 'draft' model
-        to produce a chunk of speculative tokens. The main, more powerful model then
-        validates this entire chunk in a single, parallel forward pass. Tokens from the
-        chunk are accepted up to the first point of disagreement, and then the process
-        repeats. This is significantly faster than standard auto-regressive generation,
-        which requires one full forward pass for every single token.
-
-        This method is a generator, yielding `(accepted_chunk, surprise_value)` tuples
-        as they are produced, allowing for incremental streaming of the output.
-
-        Args:
-            inputs: A dataclass containing all necessary parameters for generation,
-                    including start tokens, max length, and sampling settings.
-
-        Yields:
-            A tuple containing:
-            - A tensor of the accepted token chunk (can be one or more tokens).
-            - A float representing the 'surprise' value calculated during this step.
+        Generates a sequence of tokens using speculative decoding, optimized with KV caching.
         """
+        from src.model.layers.kv_cache import KVCache, KVCacheConfig
+
         self.eval()
-        # Use the pre-initialized draft model. If it's not available (e.g., for
-        # very small models where the overhead isn't worth it), default to the main
-        # model itself, effectively falling back to auto-regressive sampling.
         draft_model = self.draft_model or self
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
 
+        # Initialize KV Cache for the main model.
+        d_k = self.config.model.d_model // self.config.model.num_heads
+        main_cache_config = KVCacheConfig(
+            num_layers=self.config.model.num_layers,
+            batch_size=tokens.shape[0],
+            num_kv_heads=self.config.model.num_kv_heads,
+            d_k=d_k,
+            max_seq_len=self.config.model.max_seq_len,
+        )
+        main_cache = KVCache(
+            main_cache_config,
+            device=self.device,
+            dtype=self.layers.embedding.weight.dtype
+        )
+
+        # Initial forward pass to populate the KV cache with the prompt.
+        # We use no_grad here to avoid keeping the prompt's graph in memory.
+        with torch.no_grad():
+            initial_logits, _, _ = self(
+                tokens[:, -self.config.model.max_seq_len :],
+                ltm_override=inputs.ltm_override,
+                kv_cache=main_cache
+            )
+            # The last logit is needed to predict the first speculative token.
+            last_logit = initial_logits[:, -1:, :]
+
         while total_generated < inputs.max_new_tokens:
-            # 1. Generate a speculative chunk using the smaller, faster draft model.
-            speculative_chunk, draft_tokens = self._generate_speculative_chunk(
+            # 1. Generate a speculative chunk using the draft model (optimized with its own KV cache).
+            speculative_chunk, _ = self._generate_speculative_chunk(
                 draft_model, tokens, inputs
             )
+            spec_len = speculative_chunk.size(1)
 
-            # 2. Run a single forward pass on the main model to get the true logits
-            # for the entire speculative sequence. Gradients are enabled to allow for
-            # the 'surprise' calculation for the LTM.
+            # 2. Run the main model on the speculative chunk.
             with torch.enable_grad():
                 true_logits, value, _ = self(
-                    draft_tokens[:, -self.config.model.max_seq_len :],
+                    speculative_chunk,
                     ltm_override=inputs.ltm_override,
+                    kv_cache=main_cache
                 )
 
-            # 3. Calculate the 'surprise' metric to determine if the LTM should be updated.
+            # 3. Calculate 'surprise' for LTM updates.
             surprise = self._calculate_surprise(value, inputs.ltm_override)
 
-            # 4. Validate the speculative chunk. We only need the logits corresponding
-            # to the newly generated tokens for this.
-            validation_logits = true_logits[:, -speculative_chunk.size(1) - 1 : -1, :]
+            # 4. Validate the speculative chunk.
+            # Combine the last known good logit with the new logits (excluding the last one).
+            all_validation_logits = torch.cat([last_logit, true_logits[:, :-1, :]], dim=1)
             accepted_chunk = self._validate_and_accept_chunk(
-                validation_logits, speculative_chunk, inputs
+                all_validation_logits, speculative_chunk, inputs
             )
 
-            # 5. Yield the accepted tokens and update the main sequence.
-            if accepted_chunk is not None:
-                yield accepted_chunk, surprise
+            # 5. Handle acceptance and cache rollback.
+            accepted_len = accepted_chunk.size(1)
+
+            # If there was a mismatch, we need to rollback the cache and re-process
+            # the corrected token to ensure the cache is consistent.
+            is_all_accepted = (accepted_len == spec_len) and torch.equal(accepted_chunk, speculative_chunk)
+
+            if not is_all_accepted:
+                # Rollback main_cache to the point before the first mismatch.
+                # We added spec_len tokens, we want to keep accepted_len - 1 tokens.
+                main_cache.rollback(spec_len - (accepted_len - 1))
+                # Update tokens and re-process the corrected token (the last one in accepted_chunk).
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
-                total_generated += accepted_chunk.size(1)
+                with torch.enable_grad():
+                    corrected_logits, _, _ = self(
+                        tokens[:, -1:],
+                        ltm_override=inputs.ltm_override,
+                        kv_cache=main_cache
+                    )
+                    last_logit = corrected_logits[:, -1:, :]
             else:
-                # This 'else' block is a fallback and should rarely be hit with the
-                # current validation logic. It handles the case where validation
-                # might fail entirely by reverting to standard auto-regressive sampling
-                # for one token to ensure progress is always made.
-                logits, _, _ = self(tokens[:, -self.config.model.max_seq_len :])
-                next_token = self._sample_from_logits(
-                    logits[:, -1, :],
-                    inputs.sampling_config.temperature,
-                    inputs.sampling_config.dynamic_top_k
-                    or inputs.sampling_config.top_k,
-                    inputs.sampling_config.top_p,
-                )
-                yield next_token, surprise
-                tokens = torch.cat((tokens, next_token), dim=1)
-                total_generated += 1
+                # Everything was accepted! Cache is already correct.
+                tokens = torch.cat((tokens, accepted_chunk), dim=1)
+                last_logit = true_logits[:, -1:, :]
+
+            # Detach the KV cache to prevent gradients from flowing across iterations,
+            # which would cause Autograd errors and slow down the process.
+            main_cache.detach()
+
+            yield accepted_chunk, surprise
+            total_generated += accepted_len
 
     def train(self, mode: bool = True):
         """

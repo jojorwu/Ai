@@ -47,6 +47,7 @@ class TestKVCache(unittest.TestCase):
             self.config.batch_size, self.config.num_kv_heads, seq_len, self.config.d_k
         )
         self.kv_cache.update(k_new, v_new, layer_idx)
+        self.kv_cache.increment_pos(seq_len)
         self.assertEqual(self.kv_cache.current_pos, seq_len)
         k_cached, v_cached = self.kv_cache.get(layer_idx)
         expected_shape = (
@@ -75,6 +76,7 @@ class TestKVCache(unittest.TestCase):
             self.config.d_k,
         )
         self.kv_cache.update(k1, v1, layer_idx)
+        self.kv_cache.increment_pos(seq_len_first)
         self.assertEqual(self.kv_cache.current_pos, seq_len_first)
         k2 = torch.randn(
             self.config.batch_size,
@@ -89,6 +91,7 @@ class TestKVCache(unittest.TestCase):
             self.config.d_k,
         )
         self.kv_cache.update(k2, v2, layer_idx)
+        self.kv_cache.increment_pos(seq_len_second)
 
         # The position should now be 12
         self.assertEqual(self.kv_cache.current_pos, seq_len_first + seq_len_second)
