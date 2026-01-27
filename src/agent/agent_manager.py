@@ -14,8 +14,7 @@ from src.agent.agent import Agent
 from src.agent.dataclasses import LTMConfig, SpecializationConfig
 from src.agent.evaluator import CollaborativeEvaluator
 from src.agent.factory import AgentFactory
-from src.agent.trainer import AgentTrainer
-from src.data.data_loader import get_batches_torch
+from src.agent.specializer import AgentSpecializer
 from src.model.model import Transformer
 
 
@@ -54,41 +53,13 @@ class AgentManager:
         self.agents = AgentFactory.create_population(
             self.base_model, self.num_agents, self.ltm_config
         )
+        self.specializer = AgentSpecializer()
 
     def specialize_agents_on_dataset(self, spec_config: SpecializationConfig, device):
         """
-        Conducts a "specialization" phase where each agent is trained on a
-        unique subset of the data, managed by its own AgentTrainer.
+        Delegates the specialization phase to the AgentSpecializer.
         """
-        if not spec_config.full_data:
-            return
-        data_tensor = torch.tensor(spec_config.full_data)
-        data_chunks = torch.tensor_split(data_tensor, self.num_agents)
-        logging.info("Specializing agents on different data subsets...")
-        for i, agent in enumerate(self.agents):
-            agent_trainer = AgentTrainer(agent)
-            agent_data = data_chunks[i].tolist()
-            if not agent_data or len(agent_data) < spec_config.seq_len + 1:
-                logging.info("  - Skipping %s, not enough data.", agent.agent_id)
-                continue
-            logging.info(
-                "  - Specializing %s on %d items...", agent.agent_id, len(agent_data)
-            )
-            batch_generator = get_batches_torch(
-                agent_data, spec_config.batch_size, spec_config.seq_len, device
-            )
-            steps_done = 0
-            for x_batch, y_batch, _ in batch_generator:
-                if steps_done >= spec_config.steps_per_agent:
-                    break
-                agent_trainer.experience(x_batch, y_batch)
-                steps_done += 1
-            if steps_done < spec_config.steps_per_agent:
-                logging.warning(
-                    "    - Only %d/%d steps were performed for %s.",
-                    steps_done, spec_config.steps_per_agent, agent.agent_id
-                )
-        logging.info("Agent specialization complete.")
+        self.specializer.specialize_agents(self.agents, spec_config, device)
 
     def merge_agents(self, best_agents: List[Agent]):
         """

@@ -11,7 +11,8 @@ from torch import nn
 from torch.optim import Adam
 
 from src.agent.dataclasses import LTMConfig
-from src.model.model import GenerateInput, SamplingConfig, Transformer
+from src.model.model import Transformer
+from src.model.structures import GenerateInput, SamplingConfig
 
 if TYPE_CHECKING:
     from src.model.layers.kv_cache import KVCache
