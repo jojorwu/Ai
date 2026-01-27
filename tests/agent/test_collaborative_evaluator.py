@@ -42,13 +42,13 @@ class TestCollaborativeEvaluator(unittest.TestCase):
             for i in range(3)
         ]
 
-    @patch('src.agent.evaluator.CollaborativeEvaluator._batch_critique')
-    def test_collaborative_evaluation_independent_success(self, mock_batch_critique):
+    @patch('src.agent.scoring.ScoringEngine.calculate_critique_score')
+    def test_collaborative_evaluation_independent_success(self, mock_critique_score):
         """Test collaboration evaluation for a successful independent response."""
         evaluator = CollaborativeEvaluator(self.agents, self.mock_model)
 
         # Mock the critique score to be high (successful)
-        mock_batch_critique.return_value = 0.9  # Above SUCCESS_THRESHOLD
+        mock_critique_score.return_value = 0.9  # Above SUCCESS_THRESHOLD
 
         # Mock tokenizer and evaluation data
         mock_tokenizer = MagicMock()
@@ -65,18 +65,18 @@ class TestCollaborativeEvaluator(unittest.TestCase):
         )
 
         # Check that agents received the correct reward
-        expected_reward = evaluator.REWARD_INDEPENDENT_SUCCESS * 0.9
+        expected_reward = evaluator.scoring_engine.reward_independent_success * 0.9
         for agent in self.agents:
             # In this simple case, each agent proposes once
             self.assertAlmostEqual(agent.get_fitness_score(), expected_reward, places=5)
 
-    @patch('src.agent.evaluator.CollaborativeEvaluator._batch_critique')
-    def test_collaborative_evaluation_asks_for_help_and_succeeds(self, mock_batch_critique):
+    @patch('src.agent.scoring.ScoringEngine.calculate_critique_score')
+    def test_collaborative_evaluation_asks_for_help_and_succeeds(self, mock_critique_score):
         """Test evaluation when an agent asks for help and gets a good response."""
         evaluator = CollaborativeEvaluator(self.agents, self.mock_model)
 
         # Mock the critique score to be high (successful help)
-        mock_batch_critique.return_value = 0.9
+        mock_critique_score.return_value = 0.9
 
         mock_tokenizer = MagicMock()
         mock_tokenizer.char_to_idx = {"<ASK_FOR_HELP>": 1, "<I_DONT_KNOW>": 2}
@@ -102,25 +102,25 @@ class TestCollaborativeEvaluator(unittest.TestCase):
         # Agent 0 is the proposer and asks for help
         proposer_score = self.agents[0].get_fitness_score()
         expected_proposer_score = (
-            evaluator.REWARD_ASKING_FOR_HELP + (evaluator.REWARD_GOOD_HELP * 0.9)
+            evaluator.scoring_engine.reward_asking_for_help + (evaluator.scoring_engine.reward_good_help * 0.9)
         )
         self.assertAlmostEqual(proposer_score, expected_proposer_score, places=5)
 
         # Agent 1 is the helper, and also proposes for itself
         helper_score = self.agents[1].get_fitness_score()
         expected_helper_score = (
-            evaluator.REWARD_GOOD_HELP * 0.9 + evaluator.REWARD_INDEPENDENT_SUCCESS * 0.9
+            evaluator.scoring_engine.reward_good_help * 0.9 + evaluator.scoring_engine.reward_independent_success * 0.9
         )
         self.assertAlmostEqual(helper_score, expected_helper_score, places=5)
 
         # Agent 2 also proposes for itself
         critic_score = self.agents[2].get_fitness_score()
-        expected_critic_score = evaluator.REWARD_INDEPENDENT_SUCCESS * 0.9
+        expected_critic_score = evaluator.scoring_engine.reward_independent_success * 0.9
         self.assertAlmostEqual(critic_score, expected_critic_score, places=5)
 
-    def test_batch_critique_handles_ltm_output_tuple(self):
+    def test_calculate_critique_score_handles_ltm_output_tuple(self):
         """
-        Tests that _batch_critique correctly unpacks the (context, complexity)
+        Tests that calculate_critique_score correctly unpacks the (context, complexity)
         tuple from the LTM.
         """
         evaluator = CollaborativeEvaluator(self.agents, self.mock_model)
@@ -136,10 +136,8 @@ class TestCollaborativeEvaluator(unittest.TestCase):
         self.mock_model.forward.return_value = (None, torch.tensor([[0.8], [0.7]]), None)
         self.mock_model.layers.embedding.return_value = torch.randn(2, 10, 16)
 
-        # Call the private method. If the bug is present, this will likely
-        # raise a TypeError or AttributeError.
-        # pylint: disable=protected-access
-        avg_score = evaluator._batch_critique(dummy_sequence, mock_ltms)
+        # Call the method on scoring_engine
+        avg_score = evaluator.scoring_engine.calculate_critique_score(self.mock_model, dummy_sequence, mock_ltms)
 
         # Assert that the score is a valid float, confirming the method ran successfully
         self.assertIsInstance(avg_score, float)

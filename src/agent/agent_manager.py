@@ -13,6 +13,7 @@ from torch import nn
 from src.agent.agent import Agent
 from src.agent.dataclasses import LTMConfig, SpecializationConfig
 from src.agent.evaluator import CollaborativeEvaluator
+from src.agent.factory import AgentFactory
 from src.agent.trainer import AgentTrainer
 from src.data.data_loader import get_batches_torch
 from src.model.model import Transformer
@@ -37,32 +38,22 @@ class AgentManager:
             base_model: The base Transformer model to be shared among agents.
             num_agents: The number of agents to create in the population.
             accelerator: The Accelerator object for distributed training.
+            evaluator: The evaluator used for agent performance assessment.
         """
         self.base_model = accelerator.unwrap_model(base_model)
         self.num_agents = num_agents
-        self.agents: List[Agent] = []
         self.accelerator = accelerator
         self.evaluator = evaluator
+
         self.ltm_config = LTMConfig(
             learning_rate=self.base_model.config.ltm.optimizer.learning_rate,
             surprise_threshold=self.base_model.config.ltm.surprise_threshold,
         )
-        self.fork_agents()
 
-    def fork_agents(self):
-        """
-        Creates a population of agents by cloning the base model.
-        Each agent shares the base model's weights but has a unique LTM.
-        """
-        logging.info("Cloning %d agents from the base model...", self.num_agents)
-        for i in range(self.num_agents):
-            agent = Agent(
-                base_model=self.base_model,
-                ltm_config=self.ltm_config,
-                agent_id=f"agent_{i}",
-            )
-            self.agents.append(agent)
-        logging.info("Agents cloned successfully.")
+        # Use AgentFactory for agent creation
+        self.agents = AgentFactory.create_population(
+            self.base_model, self.num_agents, self.ltm_config
+        )
 
     def specialize_agents_on_dataset(self, spec_config: SpecializationConfig, device):
         """

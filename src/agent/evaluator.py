@@ -14,6 +14,7 @@ from src.agent.dataclasses import (
     CritiqueScoringContext,
     IndependentResponseContext,
 )
+from src.agent.scoring import ScoringEngine
 
 
 class CollaborativeEvaluator:
@@ -21,17 +22,10 @@ class CollaborativeEvaluator:
     Manages the collaborative evaluation of a population of agents.
     """
 
-    REWARD_INDEPENDENT_SUCCESS = 5.0
-    PENALTY_INDEPENDENT_FAILURE = -5.0
-    REWARD_GOOD_HELP = 3.0
-    PENALTY_BAD_HELP = -3.0
-    REWARD_ASKING_FOR_HELP = 0.5
-    REWARD_ADMIT_IGNORANCE = 1.0
-    SUCCESS_THRESHOLD = 0.5
-
-    def __init__(self, agents: List[Agent], base_model: nn.Module):
+    def __init__(self, agents: List[Agent], base_model: nn.Module, scoring_engine: ScoringEngine = None):
         self.agents = agents
         self.base_model = base_model
+        self.scoring_engine = scoring_engine or ScoringEngine()
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
@@ -66,24 +60,11 @@ class CollaborativeEvaluator:
         ]
         return critics or [proposer]
 
-    def _apply_critique_based_scores(self, csc: CritiqueScoringContext):
-        """
-        Applies rewards or penalties to agents based on a critique score.
-        """
-        if csc.avg_critique_score > self.SUCCESS_THRESHOLD:
-            reward = csc.success_reward * csc.avg_critique_score
-            for agent in csc.agents_to_reward:
-                csc.scores[agent.agent_id] += reward
-        else:
-            penalty = csc.failure_penalty * (1 - csc.avg_critique_score)
-            for agent in csc.agents_to_penalize:
-                csc.scores[agent.agent_id] += penalty
-
     def _handle_collaboration_request(self, ctx: CollaborationContext):
         """
         Manages the 'ask for help' scenario in collaborative evaluation.
         """
-        ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
+        ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
 
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
@@ -99,18 +80,18 @@ class CollaborativeEvaluator:
         critic_ltms = [c.long_term_memory for c in critics]
 
         full_critique_sequence = torch.cat([context, new_helper_tokens], dim=1)
-        avg_critique_score = self._batch_critique(
-            full_critique_sequence.expand(len(critics), -1), critic_ltms
+        avg_critique_score = self.scoring_engine.calculate_critique_score(
+            self.base_model, full_critique_sequence.expand(len(critics), -1), critic_ltms
         )
         csc = CritiqueScoringContext(
             scores=ctx.scores,
             avg_critique_score=avg_critique_score,
-            success_reward=self.REWARD_GOOD_HELP,
-            failure_penalty=self.PENALTY_BAD_HELP,
+            success_reward=self.scoring_engine.reward_good_help,
+            failure_penalty=self.scoring_engine.penalty_bad_help,
             agents_to_reward=[helper, ctx.proposer],
             agents_to_penalize=[helper],
         )
-        self._apply_critique_based_scores(csc)
+        self.scoring_engine.apply_scores(csc)
 
     def _handle_independent_response(self, ctx: IndependentResponseContext):
         """
@@ -124,37 +105,19 @@ class CollaborativeEvaluator:
         ).expand(len(critics), -1)
         critic_ltms = [critic.long_term_memory for critic in critics]
 
-        avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
+        avg_critique_score = self.scoring_engine.calculate_critique_score(
+            self.base_model, full_sequence, critic_ltms
+        )
 
         csc = CritiqueScoringContext(
             scores=ctx.scores,
             avg_critique_score=avg_critique_score,
-            success_reward=self.REWARD_INDEPENDENT_SUCCESS,
-            failure_penalty=self.PENALTY_INDEPENDENT_FAILURE,
+            success_reward=self.scoring_engine.reward_independent_success,
+            failure_penalty=self.scoring_engine.penalty_independent_failure,
             agents_to_reward=[ctx.proposer],
             agents_to_penalize=[ctx.proposer],
         )
-        self._apply_critique_based_scores(csc)
-
-    def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
-        """
-        Performs a batched critique of a response using the base model.
-        """
-        with torch.no_grad():
-            h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
-                self.base_model.config.model.d_model
-            )
-            ltm_states = torch.zeros(
-                (len(critic_ltms), 1, h.size(2)), device=h.device, dtype=h.dtype
-            )
-            for i, ltm in enumerate(critic_ltms):
-                if ltm:
-                    ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
-                    ltm_states[i], _ = ltm(ltm_input)
-            _, values, _ = self.base_model.forward(
-                full_sequence, ltm_state=ltm_states
-            )
-        return values.mean().item()
+        self.scoring_engine.apply_scores(csc)
 
     def _finalize_evaluation(self, scores, top_k):
         """
@@ -205,7 +168,7 @@ class CollaborativeEvaluator:
                 )
                 self._handle_collaboration_request(ctx)
             elif tokens["i_dont_know"] in response_list:
-                scores[proposer.agent_id] += self.REWARD_ADMIT_IGNORANCE
+                scores[proposer.agent_id] += self.scoring_engine.reward_admit_ignorance
             else:
                 ctx = IndependentResponseContext(
                     proposer=proposer,
