@@ -6,50 +6,11 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Tuple
 
-import docx
 import numpy as np
-import PyPDF2
 import torch
 from PIL import Image
 
-
-# pylint: disable=broad-except
-def _read_txt(file_path: str) -> str:
-    """Extracts text from a .txt file."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except (IOError, OSError) as e:
-        logging.error("Error reading TXT file %s: %s", file_path, e)
-        return ""
-
-
-def _read_pdf(file_path: str) -> str:
-    """Extracts text from a .pdf file."""
-    text = []
-    try:
-        reader = PyPDF2.PdfReader(file_path)
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text.append(page_text)
-        return "\n".join(text)
-    except (IOError, OSError, PyPDF2.errors.PyPdfError) as e:
-        logging.error("Error reading PDF file %s: %s", file_path, e)
-        return ""
-
-
-def _read_docx(file_path: str) -> str:
-    """Extracts text from a .docx file."""
-    text = []
-    try:
-        doc = docx.Document(file_path)
-        for para in doc.paragraphs:
-            text.append(para.text)
-        return "\n".join(text)
-    except (IOError, OSError, docx.opc.exceptions.PackageNotFoundError) as e:
-        logging.error("Error reading DOCX file %s: %s", file_path, e)
-        return ""
+from src.data.file_parser import FileReader
 
 
 def _read_image(file_path: str) -> Optional[torch.Tensor]:
@@ -117,7 +78,11 @@ def load_multimodal_data_from_directory(
     """
     logging.info("Scanning directory '%s' for multimodal data...",
                  directory_path)
-    text_handlers = {'.txt': _read_txt, '.pdf': _read_pdf, '.docx': _read_docx}
+    text_handlers = {
+        '.txt': FileReader.read_txt,
+        '.pdf': FileReader.read_pdf,
+        '.docx': FileReader.read_docx
+    }
     image_extensions = {'.jpg', '.jpeg', '.png'}
     text_files = _find_text_files(directory_path, text_handlers)
     multimodal_data = []

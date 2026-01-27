@@ -4,31 +4,15 @@ PyTorch implementation of the Trainer class, which encapsulates the core trainin
 import logging
 import os
 from dataclasses import dataclass
-
+import torch
 from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from src.config.core import TrainConfig
-from src.config.model_config import TransformerConfig
+from src.config.core import TrainConfig, TransformerConfig
 from src.model.model import Transformer
 from .runners import (EvolutionRunner, PretrainingRunner, ValidationRunner)
 
-
-@dataclass
-class TrainingComponents:
-    """Core components for training."""
-    model: nn.Module
-    optimizer: Adam
-    scheduler: CosineAnnealingLR
-    value_loss_fn: nn.Module
-
-@dataclass
-class DataComponents:
-    """Data-related components for training."""
-    tokenizer: 'Tokenizer'
-    train_data: list
-    val_data: list
 
 class TrainingLoop:
     """Encapsulates the main training loop logic."""
@@ -133,17 +117,19 @@ class TrainingLoop:
 
 def create_trainer(
     config: TrainConfig,
-    data_components: "DataComponents",
+    tokenizer: "Tokenizer",
+    train_data: list,
+    val_data: list,
     accelerator: "Accelerator",
     load_in_4bit: bool = False,
 ) -> "Trainer":
     """Initializes and returns a Trainer instance."""
     transformer_config = TransformerConfig(
-        vocab_size=data_components.tokenizer.vocab_size,
+        vocab_size=tokenizer.vocab_size,
         model=config.model,
         vision=config.vision,
         ltm=config.ltm,
-        tokenizer=data_components.tokenizer,
+        tokenizer=tokenizer,
     )
     model = Transformer(transformer_config, load_in_4bit=load_in_4bit)
     optimizer = Adam(model.parameters(), lr=config.optimizer.learning_rate)
@@ -156,17 +142,10 @@ def create_trainer(
         model, optimizer, scheduler, value_loss_fn
     )
 
-    training_components = TrainingComponents(
-        model=model,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        value_loss_fn=value_loss_fn,
-    )
-
     validation_runner = ValidationRunner(
         model=model,
-        val_data=data_components.val_data,
-        tokenizer=data_components.tokenizer,
+        val_data=val_data,
+        tokenizer=tokenizer,
         evolution_config=config.evolution,
         accelerator=accelerator,
     )
@@ -175,22 +154,25 @@ def create_trainer(
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
-        train_data=data_components.train_data,
-        tokenizer=data_components.tokenizer,
+        train_data=train_data,
+        tokenizer=tokenizer,
         evolution_config=config.evolution,
         optimizer_config=config.optimizer,
     )
     evolution_runner = EvolutionRunner(
         accelerator=accelerator,
         model=model,
-        train_data=data_components.train_data,
-        val_data=data_components.val_data,
-        tokenizer=data_components.tokenizer,
+        train_data=train_data,
+        val_data=val_data,
+        tokenizer=tokenizer,
         evolution_config=config.evolution,
     )
 
     return Trainer(
-        components=training_components,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        value_loss_fn=value_loss_fn,
         config=config,
         accelerator=accelerator,
         validation_runner=validation_runner,
@@ -221,14 +203,20 @@ class Trainer:
 
     def __init__(
         self,
-        components: TrainingComponents,
+        model: nn.Module,
+        optimizer: Adam,
+        scheduler: CosineAnnealingLR,
+        value_loss_fn: nn.Module,
         config: TrainConfig,
         accelerator,
         validation_runner: ValidationRunner,
         pretraining_runner: PretrainingRunner,
         evolution_runner: EvolutionRunner,
     ):
-        self.components = components
+        self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.value_loss_fn = value_loss_fn
         self.config = config
         self.accelerator = accelerator
         self._validation_runner = validation_runner
@@ -237,11 +225,11 @@ class Trainer:
 
     def get_model(self) -> nn.Module:
         """Returns the underlying model."""
-        return self.components.model
+        return self.model
 
     def get_learning_rate(self) -> float:
         """Returns the current learning rate from the scheduler."""
-        return self.components.scheduler.get_last_lr()[0]
+        return self.scheduler.get_last_lr()[0]
 
     def run_validation(self) -> float:
         """Delegates validation to the ValidationRunner."""
@@ -255,7 +243,16 @@ class Trainer:
         """Delegates the evolution cycle to the EvolutionRunner."""
         return self._evolution_runner.run()
 
-    def train(self, checkpoint_dir: str, resume_from: str | None):
-        """Executes the main training loop."""
+    def save_final_model(self, model_dir: str):
+        """Saves the final, unwrapped model for easy inference."""
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        output_path = os.path.join(model_dir, "model.pt")
+        torch.save(unwrapped_model.state_dict(), output_path)
+        logging.info("\nTraining complete! Final model saved to: %s", output_path)
+
+    def train(self, checkpoint_dir: str, model_dir: str, resume_from: str | None):
+        """Executes the main training loop and saves the final model."""
         loop = TrainingLoop(self, self.config)
         loop.run(checkpoint_dir, resume_from)
+        if self.accelerator.is_main_process:
+            self.save_final_model(model_dir)

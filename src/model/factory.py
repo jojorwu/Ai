@@ -8,8 +8,8 @@ from typing import Union
 import torch
 from accelerate import dispatch_model
 
-from src.config.core import GenerateConfig, HardwareConfig, TrainConfig
-from src.config.model_config import TransformerConfig
+from src.config.core import (GenerateConfig, HardwareConfig, TrainConfig,
+                             TransformerConfig)
 from src.data.tokenizer import Tokenizer
 from src.model.model import Transformer
 

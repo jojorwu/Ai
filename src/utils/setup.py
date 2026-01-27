@@ -8,11 +8,8 @@ from dataclasses import dataclass
 from typing import Type, Union
 
 from src.config.core import GenerateConfig, TrainConfig
-from src.utils.cli import (
-    apply_cli_args_to_config,
-    create_main_parser,
-    select_model_interactively,
-)
+from src.utils.cli import create_main_parser
+from src.utils.interaction import select_model_interactively
 
 
 @dataclass
@@ -52,7 +49,7 @@ def setup_from_args(
         )
 
     config = config_class.from_json(config_path)
-    apply_cli_args_to_config(args, config)
+    config.apply_cli_args(args)
 
     return AppSetup(args=args, config=config, model_name=model_name)
 

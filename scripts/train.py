@@ -11,7 +11,7 @@ from src.config.core import TrainConfig
 from src.training.setup import prepare_training_environment
 from src.training.trainer import create_trainer
 from src.utils.cli import make_model_name_required
-from src.utils.cli import main_entrypoint
+from src.utils.decorators import main_entrypoint
 from src.utils.setup import setup_from_args
 
 
@@ -23,6 +23,7 @@ def add_training_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--wandb", action="store_true", help="Enable Weights & Biases logging."
     )
+    make_model_name_required(parser)
 
 
 @main_entrypoint
@@ -32,19 +33,15 @@ def main():
     env = prepare_training_environment(app_setup.args)
 
     trainer = create_trainer(
-        env.config, env.data_components, env.accelerator, app_setup.args.load_in_4bit
+        config=env.config,
+        tokenizer=env.tokenizer,
+        train_data=env.train_data,
+        val_data=env.val_data,
+        accelerator=env.accelerator,
+        load_in_4bit=app_setup.args.load_in_4bit,
     )
 
-    trainer.train(env.checkpoint_dir, app_setup.args.resume_from)
-
-    # Save the final, unwrapped model for easy inference
-    unwrapped_model = env.accelerator.unwrap_model(trainer.get_model())
-    torch.save(
-        unwrapped_model.state_dict(), os.path.join(env.model_dir, "model.pt")
-    )
-    logging.info(
-        "\nTraining complete! Final model saved to: %s", env.model_dir
-    )
+    trainer.train(env.checkpoint_dir, env.model_dir, app_setup.args.resume_from)
 
 
 if __name__ == "__main__":

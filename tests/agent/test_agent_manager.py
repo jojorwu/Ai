@@ -8,9 +8,10 @@ import torch
 from accelerate import Accelerator
 
 from src.agent.agent_manager import AgentManager
-from src.config.model_config import TransformerConfig
+from src.agent.evaluator import CollaborativeEvaluator
+from src.config.core import TransformerConfig
 from src.model.model import Transformer
-from tests.test_utils import create_test_config_and_data
+from tests.test_utils import create_test_config, MockTokenizer
 
 
 class TestAgentManager(unittest.TestCase):
@@ -18,7 +19,8 @@ class TestAgentManager(unittest.TestCase):
 
     def test_merge_agents_averages_ltm_weights(self):
         """Test that merge_agents correctly averages the LTM weights."""
-        config, tokenizer, _, _ = create_test_config_and_data()
+        config = create_test_config()
+        tokenizer = MockTokenizer()
         transformer_config = TransformerConfig(
             vocab_size=tokenizer.vocab_size,
             model=config.model,
@@ -29,9 +31,10 @@ class TestAgentManager(unittest.TestCase):
         model = Transformer(transformer_config)
         accelerator = Accelerator()
         model = accelerator.prepare(model)
+        evaluator = CollaborativeEvaluator(agents=[], base_model=model)
 
         manager = AgentManager(
-            model, num_agents=2, accelerator=accelerator
+            model, num_agents=2, accelerator=accelerator, evaluator=evaluator
         )
 
         # Get the structure of the LTM state_dict from the base model

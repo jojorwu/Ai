@@ -7,9 +7,10 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from src.agent.agent import Agent
+from src.agent.dataclasses import LTMConfig
 from src.agent.evaluator import CollaborativeEvaluator
-from src.config.core import TrainConfig
 from src.model.model import Transformer
+from tests.test_utils import create_test_config
 
 
 class TestCollaborativeEvaluator(unittest.TestCase):
@@ -17,7 +18,7 @@ class TestCollaborativeEvaluator(unittest.TestCase):
 
     def setUp(self):
         """Set up a mock model and config for testing."""
-        self.mock_config = TrainConfig.from_json('config_train.json')
+        self.mock_config = create_test_config()
         self.mock_model = MagicMock(spec=Transformer)
         self.mock_model.config = self.mock_config
 
@@ -30,7 +31,16 @@ class TestCollaborativeEvaluator(unittest.TestCase):
         self.mock_model.layers = mock_layers
         self.mock_model.device = 'cpu'
 
-        self.agents = [Agent(self.mock_model, agent_id=f"agent_{i}") for i in range(3)]
+        # Create a mock LTMConfig
+        self.ltm_config = LTMConfig(
+            learning_rate=0.001,
+            surprise_threshold=0.1
+        )
+
+        self.agents = [
+            Agent(self.mock_model, self.ltm_config, agent_id=f"agent_{i}")
+            for i in range(3)
+        ]
 
     @patch('src.agent.evaluator.CollaborativeEvaluator._batch_critique')
     def test_collaborative_evaluation_independent_success(self, mock_batch_critique):

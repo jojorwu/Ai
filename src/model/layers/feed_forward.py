@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.config.model_config import FeedForwardConfig
+from src.config.core import FeedForwardConfig
 from src.model.layers.linear import Linear
 
 
