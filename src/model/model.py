@@ -48,6 +48,8 @@ class GenerateInput:
     sampling_config: SamplingConfig = field(default_factory=SamplingConfig)
     speculative_config: SpeculativeConfig = field(default_factory=SpeculativeConfig)
     ltm_override: nn.Module | None = None
+    kv_cache: 'KVCache' = None
+    draft_cache: 'KVCache' = None
 
 
 class Transformer(nn.Module, GenerationMixin):
@@ -212,23 +214,27 @@ class Transformer(nn.Module, GenerationMixin):
         tokens = inputs.start_tokens.to(self.device)
         total_generated = 0
 
-        # Initialize KV Cache for the main model.
-        d_k = self.config.model.d_model // self.config.model.num_heads
-        main_cache_config = KVCacheConfig(
-            num_layers=self.config.model.num_layers,
-            batch_size=tokens.shape[0],
-            num_kv_heads=self.config.model.num_kv_heads,
-            d_k=d_k,
-            max_seq_len=self.config.model.max_seq_len,
-        )
-        main_cache = KVCache(
-            main_cache_config,
-            device=self.device,
-            dtype=self.layers.embedding.weight.dtype
-        )
+        # Use provided KV caches or initialize new ones.
+        if inputs.kv_cache is not None:
+            main_cache = inputs.kv_cache
+        else:
+            d_k = self.config.model.d_model // self.config.model.num_heads
+            main_cache_config = KVCacheConfig(
+                num_layers=self.config.model.num_layers,
+                batch_size=tokens.shape[0],
+                num_kv_heads=self.config.model.num_kv_heads,
+                d_k=d_k,
+                max_seq_len=self.config.model.max_seq_len,
+            )
+            main_cache = KVCache(
+                main_cache_config,
+                device=self.device,
+                dtype=self.layers.embedding.weight.dtype
+            )
 
-        # Initialize KV Cache for the draft model.
-        if draft_model is not self:
+        if inputs.draft_cache is not None:
+            draft_cache = inputs.draft_cache
+        elif draft_model is not self:
             draft_cache_config = KVCacheConfig(
                 num_layers=draft_model.config.model.num_layers,
                 batch_size=tokens.shape[0],

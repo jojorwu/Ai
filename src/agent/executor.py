@@ -27,6 +27,9 @@ class AgentExecutor:
         """Keeps track of the agent's state during a conversation."""
         conversation_history_tokens: List[int]
         complexity_manager: ComplexityManager = None
+        main_cache: 'KVCache' = None
+        draft_cache: 'KVCache' = None
+
     """
     Handles the main execution loop of the agent, including the
     "thought -> tool -> observation" cycle.
@@ -78,10 +81,55 @@ class AgentExecutor:
         )
 
     def _generate_model_response(self, agent_state: AgentState) -> List[int]:
-        """Generates a response from the model."""
-        input_tokens = torch.tensor(
-            [agent_state.conversation_history_tokens], device=self.accelerator.device
-        )
+        """Generates a response from the model, utilizing persistent KV caching."""
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+
+        # Initialize KV Caches if they don't exist yet.
+        if agent_state.main_cache is None:
+            from src.model.layers.kv_cache import KVCache, KVCacheConfig
+            d_k = unwrapped_model.config.model.d_model // unwrapped_model.config.model.num_heads
+
+            agent_state.main_cache = KVCache(
+                KVCacheConfig(
+                    num_layers=unwrapped_model.config.model.num_layers,
+                    batch_size=1,
+                    num_kv_heads=unwrapped_model.config.model.num_kv_heads,
+                    d_k=d_k,
+                    max_seq_len=unwrapped_model.config.model.max_seq_len,
+                ),
+                device=self.accelerator.device,
+                dtype=unwrapped_model.layers.embedding.weight.dtype
+            )
+
+            if unwrapped_model.draft_model and unwrapped_model.draft_model is not unwrapped_model:
+                agent_state.draft_cache = KVCache(
+                    KVCacheConfig(
+                        num_layers=unwrapped_model.draft_model.config.model.num_layers,
+                        batch_size=1,
+                        num_kv_heads=unwrapped_model.draft_model.config.model.num_kv_heads,
+                        d_k=unwrapped_model.draft_model.config.model.d_model // unwrapped_model.draft_model.config.model.num_heads,
+                        max_seq_len=unwrapped_model.draft_model.config.model.max_seq_len,
+                    ),
+                    device=self.accelerator.device,
+                    dtype=unwrapped_model.layers.embedding.weight.dtype
+                )
+            else:
+                agent_state.draft_cache = agent_state.main_cache
+
+        # When using persistent cache, we only pass the NEW tokens to generate.
+        # But for the very first call, we pass the entire history.
+        # We determine "new tokens" by comparing history tokens with the current cache position.
+        cached_len = agent_state.main_cache.current_pos
+        new_tokens = agent_state.conversation_history_tokens[cached_len:]
+
+        if not new_tokens:
+            # Fallback if no new tokens are found (should not happen in normal turns).
+            input_tokens = torch.tensor(
+                [agent_state.conversation_history_tokens[-1:]], device=self.accelerator.device
+            )
+        else:
+            input_tokens = torch.tensor([new_tokens], device=self.accelerator.device)
+
         dynamic_top_k = (
             agent_state.complexity_manager.get_top_k()
             if agent_state.complexity_manager
@@ -107,10 +155,11 @@ class AgentExecutor:
             max_new_tokens=self.config.generation.max_len,
             sampling_config=sampling_config,
             speculative_config=speculative_config,
+            kv_cache=agent_state.main_cache,
+            draft_cache=agent_state.draft_cache,
         )
 
         newly_generated_tokens = []
-        unwrapped_model = self.accelerator.unwrap_model(self.model)
         for chunk, surprise in unwrapped_model.generate(gen_input):
             newly_generated_tokens.extend(chunk[0].tolist())
             if agent_state.complexity_manager:

@@ -29,7 +29,7 @@ class RMSNorm(nn.Module):
 
         # Calculate the root mean square using rsqrt for efficiency
         # rms = 1 / sqrt(mean(x^2) + eps)
-        inv_rms = torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        inv_rms = torch.rsqrt(x.square().mean(-1, keepdim=True) + self.eps)
 
         # Normalize the input, scale by gamma, and cast back to original dtype
         return (x * inv_rms).to(input_dtype) * self.gamma

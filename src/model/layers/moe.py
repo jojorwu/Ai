@@ -51,10 +51,17 @@ class MixtureOfExperts(nn.Module):
 
         # 1. Route tokens to experts
         router_logits = self.gate(x_reshaped)
-        routing_weights, selected_experts = torch.topk(
-            router_logits, current_top_k, dim=-1
-        )
-        routing_weights = F.softmax(routing_weights, dim=-1, dtype=torch.float32)
+
+        if current_top_k == 1:
+            # Optimized path for top_k=1
+            routing_weights, selected_experts = router_logits.max(dim=-1, keepdim=True)
+            # Softmax on a single value is always 1.0, so we just use 1.0 directly.
+            routing_weights = torch.ones_like(routing_weights)
+        else:
+            routing_weights, selected_experts = torch.topk(
+                router_logits, current_top_k, dim=-1
+            )
+            routing_weights = F.softmax(routing_weights, dim=-1, dtype=torch.float32)
 
         # 2. Compute auxiliary load balancing loss
         aux_loss = self._compute_aux_loss(router_logits, selected_experts, batch_size, seq_len)

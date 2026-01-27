@@ -112,7 +112,6 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
             logits,
             y,
             smoothing=self.evolution_config.label_smoothing,
-            vocab_size=self.tokenizer.vocab_size,
         )
         total_loss = policy_loss + (
             self.evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
@@ -178,7 +177,6 @@ class ValidationRunner:  # pylint: disable=too-few-public-methods
                     logits,
                     y,
                     smoothing=self.evolution_config.label_smoothing,
-                    vocab_size=self.tokenizer.vocab_size,
                 )
                 total_loss += loss.item()
                 num_batches += 1
