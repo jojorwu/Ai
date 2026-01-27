@@ -77,9 +77,9 @@ class Agent:
         max_new_tokens: int = 50,
         kv_cache: 'KVCache' = None,
         draft_cache: 'KVCache' = None,
-    ):
+    ) -> torch.Tensor:
         """
-        Generates a response based on a prompt, utilizing optional KV caches.
+        Generates a full response tensor based on a prompt, utilizing optional KV caches.
         """
         self.base_model.eval()
         if self.long_term_memory:
@@ -97,4 +97,10 @@ class Agent:
             kv_cache=kv_cache,
             draft_cache=draft_cache,
         )
-        return self.base_model.generate(generate_input)
+
+        # Accumulate all chunks from the generator
+        full_response = prompt_tokens
+        for chunk, _ in self.base_model.generate(generate_input):
+            full_response = torch.cat([full_response, chunk], dim=1)
+
+        return full_response

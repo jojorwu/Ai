@@ -12,6 +12,7 @@ from torch.nn import functional as F
 
 from src.config.core import TransformerConfig
 from src.model.generation import GenerationMixin
+from src.model.generator import TextGenerator
 from src.model.initializer import ModelInitializer
 from src.model.structures import ModelLayers, RopeEmbeddings
 from src.model.layers.decoder_block import DecoderBlock, ForwardPassInput
@@ -77,6 +78,9 @@ class Transformer(nn.Module, GenerationMixin):
 
         # Weight tying: share weights between embedding and policy head
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
+
+        # Generation pipeline
+        self.generator = TextGenerator(self)
 
     def count_parameters(self):
         """Counts the number of trainable parameters in the model."""
@@ -205,129 +209,9 @@ class Transformer(nn.Module, GenerationMixin):
         self, inputs: GenerateInput
     ) -> Generator[Tuple[torch.Tensor, float], None, None]:
         """
-        Generates a sequence of tokens using speculative decoding, optimized with KV caching.
+        Generates a sequence of tokens, delegating to the TextGenerator pipeline.
         """
-        from src.model.layers.kv_cache import KVCache, KVCacheConfig
-
-        self.eval()
-        draft_model = self.draft_model or self
-        tokens = inputs.start_tokens.to(self.device)
-        total_generated = 0
-
-        # Use provided KV caches or initialize new ones.
-        if inputs.kv_cache is not None:
-            main_cache = inputs.kv_cache
-        else:
-            d_k = self.config.model.d_model // self.config.model.num_heads
-            main_cache_config = KVCacheConfig(
-                num_layers=self.config.model.num_layers,
-                batch_size=tokens.shape[0],
-                num_kv_heads=self.config.model.num_kv_heads,
-                d_k=d_k,
-                max_seq_len=self.config.model.max_seq_len,
-            )
-            main_cache = KVCache(
-                main_cache_config,
-                device=self.device,
-                dtype=self.layers.embedding.weight.dtype
-            )
-
-        if inputs.draft_cache is not None:
-            draft_cache = inputs.draft_cache
-        elif draft_model is not self:
-            draft_cache_config = KVCacheConfig(
-                num_layers=draft_model.config.model.num_layers,
-                batch_size=tokens.shape[0],
-                num_kv_heads=draft_model.config.model.num_kv_heads,
-                d_k=draft_model.config.model.d_model // draft_model.config.model.num_heads,
-                max_seq_len=draft_model.config.model.max_seq_len,
-            )
-            draft_cache = KVCache(
-                draft_cache_config,
-                device=self.device,
-                dtype=self.layers.embedding.weight.dtype
-            )
-        else:
-            draft_cache = main_cache
-
-        # Initial forward pass to populate the KV cache with the prompt.
-        # We use no_grad here to avoid keeping the prompt's graph in memory.
-        with torch.no_grad():
-            initial_logits, _, _ = self(
-                tokens[:, -self.config.model.max_seq_len :],
-                ltm_override=inputs.ltm_override,
-                kv_cache=main_cache
-            )
-            # The last logit is needed to predict the first speculative token.
-            last_logit = initial_logits[:, -1:, :]
-
-        while total_generated < inputs.max_new_tokens:
-            # 1. Generate a speculative chunk using the draft model.
-            speculative_chunk, _ = self._generate_speculative_chunk(
-                draft_model, tokens, inputs, draft_cache=draft_cache
-            )
-            spec_len = speculative_chunk.size(1)
-
-            # 2. Run the main model on the speculative chunk.
-            with torch.enable_grad():
-                true_logits, value, _ = self(
-                    speculative_chunk,
-                    ltm_override=inputs.ltm_override,
-                    kv_cache=main_cache
-                )
-
-            # 3. Calculate 'surprise' for LTM updates.
-            surprise = self._calculate_surprise(value, inputs.ltm_override)
-
-            # 4. Validate the speculative chunk.
-            # Combine the last known good logit with the new logits (excluding the last one).
-            all_validation_logits = torch.cat([last_logit, true_logits[:, :-1, :]], dim=1)
-            accepted_chunk = self._validate_and_accept_chunk(
-                all_validation_logits, speculative_chunk, inputs
-            )
-
-            # 5. Handle acceptance and cache rollback.
-            accepted_len = accepted_chunk.size(1)
-
-            # If there was a mismatch, we need to rollback the cache and re-process
-            # the corrected token to ensure the cache is consistent.
-            is_all_accepted = (accepted_len == spec_len) and torch.equal(accepted_chunk, speculative_chunk)
-
-            if not is_all_accepted:
-                # Rollback caches to the point before the first mismatch.
-                # We added spec_len tokens, we want to keep accepted_len - 1 tokens.
-                rollback_len = spec_len - (accepted_len - 1)
-                main_cache.rollback(rollback_len)
-                if draft_cache is not main_cache:
-                    draft_cache.rollback(rollback_len)
-
-                # Update tokens and re-process the corrected token (the last one in accepted_chunk).
-                tokens = torch.cat((tokens, accepted_chunk), dim=1)
-                with torch.enable_grad():
-                    corrected_logits, _, _ = self(
-                        tokens[:, -1:],
-                        ltm_override=inputs.ltm_override,
-                        kv_cache=main_cache
-                    )
-                    # Also update the draft cache with the corrected token
-                    if draft_cache is not main_cache:
-                        with torch.no_grad():
-                            draft_model(tokens[:, -1:], kv_cache=draft_cache)
-
-                    last_logit = corrected_logits[:, -1:, :]
-            else:
-                # Everything was accepted! Cache is already correct.
-                tokens = torch.cat((tokens, accepted_chunk), dim=1)
-                last_logit = true_logits[:, -1:, :]
-
-            # Detach the KV cache to prevent gradients from flowing across iterations,
-            # which would cause Autograd errors and slow down the process.
-            main_cache.detach()
-            if draft_cache is not main_cache:
-                draft_cache.detach()
-
-            yield accepted_chunk, surprise
-            total_generated += accepted_len
+        return self.generator.generate(inputs)
 
     def train(self, mode: bool = True):
         """
