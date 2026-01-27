@@ -83,7 +83,11 @@ class GenerationMixin:
         return surprise
 
     def _generate_speculative_chunk(
-        self, draft_model: "Transformer", tokens: torch.Tensor, inputs: "GenerateInput"
+        self,
+        draft_model: "Transformer",
+        tokens: torch.Tensor,
+        inputs: "GenerateInput",
+        draft_cache: "KVCache" = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Generates a small 'draft' chunk of tokens using a faster, smaller model,
@@ -91,27 +95,34 @@ class GenerationMixin:
         """
         from src.model.layers.kv_cache import KVCache, KVCacheConfig
 
-        # Initialize KV Cache for the draft model for efficient generation
-        d_k = draft_model.config.model.d_model // draft_model.config.model.num_heads
-        draft_cache_config = KVCacheConfig(
-            num_layers=draft_model.config.model.num_layers,
-            batch_size=tokens.shape[0],
-            num_kv_heads=draft_model.config.model.num_kv_heads,
-            d_k=d_k,
-            max_seq_len=draft_model.config.model.max_seq_len,
-        )
-        draft_cache = KVCache(
-            draft_cache_config,
-            device=tokens.device,
-            dtype=self.layers.embedding.weight.dtype
-        )
+        # Initialize KV Cache for the draft model if not provided
+        if draft_cache is None:
+            d_k = draft_model.config.model.d_model // draft_model.config.model.num_heads
+            draft_cache_config = KVCacheConfig(
+                num_layers=draft_model.config.model.num_layers,
+                batch_size=tokens.shape[0],
+                num_kv_heads=draft_model.config.model.num_kv_heads,
+                d_k=d_k,
+                max_seq_len=draft_model.config.model.max_seq_len,
+            )
+            draft_cache = KVCache(
+                draft_cache_config,
+                device=tokens.device,
+                dtype=self.layers.embedding.weight.dtype,
+            )
 
         draft_tokens = tokens
         with torch.no_grad():
-            # 1. Initial forward pass to populate the KV cache with the prompt.
-            # We only need the last max_seq_len tokens.
-            prefix = tokens[:, -draft_model.config.model.max_seq_len:]
-            draft_logits, _, _ = draft_model(prefix, kv_cache=draft_cache)
+            # 1. Populate the KV cache with the prompt if it's empty.
+            if draft_cache.current_pos == 0:
+                prefix = tokens[:, -draft_model.config.model.max_seq_len :]
+                draft_logits, _, _ = draft_model(prefix, kv_cache=draft_cache)
+            else:
+                # If cache is not empty, we assume the last token of `tokens` is already in it.
+                # To get the logits for the last token without duplicating it in the cache,
+                # we rollback by 1 and then re-process it.
+                draft_cache.rollback(1)
+                draft_logits, _, _ = draft_model(tokens[:, -1:], kv_cache=draft_cache)
 
             # 2. Iteratively generate speculative tokens.
             for i in range(inputs.speculative_config.speculative_steps):
@@ -124,10 +135,8 @@ class GenerationMixin:
                 )
                 draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
 
-                # 3. Update the KV cache with the new token for the next iteration,
-                # but only if we're not at the last speculative step.
-                if i < inputs.speculative_config.speculative_steps - 1:
-                    draft_logits, _, _ = draft_model(next_token, kv_cache=draft_cache)
+                # 3. Update the KV cache with the new token for the next iteration.
+                draft_logits, _, _ = draft_model(next_token, kv_cache=draft_cache)
 
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 

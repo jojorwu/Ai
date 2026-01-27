@@ -71,26 +71,30 @@ class KVCache:
         """Rolls back the cache position by a certain number of tokens."""
         self.current_pos = max(0, self.current_pos - num_tokens)
 
-    def get(self, layer_idx: int):
+    def get(self, layer_idx: int, seq_len: int = 0):
         """
         Retrieves the cached keys and values for a specific layer in correct chronological order.
+        Includes `seq_len` additional tokens that were just added via `update` but not yet
+        accounted for in `self.current_pos`.
         """
-        if self.current_pos == 0:
+        effective_pos = self.current_pos + seq_len
+        if effective_pos == 0:
             return (
                 self.k_cache[layer_idx, :, :, :0, :],
                 self.v_cache[layer_idx, :, :, :0, :]
             )
 
-        if self.current_pos <= self.config.max_seq_len:
+        if effective_pos <= self.config.max_seq_len:
             # Cache is not yet full, no wrap-around needed for retrieval
             return (
-                self.k_cache[layer_idx, :, :, :self.current_pos, :],
-                self.v_cache[layer_idx, :, :, :self.current_pos, :]
+                self.k_cache[layer_idx, :, :, :effective_pos, :],
+                self.v_cache[layer_idx, :, :, :effective_pos, :]
             )
 
         # Cache is full or has wrapped around.
-        # current_pos % max_seq_len is the index of the OLDEST token.
-        pos = self.current_pos % self.config.max_seq_len
+        # effective_pos % max_seq_len is the index of the "next" token to be overwritten,
+        # which means it's the index of the OLDEST token if we've wrapped around.
+        pos = effective_pos % self.config.max_seq_len
         if pos == 0:
             # Perfectly aligned
             return self.k_cache[layer_idx], self.v_cache[layer_idx]

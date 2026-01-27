@@ -19,6 +19,16 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self._validate_config(config)
         self.config = config
+
+        # Store frequently used attributes as instance variables to avoid
+        # repeated dictionary lookups in the forward pass.
+        self.num_heads = config.num_heads
+        self.num_kv_heads = config.num_kv_heads
+        self.n_rep = config.num_heads // config.num_kv_heads
+        self.head_dim = config.d_model // config.num_heads
+        self.q_dim = self.head_dim * self.num_heads
+        self.kv_dim = self.head_dim * self.num_kv_heads
+
         self.attention = ScaledDotProductAttention()
         self.qkv_proj, self.wo = self._create_projections(config, linear_class)
 
@@ -45,8 +55,7 @@ class MultiHeadAttention(nn.Module):
     def _split_heads(self, x: torch.Tensor, num_heads: int) -> torch.Tensor:
         """Splits the last dimension into (heads, d_k) and transposes."""
         batch_size, seq_len, _ = x.shape
-        d_k = self.config.d_model // self.config.num_heads
-        return x.view(batch_size, seq_len, num_heads, d_k).transpose(1, 2)
+        return x.view(batch_size, seq_len, num_heads, self.head_dim).transpose(1, 2)
 
     def _combine_heads(self, x: torch.Tensor) -> torch.Tensor:
         """Merges the head and d_k dimensions back."""
@@ -72,13 +81,10 @@ class MultiHeadAttention(nn.Module):
         seq_len = x.shape[1]
         seq_offset = kv_cache.current_pos if kv_cache is not None else 0
         qkv = self.qkv_proj(x)
-        d_k = self.config.d_model // self.config.num_heads
-        q_dim = d_k * self.config.num_heads
-        kv_dim = d_k * self.config.num_kv_heads
-        q_proj, k_proj, v_proj = qkv.split([q_dim, kv_dim, kv_dim], dim=-1)
-        q_proj = self._split_heads(q_proj, self.config.num_heads)
-        k_proj = self._split_heads(k_proj, self.config.num_kv_heads)
-        v_proj = self._split_heads(v_proj, self.config.num_kv_heads)
+        q_proj, k_proj, v_proj = qkv.split([self.q_dim, self.kv_dim, self.kv_dim], dim=-1)
+        q_proj = self._split_heads(q_proj, self.num_heads)
+        k_proj = self._split_heads(k_proj, self.num_kv_heads)
+        v_proj = self._split_heads(v_proj, self.num_kv_heads)
         return q_proj, k_proj, v_proj, seq_len, seq_offset
 
     def _apply_rope(self, q: torch.Tensor, k: torch.Tensor, seq_offset: int):
@@ -89,24 +95,29 @@ class MultiHeadAttention(nn.Module):
             k = apply_rope_embeddings(k, cos, sin, seq_offset)
         return q, k
 
-    def _get_updated_kv(self, k: torch.Tensor, v: torch.Tensor, kv_cache, layer_idx):
+    def _get_updated_kv(self, k: torch.Tensor, v: torch.Tensor, kv_cache, layer_idx, seq_len: int):
         """Updates and retrieves K and V from the cache."""
         if kv_cache is not None:
             kv_cache.update(k, v, layer_idx)
-            k, v = kv_cache.get(layer_idx)
+            k, v = kv_cache.get(layer_idx, seq_len=seq_len)
         return k, v
 
     def forward(self, x: torch.Tensor, kv_cache=None, layer_idx=None):
         """Forward pass of the GQA layer."""
+        seq_len = x.shape[1]
         q, k, v, _, seq_offset = self._prepare_qkv(x, kv_cache)
         q, k = self._apply_rope(q, k, seq_offset)
-        k, v = self._get_updated_kv(k, v, kv_cache, layer_idx)
+        k, v = self._get_updated_kv(k, v, kv_cache, layer_idx, seq_len)
 
-        n_rep = self.config.num_heads // self.config.num_kv_heads
-        k = self._repeat_kv(k, n_rep)
-        v = self._repeat_kv(v, n_rep)
+        k = self._repeat_kv(k, self.n_rep)
+        v = self._repeat_kv(v, self.n_rep)
 
-        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=kv_cache is None)
+        # Causal masking is required during prompt processing and speculative
+        # decoding chunk validation (seq_len > 1). For single-token generation
+        # (seq_len == 1), is_causal=True is also correct and efficient.
+        is_causal = (kv_cache is None) or (seq_len > 0) # Effectively always True for decoder-only
+
+        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal)
         attention_output = self.attention(attn_input)
         combined_output = self._combine_heads(attention_output)
         return self.wo(combined_output)

@@ -105,6 +105,28 @@ class TestKVCache(unittest.TestCase):
         k_expected = torch.cat([k1[:, :, -5:], k2[:, :, :5]], dim=2)
         self.assertTrue(torch.equal(k_cached, k_expected))
 
+    def test_get_with_seq_len(self):
+        """Tests that get(seq_len=...) includes tokens from a recent update."""
+        layer_idx, seq_len = 0, 3
+        k_new = torch.randn(
+            self.config.batch_size, self.config.num_kv_heads, seq_len, self.config.d_k
+        )
+        v_new = torch.randn(
+            self.config.batch_size, self.config.num_kv_heads, seq_len, self.config.d_k
+        )
+
+        # Update but DON'T increment_pos yet (simulating layer forward pass)
+        self.kv_cache.update(k_new, v_new, layer_idx)
+
+        # Regular get should be empty
+        k_empty, _ = self.kv_cache.get(layer_idx)
+        self.assertEqual(k_empty.shape[2], 0)
+
+        # get with seq_len should have the new tokens
+        k_full, _ = self.kv_cache.get(layer_idx, seq_len=seq_len)
+        self.assertEqual(k_full.shape[2], seq_len)
+        self.assertTrue(torch.equal(k_full, k_new))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -227,6 +227,23 @@ class Transformer(nn.Module, GenerationMixin):
             dtype=self.layers.embedding.weight.dtype
         )
 
+        # Initialize KV Cache for the draft model.
+        if draft_model is not self:
+            draft_cache_config = KVCacheConfig(
+                num_layers=draft_model.config.model.num_layers,
+                batch_size=tokens.shape[0],
+                num_kv_heads=draft_model.config.model.num_kv_heads,
+                d_k=draft_model.config.model.d_model // draft_model.config.model.num_heads,
+                max_seq_len=draft_model.config.model.max_seq_len,
+            )
+            draft_cache = KVCache(
+                draft_cache_config,
+                device=self.device,
+                dtype=self.layers.embedding.weight.dtype
+            )
+        else:
+            draft_cache = main_cache
+
         # Initial forward pass to populate the KV cache with the prompt.
         # We use no_grad here to avoid keeping the prompt's graph in memory.
         with torch.no_grad():
@@ -239,9 +256,9 @@ class Transformer(nn.Module, GenerationMixin):
             last_logit = initial_logits[:, -1:, :]
 
         while total_generated < inputs.max_new_tokens:
-            # 1. Generate a speculative chunk using the draft model (optimized with its own KV cache).
+            # 1. Generate a speculative chunk using the draft model.
             speculative_chunk, _ = self._generate_speculative_chunk(
-                draft_model, tokens, inputs
+                draft_model, tokens, inputs, draft_cache=draft_cache
             )
             spec_len = speculative_chunk.size(1)
 
@@ -271,9 +288,13 @@ class Transformer(nn.Module, GenerationMixin):
             is_all_accepted = (accepted_len == spec_len) and torch.equal(accepted_chunk, speculative_chunk)
 
             if not is_all_accepted:
-                # Rollback main_cache to the point before the first mismatch.
+                # Rollback caches to the point before the first mismatch.
                 # We added spec_len tokens, we want to keep accepted_len - 1 tokens.
-                main_cache.rollback(spec_len - (accepted_len - 1))
+                rollback_len = spec_len - (accepted_len - 1)
+                main_cache.rollback(rollback_len)
+                if draft_cache is not main_cache:
+                    draft_cache.rollback(rollback_len)
+
                 # Update tokens and re-process the corrected token (the last one in accepted_chunk).
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 with torch.enable_grad():
@@ -282,6 +303,11 @@ class Transformer(nn.Module, GenerationMixin):
                         ltm_override=inputs.ltm_override,
                         kv_cache=main_cache
                     )
+                    # Also update the draft cache with the corrected token
+                    if draft_cache is not main_cache:
+                        with torch.no_grad():
+                            draft_model(tokens[:, -1:], kv_cache=draft_cache)
+
                     last_logit = corrected_logits[:, -1:, :]
             else:
                 # Everything was accepted! Cache is already correct.
@@ -291,6 +317,8 @@ class Transformer(nn.Module, GenerationMixin):
             # Detach the KV cache to prevent gradients from flowing across iterations,
             # which would cause Autograd errors and slow down the process.
             main_cache.detach()
+            if draft_cache is not main_cache:
+                draft_cache.detach()
 
             yield accepted_chunk, surprise
             total_generated += accepted_len
