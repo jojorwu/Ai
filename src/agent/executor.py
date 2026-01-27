@@ -9,27 +9,16 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
-from src.agent.tools import execute_tool, parse_tool_call
+from src.agent.dataclasses import AgentState
+from src.agent.tools import ToolRegistry, parse_tool_call
 from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
 from src.model.complexity_manager import ComplexityManager
-from src.model.model import (
-    GenerateInput,
-    SamplingConfig,
-    SpeculativeConfig,
-    Transformer,
-)
+from src.model.model import (GenerateInput, SamplingConfig, SpeculativeConfig,
+                             Transformer)
 
 
 class AgentExecutor:
-    @dataclass
-    class AgentState:
-        """Keeps track of the agent's state during a conversation."""
-        conversation_history_tokens: List[int]
-        complexity_manager: ComplexityManager = None
-        main_cache: 'KVCache' = None
-        draft_cache: 'KVCache' = None
-
     """
     Handles the main execution loop of the agent, including the
     "thought -> tool -> observation" cycle.
@@ -46,6 +35,7 @@ class AgentExecutor:
         self.tokenizer = tokenizer
         self.config = config
         self.accelerator = accelerator
+        self.tool_registry = ToolRegistry()
 
     def run(self):
         """Runs the main agent loop."""
@@ -53,13 +43,18 @@ class AgentExecutor:
 
         for turn in range(self.config.generation.max_turns):
             logging.info("\n--- Iteration %d ---", turn + 1)
-            newly_generated_tokens = self._generate_model_response(agent_state)
-            generated_text = self.tokenizer.decode(newly_generated_tokens)
-            logging.info("Model generated:\n%s", generated_text)
-            agent_state.conversation_history_tokens.extend(newly_generated_tokens)
 
+            # Generate model response
+            new_tokens = self._generate_model_response(agent_state)
+            agent_state.append_tokens(new_tokens)
+
+            generated_text = self.tokenizer.decode(new_tokens)
+            logging.info("Model generated:\n%s", generated_text)
+
+            # Check for tool calls
             if not self._process_tool_call(agent_state):
                 logging.info("\n--- Final Answer ---")
+                # Attempt to extract the final answer from the last generated text
                 final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
                 print(final_answer)
                 break
@@ -86,49 +81,14 @@ class AgentExecutor:
 
         # Initialize KV Caches if they don't exist yet.
         if agent_state.main_cache is None:
-            from src.model.layers.kv_cache import KVCache, KVCacheConfig
-            d_k = unwrapped_model.config.model.d_model // unwrapped_model.config.model.num_heads
+            self._init_agent_caches(agent_state, unwrapped_model)
 
-            agent_state.main_cache = KVCache(
-                KVCacheConfig(
-                    num_layers=unwrapped_model.config.model.num_layers,
-                    batch_size=1,
-                    num_kv_heads=unwrapped_model.config.model.num_kv_heads,
-                    d_k=d_k,
-                    max_seq_len=unwrapped_model.config.model.max_seq_len,
-                ),
-                device=self.accelerator.device,
-                dtype=unwrapped_model.layers.embedding.weight.dtype
-            )
-
-            if unwrapped_model.draft_model and unwrapped_model.draft_model is not unwrapped_model:
-                agent_state.draft_cache = KVCache(
-                    KVCacheConfig(
-                        num_layers=unwrapped_model.draft_model.config.model.num_layers,
-                        batch_size=1,
-                        num_kv_heads=unwrapped_model.draft_model.config.model.num_kv_heads,
-                        d_k=unwrapped_model.draft_model.config.model.d_model // unwrapped_model.draft_model.config.model.num_heads,
-                        max_seq_len=unwrapped_model.draft_model.config.model.max_seq_len,
-                    ),
-                    device=self.accelerator.device,
-                    dtype=unwrapped_model.layers.embedding.weight.dtype
-                )
-            else:
-                agent_state.draft_cache = agent_state.main_cache
-
-        # When using persistent cache, we only pass the NEW tokens to generate.
-        # But for the very first call, we pass the entire history.
-        # We determine "new tokens" by comparing history tokens with the current cache position.
-        cached_len = agent_state.main_cache.current_pos
-        new_tokens = agent_state.conversation_history_tokens[cached_len:]
-
+        # Use new_tokens from AgentState
+        new_tokens = agent_state.get_new_tokens()
         if not new_tokens:
-            # Fallback if no new tokens are found (should not happen in normal turns).
-            input_tokens = torch.tensor(
-                [agent_state.conversation_history_tokens[-1:]], device=self.accelerator.device
-            )
-        else:
-            input_tokens = torch.tensor([new_tokens], device=self.accelerator.device)
+            new_tokens = agent_state.conversation_history_tokens[-1:]
+
+        input_tokens = torch.tensor([new_tokens], device=self.accelerator.device)
 
         dynamic_top_k = (
             agent_state.complexity_manager.get_top_k()
@@ -168,16 +128,50 @@ class AgentExecutor:
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
         """Processes a tool call if one is present in the conversation history."""
-        full_history_text = self.tokenizer.decode(
-            agent_state.conversation_history_tokens
-        )
+        full_history_text = self.tokenizer.decode(agent_state.conversation_history_tokens)
         tool_name, args = parse_tool_call(full_history_text)
+
         if tool_name and args is not None:
-            tool_output = execute_tool(tool_name, args)
+            tool_output = self.tool_registry.execute_tool(tool_name, args)
             logging.info("Output of tool '%s':\n%s", tool_name, tool_output)
+
             tool_output_formatted = f"<TOOL_OUTPUT>{tool_output}</TOOL_OUTPUT>"
-            agent_state.conversation_history_tokens.extend(
-                self.tokenizer.encode(tool_output_formatted)
-            )
+            agent_state.append_tokens(self.tokenizer.encode(tool_output_formatted))
             return True
         return False
+
+    def _init_agent_caches(self, agent_state: AgentState, unwrapped_model: Transformer):
+        """Initializes KV caches for the main and draft models."""
+        from src.model.layers.kv_cache import KVCache, KVCacheConfig
+        d_k = unwrapped_model.config.model.d_model // unwrapped_model.config.model.num_heads
+
+        agent_state.main_cache = KVCache(
+            KVCacheConfig(
+                num_layers=unwrapped_model.config.model.num_layers,
+                batch_size=1,
+                num_kv_heads=unwrapped_model.config.model.num_kv_heads,
+                d_k=d_k,
+                max_seq_len=unwrapped_model.config.model.max_seq_len,
+            ),
+            device=self.accelerator.device,
+            dtype=unwrapped_model.layers.embedding.weight.dtype,
+        )
+
+        if (
+            unwrapped_model.draft_model
+            and unwrapped_model.draft_model is not unwrapped_model
+        ):
+            agent_state.draft_cache = KVCache(
+                KVCacheConfig(
+                    num_layers=unwrapped_model.draft_model.config.model.num_layers,
+                    batch_size=1,
+                    num_kv_heads=unwrapped_model.draft_model.config.model.num_kv_heads,
+                    d_k=unwrapped_model.draft_model.config.model.d_model
+                    // unwrapped_model.draft_model.config.model.num_heads,
+                    max_seq_len=unwrapped_model.draft_model.config.model.max_seq_len,
+                ),
+                device=self.accelerator.device,
+                dtype=unwrapped_model.layers.embedding.weight.dtype,
+            )
+        else:
+            agent_state.draft_cache = agent_state.main_cache

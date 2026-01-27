@@ -4,6 +4,7 @@ PyTorch implementation of the Agent class for the evolutionary training approach
 import copy
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -11,6 +12,9 @@ from torch.optim import Adam
 
 from src.agent.dataclasses import LTMConfig
 from src.model.model import GenerateInput, SamplingConfig, Transformer
+
+if TYPE_CHECKING:
+    from src.model.layers.kv_cache import KVCache
 
 
 @dataclass
@@ -68,10 +72,14 @@ class Agent:
 
     @torch.no_grad()
     def generate_response(
-        self, prompt_tokens: torch.Tensor, max_new_tokens=50
-    ) -> torch.Tensor:
+        self,
+        prompt_tokens: torch.Tensor,
+        max_new_tokens: int = 50,
+        kv_cache: 'KVCache' = None,
+        draft_cache: 'KVCache' = None,
+    ):
         """
-        Generates a response based on a prompt.
+        Generates a response based on a prompt, utilizing optional KV caches.
         """
         self.base_model.eval()
         if self.long_term_memory:
@@ -86,5 +94,7 @@ class Agent:
             max_new_tokens=max_new_tokens,
             sampling_config=sampling_config,
             ltm_override=self.long_term_memory,
+            kv_cache=kv_cache,
+            draft_cache=draft_cache,
         )
         return self.base_model.generate(generate_input)

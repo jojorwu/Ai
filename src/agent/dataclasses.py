@@ -2,9 +2,34 @@
 Dataclasses for the agent module.
 """
 from dataclasses import dataclass
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from src.model.complexity_manager import ComplexityManager
+    from src.model.layers.kv_cache import KVCache
+
+
+@dataclass
+class AgentState:
+    """Keeps track of the agent's state during a conversation."""
+
+    conversation_history_tokens: List[int]
+    complexity_manager: 'ComplexityManager' = None
+    main_cache: 'KVCache' = None
+    draft_cache: 'KVCache' = None
+
+    def get_new_tokens(self) -> List[int]:
+        """Returns the tokens that have not yet been processed by the KV cache."""
+        if self.main_cache is None:
+            return self.conversation_history_tokens
+        cached_len = self.main_cache.current_pos
+        return self.conversation_history_tokens[cached_len:]
+
+    def append_tokens(self, tokens: List[int]):
+        """Appends new tokens to the conversation history."""
+        self.conversation_history_tokens.extend(tokens)
 
 
 @dataclass
