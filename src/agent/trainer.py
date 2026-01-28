@@ -85,5 +85,3 @@ class AgentTrainer:
         # Update metrics
         self.agent.metrics.value_score_sum += torch.mean(values).item()
         self.agent.metrics.experience_count += 1
-
-        self.agent.ltm_optimizer.zero_grad()

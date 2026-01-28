@@ -94,5 +94,9 @@ class PopulationEvaluator:
 
         max_workers = min(len(agents), os.cpu_count() or 4)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for i, proposer in enumerate(agents):
+            futures = [
                 executor.submit(_get_response_and_score, i, proposer)
+                for i, proposer in enumerate(agents)
+            ]
+            for future in futures:
+                future.result()

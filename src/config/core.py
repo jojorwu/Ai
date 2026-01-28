@@ -51,11 +51,13 @@ class DynamicParametersConfig(BaseModel):
 
 class BaseConfig(BaseModel):
     """Base configuration model with shared settings."""
-    model: ModelConfig
-    vision: VisionConfig
-    ltm: LTMConfig
-    hardware: HardwareConfig
-    complexity: Optional[ComplexityConfig] = Field(default_factory=ComplexityConfig)
+    model: ModelConfig = Field(..., description="Настройки архитектуры Transformer.")
+    vision: VisionConfig = Field(..., description="Настройки визуального энкодера.")
+    ltm: LTMConfig = Field(..., description="Настройки Long-Term Memory (памяти агента).")
+    hardware: HardwareConfig = Field(..., description="Настройки оборудования и ускорения.")
+    complexity: Optional[ComplexityConfig] = Field(
+        default_factory=ComplexityConfig, description="Настройки управления сложностью."
+    )
 
     @classmethod
     def from_json(cls, file_path: str):
@@ -93,6 +95,15 @@ class BaseConfig(BaseModel):
         _print_recursive(config_class)
         print("\n" + "=" * 50 + "\n")
 
+    def to_transformer_config(self) -> TransformerConfig:
+        """Converts the base config to a TransformerConfig."""
+        return TransformerConfig(
+            vocab_size=self.model.vocab_size or 0,
+            model=self.model,
+            vision=self.vision,
+            ltm=self.ltm,
+        )
+
     def apply_cli_args(self, args: argparse.Namespace):
         """
         Overrides configuration fields based on command-line arguments.
@@ -129,9 +140,9 @@ class BaseConfig(BaseModel):
 
 class TrainConfig(BaseConfig):
     """Configuration model for training."""
-    evolution: EvolutionConfig
-    optimizer: OptimizerConfig
-    scheduler: SchedulerConfig
+    evolution: EvolutionConfig = Field(..., description="Параметры эволюционного обучения.")
+    optimizer: OptimizerConfig = Field(..., description="Параметры оптимизатора AdamW.")
+    scheduler: SchedulerConfig = Field(..., description="Параметры планировщика скорости обучения.")
 
 
 class GenerateConfig(BaseConfig):

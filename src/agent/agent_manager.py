@@ -30,6 +30,7 @@ class AgentManager:
         num_agents: int,
         accelerator: Accelerator,
         evaluator: CollaborativeEvaluator,
+        hardware_config=None,
     ):
         """
         Initializes the AgentManager.
@@ -39,11 +40,13 @@ class AgentManager:
             num_agents: The number of agents to create in the population.
             accelerator: The Accelerator object for distributed training.
             evaluator: The evaluator used for agent performance assessment.
+            hardware_config: Hardware configuration settings.
         """
         self.base_model = accelerator.unwrap_model(base_model)
         self.num_agents = num_agents
         self.accelerator = accelerator
         self.evaluator = evaluator
+        self.hardware_config = hardware_config
 
         self.ltm_config = LTMConfig(
             learning_rate=self.base_model.config.ltm.optimizer.learning_rate,
@@ -60,7 +63,9 @@ class AgentManager:
         """
         Delegates the specialization phase to the AgentSpecializer.
         """
-        self.specializer.specialize_agents(self.agents, spec_config, device)
+        self.specializer.specialize_agents(
+            self.agents, spec_config, device, self.hardware_config
+        )
 
     def merge_agents(self, best_agents: List[Agent]):
         """

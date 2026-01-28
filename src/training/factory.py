@@ -71,6 +71,7 @@ def create_trainer(
         num_agents=config.evolution.num_agents,
         accelerator=accelerator,
         evaluator=evaluator,
+        hardware_config=config.hardware,
     )
     evaluator.agents = agent_manager.agents
 

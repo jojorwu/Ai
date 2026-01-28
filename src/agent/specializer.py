@@ -26,6 +26,7 @@ class AgentSpecializer:
         agents: List[Agent],
         spec_config: SpecializationConfig,
         device: torch.device,
+        hardware_config=None,
     ):
         """
         Conducts a "specialization" phase where each agent is trained on a
@@ -56,7 +57,11 @@ class AgentSpecializer:
                 return
 
             batch_generator = get_batches_torch(
-                agent_data, spec_config.batch_size, spec_config.seq_len, device
+                agent_data,
+                spec_config.batch_size,
+                spec_config.seq_len,
+                device,
+                pin_memory=hardware_config.pin_memory if hardware_config else False,
             )
 
             steps_done = 0
@@ -69,7 +74,11 @@ class AgentSpecializer:
             logging.info("  - Specialized %s in %d steps.", agent.agent_id, steps_done)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for i, agent in enumerate(agents):
+            futures = [
                 executor.submit(_train_single_agent, i, agent)
+                for i, agent in enumerate(agents)
+            ]
+            for future in futures:
+                future.result()
 
         logging.info("Agent specialization complete.")
