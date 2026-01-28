@@ -11,7 +11,8 @@ from torch import nn
 from torch.optim import Adam
 
 from src.agent.dataclasses import LTMConfig
-from src.model.model import GenerateInput, SamplingConfig, Transformer
+from src.model.model import Transformer
+from src.model.structures import GenerateInput, SamplingConfig
 
 if TYPE_CHECKING:
     from src.model.layers.kv_cache import KVCache
@@ -77,6 +78,7 @@ class Agent:
         max_new_tokens: int = 50,
         kv_cache: 'KVCache' = None,
         draft_cache: 'KVCache' = None,
+        sampling_config: SamplingConfig | None = None,
     ) -> torch.Tensor:
         """
         Generates a full response tensor based on a prompt, utilizing optional KV caches.
@@ -88,11 +90,15 @@ class Agent:
         if prompt_tokens.ndim == 1:
             prompt_tokens = prompt_tokens.unsqueeze(0)
 
-        sampling_config = SamplingConfig(temperature=0.7, top_k=50)
+        # Use provided sampling config or a sensible default
+        actual_sampling_config = sampling_config or SamplingConfig(
+            temperature=0.7, top_k=50
+        )
+
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
-            sampling_config=sampling_config,
+            sampling_config=actual_sampling_config,
             ltm_override=self.long_term_memory,
             kv_cache=kv_cache,
             draft_cache=draft_cache,

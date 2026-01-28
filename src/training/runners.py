@@ -18,6 +18,22 @@ from src.data.data_loader import get_batches_torch as get_batches
 from src.training.loss import cross_entropy_with_label_smoothing
 
 
+def calculate_loss(model, x, y, evolution_config):
+    """
+    Common loss calculation logic for Transformer model with MoE support.
+    """
+    logits, _, aux_loss = model(x)
+    policy_loss = cross_entropy_with_label_smoothing(
+        logits,
+        y,
+        smoothing=evolution_config.label_smoothing,
+    )
+    total_loss = policy_loss + (
+        evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+    )
+    return total_loss, policy_loss
+
+
 class EvolutionRunner:  # pylint: disable=too-few-public-methods
     """Handles the evolutionary cycle."""
 
@@ -102,14 +118,8 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
 
     def _run_training_step(self, x, y):
         """Runs a single training step."""
-        logits, _, aux_loss = self.model(x)
-        policy_loss = cross_entropy_with_label_smoothing(
-            logits,
-            y,
-            smoothing=self.evolution_config.label_smoothing,
-        )
-        total_loss = policy_loss + (
-            self.evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+        total_loss, policy_loss = calculate_loss(
+            self.model, x, y, self.evolution_config
         )
         loss_scaled = total_loss / self.evolution_config.gradient_accumulation_steps
         self.accelerator.backward(loss_scaled)
@@ -167,13 +177,10 @@ class ValidationRunner:  # pylint: disable=too-few-public-methods
         )
         with torch.no_grad():
             for x, y, _ in batch_iterator:
-                logits, _, _ = self.model(x)
-                loss = cross_entropy_with_label_smoothing(
-                    logits,
-                    y,
-                    smoothing=self.evolution_config.label_smoothing,
+                _, policy_loss = calculate_loss(
+                    self.model, x, y, self.evolution_config
                 )
-                total_loss += loss.item()
+                total_loss += policy_loss.item()
                 num_batches += 1
         self.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')
