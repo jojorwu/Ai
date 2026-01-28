@@ -78,6 +78,18 @@ class BaseConfig(BaseModel):
         if args.torch_compile:
             self.hardware.torch_compile = True
             logging.info("Enabling torch.compile.")
+        if hasattr(args, 'num_threads') and args.num_threads is not None:
+            self.hardware.num_threads = args.num_threads
+            logging.info("Setting num_threads to %d.", args.num_threads)
+        if hasattr(args, 'num_interop_threads') and args.num_interop_threads is not None:
+            self.hardware.num_interop_threads = args.num_interop_threads
+            logging.info("Setting num_interop_threads to %d.", args.num_interop_threads)
+        if hasattr(args, 'disable_mkldnn') and args.disable_mkldnn:
+            self.hardware.enable_mkldnn = False
+            logging.info("Disabling MKLDNN optimizations.")
+        if hasattr(args, 'flush_denormals') and args.flush_denormals:
+            self.hardware.flush_denormals = True
+            logging.info("Enabling flushing denormals.")
 
 
 class TrainConfig(BaseConfig):

@@ -175,7 +175,7 @@ class ValidationRunner:  # pylint: disable=too-few-public-methods
             self.evolution_config.seq_len,
             self.accelerator.device,
         )
-        with torch.no_grad():
+        with torch.inference_mode():
             for x, y, _ in batch_iterator:
                 _, policy_loss = calculate_loss(
                     self.model, x, y, self.evolution_config

@@ -14,6 +14,7 @@ from accelerate import Accelerator
 from src.config.core import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
+from src.model.device_manager import DeviceManager
 from src.utils.setup import setup_logging
 
 
@@ -96,11 +97,22 @@ def prepare_training_environment(
     """
     config, model_dir, checkpoint_dir, resume_from = setup_environment(args)
 
+    # Apply hardware optimizations
+    device_manager = DeviceManager(config.hardware)
+    device_manager.optimize_environment()
+
     # Determine best mixed precision strategy
-    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+    if torch.cuda.is_available():
+        mixed_precision = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
+    elif (
+        hasattr(torch, "cpu")
+        and hasattr(torch.cpu, "is_bf16_supported")
+        and torch.cpu.is_bf16_supported()
+    ):
         mixed_precision = "bf16"
     else:
-        mixed_precision = "fp16"
+        # Avoid fp16 on CPU as it is often not native and slower than fp32
+        mixed_precision = "no"
 
     accelerator = Accelerator(
         mixed_precision=mixed_precision,
