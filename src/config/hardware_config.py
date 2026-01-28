@@ -8,20 +8,20 @@ from pydantic import BaseModel, Field
 class HardwareConfig(BaseModel):
     """Hardware configuration."""
     device: Literal["cpu", "gpu", "mps"] = Field(
-        "cpu", description="Device for computations (cpu, gpu, mps).")
+        "cpu", description="Устройство для вычислений (cpu, gpu, mps).")
     strategy: Literal["unified", "discrete", "hybrid"] = Field(
-        "discrete", description="Memory strategy for hardware.")
+        "discrete", description="Стратегия использования памяти (unified, discrete, hybrid).")
     torch_compile: bool = Field(
-        False, description="Enable torch.compile for the model.")
+        False, description="Включить torch.compile для ускорения модели.")
     num_threads: int = Field(
-        0, description="Number of threads for intra-op parallelism (0 for default).")
+        0, description="Количество потоков для внутриоперационного параллелизма (0 — по умолчанию).")
     num_interop_threads: int = Field(
-        0, description="Number of threads for inter-op parallelism (0 for default).")
+        0, description="Количество потоков для меж-операционного параллелизма (0 — по умолчанию).")
     enable_mkldnn: bool = Field(
-        True, description="Enable oneDNN (MKLDNN) optimizations for CPU.")
+        True, description="Включить оптимизации oneDNN (MKLDNN) для CPU.")
     flush_denormals: bool = Field(
-        False, description="Enable flushing denormal numbers to zero on CPU.")
+        False, description="Включить обнуление денормализованных чисел на CPU.")
     num_workers: int = Field(
-        4, description="Number of worker processes for data loading.")
+        4, description="Количество рабочих процессов для загрузки данных.")
     pin_memory: bool = Field(
-        True, description="Enable pinned memory for faster CPU-to-GPU transfers.")
+        True, description="Включить закрепленную память для ускорения передачи данных CPU->GPU.")

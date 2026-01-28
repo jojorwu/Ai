@@ -65,6 +65,11 @@ def create_main_parser():
         help="Enable torch.compile for the model."
     )
     parser.add_argument(
+        '--explain',
+        action='store_true',
+        help="Explain all configuration settings and exit."
+    )
+    parser.add_argument(
         '--num-threads',
         type=int,
         help="Number of threads for intra-op parallelism (CPU)."

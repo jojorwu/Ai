@@ -4,7 +4,7 @@ Core Pydantic models for project configuration.
 import argparse
 import json
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Type, Union
 
 from pydantic import BaseModel, Field
 
@@ -29,24 +29,24 @@ class TransformerConfig(BaseModel):
 class DynamicParametersConfig(BaseModel):
     """Configuration for the dynamic parameters of the text generation process."""
     start_text: str = Field(...,
-                            description="Initial text for generation.")
+                            description="Начальный текст для генерации.")
     max_len: int = Field(...,
-                         description="Maximum length of the generated text.")
-    temperature: float = Field(..., description="Temperature for sampling.")
-    top_k: int = Field(..., description="Top-k for sampling.")
-    top_p: float = Field(..., description="Top-p (nucleus) for sampling.")
+                         description="Максимальная длина сгенерированного текста.")
+    temperature: float = Field(..., description="Температура для сэмплирования.")
+    top_k: int = Field(..., description="Параметр Top-k для сэмплирования.")
+    top_p: float = Field(..., description="Параметр Top-p (nucleus) для сэмплирования.")
     speculative_steps: int = Field(...,
-                                   description="Number of speculative steps.")
+                                   description="Количество шагов спекулятивного декодирования.")
     value_threshold: float = Field(
-        ..., description="Value threshold for accepting speculative generation.")
+        ..., description="Порог функции ценности для принятия спекулятивной генерации.")
     max_thought_len: int = Field(...,
-                                 description="Maximum length of 'thoughts'.")
+                                 description="Максимальная длина 'мыслей'.")
     max_retries: int = Field(
-        ..., description="Maximum number of retries on failed speculation.")
+        ..., description="Максимальное количество повторов при неудачной спекуляции.")
     max_turns: int = Field(
-        10, description="Maximum number of iterations in the agent loop.")
+        10, description="Максимальное количество итераций в цикле агента.")
     context_window_size: int = Field(
-        2048, description="The number of tokens to retain in history.")
+        2048, description="Количество токенов, удерживаемых в истории.")
 
 
 class BaseConfig(BaseModel):
@@ -63,6 +63,35 @@ class BaseConfig(BaseModel):
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return cls.model_validate(data)
+
+    @staticmethod
+    def print_explanations(config_class: Type['BaseConfig']):
+        """Prints Russian explanations for all fields in the configuration classes."""
+        print(f"\n=== Описание настроек ({config_class.__name__}) ===\n")
+
+        def _print_recursive(model_cls, indent=0):
+            for name, field in model_cls.model_fields.items():
+                desc = field.description or "Нет описания."
+                print("  " * indent + f"• {name}: {desc}")
+
+                # Safely extract the underlying model class if it's nested or Optional
+                target_cls = field.annotation
+                actual_cls = None
+
+                # Handle Union (e.g., Optional[Model])
+                if hasattr(target_cls, "__origin__") and target_cls.__origin__ is Union:
+                    for arg in target_cls.__args__:
+                        if hasattr(arg, 'model_fields') and arg is not BaseModel:
+                            actual_cls = arg
+                            break
+                elif hasattr(target_cls, 'model_fields') and target_cls is not BaseModel:
+                    actual_cls = target_cls
+
+                if actual_cls:
+                    _print_recursive(actual_cls, indent + 2)
+
+        _print_recursive(config_class)
+        print("\n" + "=" * 50 + "\n")
 
     def apply_cli_args(self, args: argparse.Namespace):
         """

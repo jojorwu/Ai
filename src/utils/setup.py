@@ -37,6 +37,10 @@ def setup_from_args(
         add_extra_args(parser)
     args = parser.parse_args()
 
+    if getattr(args, 'explain', False):
+        config_class.print_explanations(config_class)
+        raise SystemExit(0)
+
     model_name = args.model_name or select_model_interactively()
     if not model_name:
         raise SystemExit("No model selected. Exiting.")
