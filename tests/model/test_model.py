@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from src.config.core import (TrainConfig, TransformerConfig, ModelConfig,
-                             VisionConfig, LTMArchitectureConfig)
+from src.config.core import TrainConfig, TransformerConfig
+from src.config.model_config import ModelConfig, VisionConfig
 from src.model.model import Transformer
 
 

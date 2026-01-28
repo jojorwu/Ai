@@ -7,7 +7,7 @@ import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
-from src.training.trainer import create_trainer
+from src.training.factory import create_trainer
 from tests.test_utils import create_full_test_config_and_data, MockTokenizer
 
 

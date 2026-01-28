@@ -29,6 +29,7 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         val_data,
         tokenizer,
         evolution_config,
+        agent_manager: AgentManager,
     ):
         self.accelerator = accelerator
         self.model = model
@@ -36,22 +37,14 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         self.val_data = val_data
         self.tokenizer = tokenizer
         self.evolution_config = evolution_config
+        self.agent_manager = agent_manager
 
     def run(self):
         """Runs one full cycle of evolution."""
         logging.info("--- Starting new evolution cycle ---")
         start_time = time.time()
         device = self.accelerator.device
-        evaluator = CollaborativeEvaluator(
-            agents=[], base_model=self.model
-        )
-        agent_manager = AgentManager(
-            base_model=self.model,
-            num_agents=self.evolution_config.num_agents,
-            accelerator=self.accelerator,
-            evaluator=evaluator,
-        )
-        evaluator.agents = agent_manager.agents
+
         logging.info("Specializing %d agents...", self.evolution_config.num_agents)
         spec_config = SpecializationConfig(
             full_data=self.train_data,
@@ -59,20 +52,22 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
             batch_size=self.evolution_config.batch_size,
             steps_per_agent=10,
         )
-        agent_manager.specialize_agents_on_dataset(spec_config, device)
+        self.agent_manager.specialize_agents_on_dataset(spec_config, device)
+
         logging.info("Evaluating and selecting best agents...")
-        best_agents = agent_manager.collaborative_evaluation(
+        best_agents = self.agent_manager.collaborative_evaluation(
             evaluation_data=self.val_data[:50],
             tokenizer=self.tokenizer,
             top_k=self.evolution_config.num_survivors,
             device=device,
         )
+
         if best_agents:
             logging.info(
                 "Merging LTM from %d best agents into base model...",
                 len(best_agents),
             )
-            agent_manager.merge_agents(best_agents)
+            self.agent_manager.merge_agents(best_agents)
             if self.model.layers.long_term_memory:
                 self.model.layers.long_term_memory.to(device)
         else:

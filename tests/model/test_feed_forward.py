@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.config.core import FeedForwardConfig
+from src.config.model_config import FeedForwardConfig
 from src.model.layers.feed_forward import FeedForward
 
 

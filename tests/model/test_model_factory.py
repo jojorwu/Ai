@@ -4,7 +4,7 @@ Unit tests for the DeviceManager.
 import unittest
 from unittest.mock import patch
 
-from src.config.core import HardwareConfig
+from src.config.hardware_config import HardwareConfig
 from src.model.factory import DeviceManager
 
 

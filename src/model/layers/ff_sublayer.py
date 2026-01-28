@@ -4,7 +4,7 @@ PyTorch implementation of the Feed-Forward Sub-Layer for a Transformer Decoder B
 import torch
 from torch import nn
 
-from src.config.core import DecoderBlockConfig, FeedForwardConfig, MoEConfig
+from src.config.model_config import DecoderBlockConfig, FeedForwardConfig, MoEConfig
 from src.model.layers.dropout import Dropout
 from src.model.layers.feed_forward import FeedForward
 from src.model.layers.moe import MixtureOfExperts
