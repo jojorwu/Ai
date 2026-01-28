@@ -2,7 +2,7 @@
 Unit tests for the DeviceManager.
 """
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import torch
 from src.model.device_manager import DeviceManager
 from src.config.hardware_config import HardwareConfig
@@ -46,14 +46,33 @@ class TestDeviceManager(unittest.TestCase):
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
             self.assertTrue(torch.backends.cudnn.allow_tf32)
 
-    def test_get_device_map_hybrid(self):
-        """Tests the hybrid device mapping strategy."""
+    @patch("torch.cuda.is_available", return_value=True)
+    def test_hybrid_strategy_with_cuda(self, _mock_cuda_available):
+        """Tests that the hybrid strategy returns the correct device map with CUDA."""
         config = HardwareConfig(strategy="hybrid")
-        with patch("torch.cuda.is_available", return_value=True):
-            manager = DeviceManager(config)
-            device_map = manager.get_device_map()
-            self.assertEqual(device_map["layers.long_term_memory"], "cpu")
-            self.assertEqual(device_map[""], "cuda:0")
+        manager = DeviceManager(config)
+        device_map = manager.get_device_map()
+        expected_map = {"layers.long_term_memory": "cpu", "": "cuda:0"}
+        self.assertEqual(device_map, expected_map)
+        self.assertFalse(manager.should_disable_4bit())
+
+    @patch("torch.cuda.is_available", return_value=False)
+    def test_hybrid_strategy_without_cuda(self, _mock_cuda_available):
+        """Tests that the hybrid strategy falls back to the default device without CUDA."""
+        config = HardwareConfig(strategy="hybrid", device="cpu")
+        manager = DeviceManager(config)
+        device_map = manager.get_device_map()
+        self.assertEqual(device_map, {"": "cpu"})
+        self.assertTrue(manager.should_disable_4bit())
+
+    @patch("torch.cuda.is_available", return_value=False)
+    def test_cpu_only_strategy(self, _mock_cuda_available):
+        """Tests that a non-hybrid strategy returns the default device."""
+        config = HardwareConfig(strategy="discrete", device="cpu")
+        manager = DeviceManager(config)
+        device_map = manager.get_device_map()
+        self.assertEqual(device_map, {"": "cpu"})
+        self.assertTrue(manager.should_disable_4bit())
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 import tempfile
 import os
-import shutil
 
 from src.training.setup import prepare_training_environment, TrainingEnvironment
+from tests.test_utils import create_test_config
 
 
 class TestTrainingSetup(unittest.TestCase):
@@ -17,8 +17,10 @@ class TestTrainingSetup(unittest.TestCase):
     @patch("src.training.setup.setup_logging")
     @patch("src.training.setup.Accelerator")
     @patch("src.training.setup.load_and_prepare_data")
+    @patch("src.training.setup.TrainConfig.from_json")
     def test_prepare_training_environment(
         self,
+        mock_from_json,
         mock_load_data,
         mock_accelerator,
         mock_setup_logging,
@@ -30,14 +32,15 @@ class TestTrainingSetup(unittest.TestCase):
             original_cwd = os.getcwd()
             os.chdir(temp_dir)
             try:
-                # Create a dummy tokenizer file for the Tokenizer to load
-                data_dir = "data"
-                os.makedirs(data_dir, exist_ok=True)
-                with open(os.path.join(data_dir, "tokenizer_vocab.json"), "w") as f:
-                    f.write('{"<unk>": 0, "a": 1, "b": 2}')
+                # Mock configuration
+                test_config = create_test_config()
+                mock_from_json.return_value = test_config
 
-                os.makedirs("config")
-                shutil.copy(os.path.join(original_cwd, "config/config_train.json"), "config/config_train.json")
+                # Create dummy root config for copying if necessary,
+                # but we're mocking from_json anyway.
+                os.makedirs("config", exist_ok=True)
+                with open("config/config_train.json", "w") as f:
+                    f.write("{}")
 
                 args = argparse.Namespace(
                     model_name="test-model",
@@ -45,6 +48,12 @@ class TestTrainingSetup(unittest.TestCase):
                     wandb=False,
                     hardware_strategy=None,
                     torch_compile=False,
+                    num_threads=None,
+                    num_interop_threads=None,
+                    disable_mkldnn=False,
+                    flush_denormals=False,
+                    num_workers=None,
+                    pin_memory=None
                 )
 
                 mock_load_data.return_value = (MagicMock(), [1, 2, 3], [4, 5])

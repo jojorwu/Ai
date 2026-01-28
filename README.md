@@ -1,10 +1,10 @@
-# Transformer from Scratch using NumPy
+# Agent-Centric Titans Transformer
 
-This project is a decoder-only Transformer (GPT-style) implemented from scratch using only NumPy. It features an agent-based evolutionary training system and is capable of multimodal learning (text and images).
+This project is a high-performance, decoder-only Transformer (GPT-style) implemented in PyTorch. It features an agent-based evolutionary training system and is designed for scalability and hardware efficiency.
 
 ## Core Architectural Features
 
-- **Modular Design**: Components like `Embedding`, `MultiHeadAttention`, `RMSNorm`, etc., are implemented as separate, reusable classes in the `nn_components/` directory.
+- **Modular Design**: Components like `Embedding`, `MultiHeadAttention`, `RMSNorm`, etc., are implemented as separate, reusable PyTorch modules.
 - **Agent-based Evolutionary Learning**: Instead of a traditional single-model training loop, this project uses a population of agents. The `AgentManager` class controls their lifecycle: forking, specialization through experience, collaborative evaluation, and merging the best agents back into a base model.
 - **Multimodality**: The model can process both text and images. A `VisionEncoder` converts images into patch embeddings, which are seamlessly integrated into the Transformer's input sequence.
 - **Actor-Critic Architecture**: The Transformer has a dual-head design: a **Policy Head** for generating token logits and a **Value Head** for predicting a "usefulness" score of a sequence, crucial for the agent evaluation process.
@@ -18,6 +18,7 @@ This project is a decoder-only Transformer (GPT-style) implemented from scratch 
 - **SwiGLU Feed-Forward Network**: Uses the advanced Swish-Gated Linear Unit for better performance compared to standard FFNs.
 - **Mixture of Experts (MoE)**: Can be configured to use MoE layers for a massive increase in parameters with only a small increase in computational cost during inference. Includes an auxiliary load-balancing loss.
 - **Weight Tying**: The `Embedding` layer and the final `Linear` projection layer share weights, reducing the total parameter count.
+- **Hardware Optimized**: Includes specific optimizations for both CPU (MKLDNN, thread management) and GPU (TF32, pinned memory, non-blocking transfers).
 - **AdamW Optimizer**: Uses the Adam optimizer with Decoupled Weight Decay for better regularization.
 - **Advanced Training Techniques**:
     - **Gradient Accumulation**: Emulates a larger batch size on memory-constrained hardware.
