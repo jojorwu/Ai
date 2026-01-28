@@ -63,7 +63,7 @@ class AgentExecutor:
                 logging.info("\n--- Final Answer ---")
                 # Attempt to extract the final answer from the last generated text
                 final_answer = generated_text.split("</TOOL_CALL>")[-1].strip()
-                print(final_answer)
+                logging.info(final_answer)
                 break
         else:
             logging.warning("Maximum number of iterations reached.")

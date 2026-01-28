@@ -93,7 +93,7 @@ class Tokenizer:
             # Add the text before the special token
             if start > last_idx:
                 pre_text = text[last_idx:start]
-                tokens.extend(self.char_to_idx.get(char, -1) for char in pre_text)
+                tokens.extend([self.char_to_idx.get(char, -1) for char in pre_text])
 
             # Add the special token itself
             special_token = match.group(0)
@@ -103,7 +103,7 @@ class Tokenizer:
         # Add any remaining text after the last special token
         if last_idx < len(text):
             post_text = text[last_idx:]
-            tokens.extend(self.char_to_idx.get(char, -1) for char in post_text)
+            tokens.extend([self.char_to_idx.get(char, -1) for char in post_text])
 
         # Filter out any -1 tokens for characters not in vocab
         return [token for token in tokens if token != -1]

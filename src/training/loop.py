@@ -1,8 +1,10 @@
 """
 Implements the main training loop and training state management.
 """
+import gc
 import logging
 import os
+
 import torch
 
 
@@ -121,3 +123,8 @@ class TrainingLoop:
             if epochs_no_improve >= self.config.evolution.early_stopping_patience:
                 logging.warning("Early stopping triggered.")
                 break
+
+            # Explicit memory management after each epoch/cycle
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()

@@ -104,9 +104,9 @@ class Agent:
             draft_cache=draft_cache,
         )
 
-        # Accumulate all chunks from the generator
-        full_response = prompt_tokens
+        # Accumulate all chunks from the generator in a list to avoid O(N^2) copying.
+        chunks = [prompt_tokens]
         for chunk, _ in self.base_model.generate(generate_input):
-            full_response = torch.cat([full_response, chunk], dim=1)
+            chunks.append(chunk)
 
-        return full_response
+        return torch.cat(chunks, dim=1)
