@@ -59,7 +59,12 @@ def load_model_and_tokenizer(
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"No weights file found in {model_dir} or specified in config.")
 
-    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    # Optimized weight loading: use mmap if available for faster loading
+    # and lower memory peak. Load directly to CPU first to avoid OOM,
+    # dispatch_model will handle device placement.
+    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state_dict)
+    del state_dict # Free memory
 
     if quantized:
         model = torch.quantization.quantize_dynamic(

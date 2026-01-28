@@ -28,27 +28,33 @@ class EvolutionaryOrchestrator:
             logging.warning("None of the best agents had a valid LTM state.")
             return
 
-        logging.info("Merging LTM weights from %d best agents...", len(ltm_states))
-
-        # Initialize a dictionary for the averaged state with zero-tensors.
-        avg_state = {
-            key: torch.zeros_like(tensor, device="cpu")
-            for key, tensor in ltm_states[0].items()
-        }
-        for state in ltm_states:
-            for key, tensor in state.items():
-                avg_state[key] += tensor.to("cpu")
-
-        for key in avg_state:
-            avg_state[key] /= len(ltm_states)
-
-        # Update the base model's LTM
+        # Determine target device for averaging (use base model's device)
         unwrapped_model = (
             base_model.module if hasattr(base_model, "module") else base_model
         )
-
-        if unwrapped_model.layers.long_term_memory:
-            unwrapped_model.layers.long_term_memory.load_state_dict(avg_state)
-            logging.info("Base model's LTM has been updated with merged weights.")
-        else:
+        if not unwrapped_model.layers.long_term_memory:
             logging.warning("Base model does not have an LTM module to update.")
+            return
+
+        device = unwrapped_model.layers.long_term_memory.parameters().__next__().device
+        logging.info(
+            "Merging LTM weights from %d best agents on %s...", len(ltm_states), device
+        )
+
+        # Initialize a dictionary for the averaged state with zero-tensors on the target device.
+        avg_state = {
+            key: torch.zeros_like(tensor, device=device)
+            for key, tensor in ltm_states[0].items()
+        }
+
+        # Perform averaging on-device to maximize efficiency.
+        for state in ltm_states:
+            for key, tensor in state.items():
+                avg_state[key].add_(tensor.to(device))
+
+        for key in avg_state:
+            avg_state[key].div_(len(ltm_states))
+
+        # Update the base model's LTM
+        unwrapped_model.layers.long_term_memory.load_state_dict(avg_state)
+        logging.info("Base model's LTM has been updated with merged weights.")

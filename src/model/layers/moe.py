@@ -80,16 +80,20 @@ class MixtureOfExperts(nn.Module):
 
         # 5. Process tokens by each expert in batches
         # We group tokens for the same expert to maximize GPU utilization.
-        for i, expert in enumerate(self.experts):
+        # Loop only over experts that have at least one token assigned.
+        active_experts = torch.unique(flat_selected_experts)
+        for i in active_experts:
+            expert_idx = i.item()
+            expert = self.experts[expert_idx]
+
             # Find which token-expert pairs in the flat list belong to this expert.
-            expert_mask = (flat_selected_experts == i)
-            if expert_mask.any():
-                # Get the indices of the selected tokens for this expert.
-                indices = torch.where(expert_mask)[0]
-                # Run the expert on its batch of tokens.
-                expert_result = expert(x_reshaped[token_indices[indices]])
-                # Store results using direct indexing, which is faster than masked_scatter_.
-                expert_outputs[indices] = expert_result
+            expert_mask = (flat_selected_experts == expert_idx)
+            # Get the indices of the selected tokens for this expert.
+            indices = torch.where(expert_mask)[0]
+            # Run the expert on its batch of tokens.
+            expert_result = expert(x_reshaped[token_indices[indices]])
+            # Store results using direct indexing, which is faster than masked_scatter_.
+            expert_outputs[indices] = expert_result
 
         # 6. Weight and combine the expert outputs
         weighted_outputs = expert_outputs * routing_weights.view(-1, 1)
