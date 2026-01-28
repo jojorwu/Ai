@@ -41,7 +41,7 @@ class ScoringEngine:
         """
         Performs a batched critique of a response using the base model.
         """
-        with torch.no_grad():
+        with torch.inference_mode():
             h = base_model.layers.embedding(full_sequence) * math.sqrt(
                 base_model.config.model.d_model
             )

@@ -90,6 +90,12 @@ class BaseConfig(BaseModel):
         if hasattr(args, 'flush_denormals') and args.flush_denormals:
             self.hardware.flush_denormals = True
             logging.info("Enabling flushing denormals.")
+        if hasattr(args, 'num_workers') and args.num_workers is not None:
+            self.hardware.num_workers = args.num_workers
+            logging.info("Setting num_workers to %d.", args.num_workers)
+        if hasattr(args, 'pin_memory') and args.pin_memory is not None:
+            self.hardware.pin_memory = args.pin_memory
+            logging.info("Setting pin_memory to %s.", args.pin_memory)
 
 
 class TrainConfig(BaseConfig):

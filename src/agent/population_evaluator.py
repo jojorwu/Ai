@@ -3,8 +3,10 @@ This module contains the PopulationEvaluator class, which manages the
 outer loop of collaborative evaluation.
 """
 import logging
-import torch
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, TYPE_CHECKING
+
+import torch
 
 from src.agent.agent import Agent
 from src.agent.dataclasses import CollaborationContext, IndependentResponseContext
@@ -62,7 +64,8 @@ class PopulationEvaluator:
         Orchestrates the evaluation of a single prompt by having each agent
         propose a response and delegating the scoring to CollaborativeEvaluator.
         """
-        for i, proposer in enumerate(agents):
+
+        def _get_response_and_score(i, proposer):
             response = proposer.generate_response(prompt_tensor)
             response_list = response[0].tolist()
 
@@ -87,3 +90,7 @@ class PopulationEvaluator:
                     response=response,
                 )
                 collaborative_evaluator.handle_independent_response(ctx)
+
+        with ThreadPoolExecutor(max_workers=len(agents)) as executor:
+            for i, proposer in enumerate(agents):
+                executor.submit(_get_response_and_score, i, proposer)

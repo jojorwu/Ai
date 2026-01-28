@@ -21,15 +21,19 @@ class DeviceManager:
         if self.config.device == "cpu":
             if self.config.num_threads > 0:
                 torch.set_num_threads(self.config.num_threads)
-                # logging.info("PyTorch intra-op threads set to %d", self.config.num_threads)
             if self.config.num_interop_threads > 0:
                 torch.set_num_interop_threads(self.config.num_interop_threads)
-                # logging.info("PyTorch inter-op threads set to %d", self.config.num_interop_threads)
 
             torch.backends.mkldnn.enabled = self.config.enable_mkldnn
 
             if self.config.flush_denormals:
                 torch.set_flush_denormal(True)
+
+        elif self.config.device == "gpu" or self.cuda_available:
+            torch.backends.cudnn.benchmark = True
+            # Allows for some more parallelism in CUDA operations
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
 
     def get_device_map(self) -> dict:
         """

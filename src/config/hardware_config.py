@@ -21,3 +21,7 @@ class HardwareConfig(BaseModel):
         True, description="Enable oneDNN (MKLDNN) optimizations for CPU.")
     flush_denormals: bool = Field(
         False, description="Enable flushing denormal numbers to zero on CPU.")
+    num_workers: int = Field(
+        4, description="Number of worker processes for data loading.")
+    pin_memory: bool = Field(
+        True, description="Enable pinned memory for faster CPU-to-GPU transfers.")

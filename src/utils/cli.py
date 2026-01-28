@@ -84,4 +84,15 @@ def create_main_parser():
         action='store_true',
         help="Enable flushing denormal numbers to zero on CPU."
     )
+    parser.add_argument(
+        '--num-workers',
+        type=int,
+        help="Number of worker processes for data loading."
+    )
+    parser.add_argument(
+        '--no-pin-memory',
+        action='store_false',
+        dest='pin_memory',
+        help="Disable pinned memory for CPU-to-GPU transfers."
+    )
     return parser

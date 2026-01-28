@@ -18,9 +18,9 @@ def load_multimodal_data_from_directory(
     return loader.load_from_directory(directory_path)
 
 
-def get_batches_torch(data, batch_size, seq_len, device):
+def get_batches_torch(data, batch_size, seq_len, device, pin_memory=False):
     """
     Generator function to yield batches of data as PyTorch tensors.
     (Backward compatibility wrapper)
     """
-    return Batcher.get_batches(data, batch_size, seq_len, device)
+    return Batcher.get_batches(data, batch_size, seq_len, device, pin_memory=pin_memory)
