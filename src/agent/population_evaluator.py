@@ -3,6 +3,7 @@ This module contains the PopulationEvaluator class, which manages the
 outer loop of collaborative evaluation.
 """
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, TYPE_CHECKING
 
@@ -91,6 +92,7 @@ class PopulationEvaluator:
                 )
                 collaborative_evaluator.handle_independent_response(ctx)
 
-        with ThreadPoolExecutor(max_workers=len(agents)) as executor:
+        max_workers = min(len(agents), os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for i, proposer in enumerate(agents):
                 executor.submit(_get_response_and_score, i, proposer)

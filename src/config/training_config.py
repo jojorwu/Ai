@@ -47,18 +47,20 @@ class OptimizerConfig(BaseModel):
 
 class LTMOptimizerConfig(BaseModel):
     """Configuration for the LTM's Adam optimizer."""
-    learning_rate: float
-    beta1: float
-    beta2: float
-    epsilon: float
-    weight_decay: float
+    learning_rate: float = Field(..., description="Learning rate for LTM updates.")
+    beta1: float = Field(0.9, description="Beta1 coefficient for Adam optimizer.")
+    beta2: float = Field(0.999, description="Beta2 coefficient for Adam optimizer.")
+    epsilon: float = Field(1e-8, description="Epsilon to avoid division by zero.")
+    weight_decay: float = Field(0.01, description="Weight decay (L2 regularization).")
 
 
 class LTMConfig(BaseModel):
     """Configuration for the Long-Term Memory (LTM)."""
     surprise_threshold: float = Field(
         ..., description="'Surprise' threshold for updating the LTM.")
-    optimizer: LTMOptimizerConfig
+    optimizer: LTMOptimizerConfig = Field(
+        ..., description="Optimizer settings for the LTM module."
+    )
 
 
 class SchedulerConfig(BaseModel):

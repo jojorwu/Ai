@@ -2,6 +2,7 @@
 Handles the collaborative evaluation of agents.
 """
 import logging
+import threading
 from typing import List
 
 import torch
@@ -32,6 +33,7 @@ class CollaborativeEvaluator:
         self.base_model = base_model
         self.scoring_engine = scoring_engine or ScoringEngine()
         self.population_evaluator = PopulationEvaluator()
+        self._score_lock = threading.Lock()
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
@@ -80,7 +82,8 @@ class CollaborativeEvaluator:
         """
         Manages the 'ask for help' scenario in collaborative evaluation.
         """
-        ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
+        with self._score_lock:
+            ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
 
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
@@ -109,7 +112,8 @@ class CollaborativeEvaluator:
             agents_to_reward=[helper, ctx.proposer],
             agents_to_penalize=[helper],
         )
-        self.scoring_engine.apply_scores(csc)
+        with self._score_lock:
+            self.scoring_engine.apply_scores(csc)
 
     def handle_independent_response(self, ctx: IndependentResponseContext):
         """
@@ -135,7 +139,8 @@ class CollaborativeEvaluator:
             agents_to_reward=[ctx.proposer],
             agents_to_penalize=[ctx.proposer],
         )
-        self.scoring_engine.apply_scores(csc)
+        with self._score_lock:
+            self.scoring_engine.apply_scores(csc)
 
     def _finalize_evaluation(self, scores, top_k):
         """

@@ -62,7 +62,6 @@ class AgentTrainer:
         )
 
         # Calculate value loss (encouraging the model to predict high values)
-        # We train the value head to predict 1.0 for any given sequence.
         target_values = torch.ones_like(values)
         loss_value = self.agent.value_loss_fn(values, target_values)
 
@@ -71,8 +70,14 @@ class AgentTrainer:
         if aux_loss is not None:
             total_loss += aux_loss
 
-        # Backward pass to compute gradients for LTM
-        total_loss.backward()
+        # Compute gradients ONLY for LTM parameters to avoid touching the shared base_model's gradients.
+        # This is essential for thread-safety during parallel agent training.
+        ltm_params = list(self.agent.long_term_memory.parameters())
+        grads = torch.autograd.grad(total_loss, ltm_params, allow_unused=True)
+
+        for param, grad in zip(ltm_params, grads):
+            if grad is not None:
+                param.grad = grad
 
         # Update LTM based on surprise
         self._update_ltm_and_calc_surprise()
