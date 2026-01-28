@@ -109,8 +109,9 @@ class MultiHeadAttention(nn.Module):
         q, k = self._apply_rope(q, k, seq_offset)
         k, v = self._get_updated_kv(k, v, kv_cache, layer_idx, seq_len)
 
-        k = self._repeat_kv(k, self.n_rep)
-        v = self._repeat_kv(v, self.n_rep)
+        if self.n_rep > 1:
+            k = self._repeat_kv(k, self.n_rep)
+            v = self._repeat_kv(v, self.n_rep)
 
         # Causal masking is required during prompt processing and speculative
         # decoding chunk validation (seq_len > 1). For single-token generation

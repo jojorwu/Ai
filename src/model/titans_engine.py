@@ -50,7 +50,7 @@ class TitansForwardEngine:
             final_dynamic_top_k = moe_top_k
 
         # 3. Pass through the dynamically selected number of decoder blocks.
-        total_aux_loss = torch.tensor(0.0, device=h.device)
+        aux_losses = []
         for i in range(active_layers):
             block = self.model.layers.decoder[i]
             block_input = ForwardPassInput(
@@ -69,6 +69,12 @@ class TitansForwardEngine:
                 h, aux_loss = block(block_input)
 
             if aux_loss is not None:
-                total_aux_loss += aux_loss
+                aux_losses.append(aux_loss)
+
+        total_aux_loss = (
+            torch.stack(aux_losses).sum()
+            if aux_losses
+            else torch.tensor(0.0, device=h.device)
+        )
 
         return h, total_aux_loss

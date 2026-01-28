@@ -85,7 +85,7 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
             )
             self.agent_manager.merge_agents(best_agents)
             if self.model.layers.long_term_memory:
-                self.model.layers.long_term_memory.to(device)
+                self.model.layers.long_term_memory.to(device, non_blocking=True)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
         epoch_time = time.time() - start_time
