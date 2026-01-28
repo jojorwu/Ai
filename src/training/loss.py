@@ -9,7 +9,6 @@ def cross_entropy_with_label_smoothing(
     logits: torch.Tensor,
     targets: torch.Tensor,
     smoothing: float,
-    vocab_size: int,
     ignore_index: int = -100,  # Standard ignore_index for PyTorch loss functions
 ) -> torch.Tensor:
     """
@@ -34,34 +33,15 @@ def cross_entropy_with_label_smoothing(
         The calculated loss as a single scalar tensor.
     """
     # Reshape for cross-entropy calculation
-    logits_flat = logits.view(-1, vocab_size)
+    logits_flat = logits.view(-1, logits.size(-1))
     targets_flat = targets.view(-1)
 
-    # Create the smoothed target distribution
-    # The confidence for the true class is (1.0 - smoothing)
-    # The confidence for all other classes is (smoothing / (vocab_size - 1))
-    confidence = 1.0 - smoothing
-    low_confidence = smoothing / (vocab_size - 1)
-
-    # Create a tensor of the same shape as logits, filled with the low_confidence value
-    smoothed_targets = torch.full_like(
-        logits_flat, low_confidence, device=logits_flat.device
+    # Use PyTorch's built-in cross_entropy with label_smoothing for efficiency.
+    # This avoids creating a large smoothed_targets tensor and is more stable.
+    return F.cross_entropy(
+        logits_flat,
+        targets_flat,
+        label_smoothing=smoothing,
+        ignore_index=ignore_index,
+        reduction="mean",
     )
-
-    # Set the high confidence value for the true target classes
-    smoothed_targets.scatter_(1, targets_flat.unsqueeze(1), confidence)
-
-    # Apply ignore_index mask
-    mask = targets_flat != ignore_index
-    smoothed_targets[targets_flat == ignore_index] = 0
-
-    # Calculate the Kullback-Leibler divergence loss
-    # Using log_softmax is more numerically stable than softmax followed by log
-    log_probs = F.log_softmax(logits_flat, dim=-1)
-    loss = torch.sum(-smoothed_targets * log_probs, dim=-1)
-
-    # Apply the mask and calculate the mean loss for non-ignored tokens
-    masked_loss = loss * mask
-    final_loss = masked_loss.sum() / mask.sum()
-
-    return final_loss

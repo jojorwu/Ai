@@ -7,7 +7,7 @@ import torch
 from bitsandbytes.nn import Linear4bit
 from torch import nn
 
-from src.config.core import DecoderBlockConfig
+from src.config.model_config import DecoderBlockConfig
 from src.model.layers.attention_sublayer import (AttentionSubLayer,
                                                  AttentionSubLayerInput)
 from src.model.layers.ff_sublayer import FeedForwardSubLayer

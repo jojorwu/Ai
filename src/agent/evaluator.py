@@ -2,7 +2,6 @@
 Handles the collaborative evaluation of agents.
 """
 import logging
-import math
 from typing import List
 
 import torch
@@ -14,6 +13,8 @@ from src.agent.dataclasses import (
     CritiqueScoringContext,
     IndependentResponseContext,
 )
+from src.agent.population_evaluator import PopulationEvaluator
+from src.agent.scoring import ScoringEngine
 
 
 class CollaborativeEvaluator:
@@ -21,17 +22,16 @@ class CollaborativeEvaluator:
     Manages the collaborative evaluation of a population of agents.
     """
 
-    REWARD_INDEPENDENT_SUCCESS = 5.0
-    PENALTY_INDEPENDENT_FAILURE = -5.0
-    REWARD_GOOD_HELP = 3.0
-    PENALTY_BAD_HELP = -3.0
-    REWARD_ASKING_FOR_HELP = 0.5
-    REWARD_ADMIT_IGNORANCE = 1.0
-    SUCCESS_THRESHOLD = 0.5
-
-    def __init__(self, agents: List[Agent], base_model: nn.Module):
+    def __init__(
+        self,
+        agents: List[Agent],
+        base_model: nn.Module,
+        scoring_engine: ScoringEngine = None,
+    ):
         self.agents = agents
         self.base_model = base_model
+        self.scoring_engine = scoring_engine or ScoringEngine()
+        self.population_evaluator = PopulationEvaluator()
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
@@ -42,7 +42,17 @@ class CollaborativeEvaluator:
             return self.agents[:top_k]
 
         scores, tokens = self._initialize_evaluation(tokenizer)
-        self._process_evaluation_prompts(evaluation_data, scores, tokens, device)
+
+        self.population_evaluator.process_evaluation_data(
+            evaluation_data=evaluation_data,
+            agents=self.agents,
+            scores=scores,
+            tokens=tokens,
+            device=device,
+            max_seq_len=self.base_model.config.model.max_seq_len,
+            collaborative_evaluator=self,
+        )
+
         return self._finalize_evaluation(scores, top_k)
 
     def _initialize_evaluation(self, tokenizer):
@@ -56,34 +66,21 @@ class CollaborativeEvaluator:
         }
         return scores, tokens
 
-    def _get_critics(self, proposer: Agent, agents_to_exclude: List[Agent]) -> List[Agent]:
+    def _get_critics(
+        self, proposer: Agent, agents_to_exclude: List[Agent]
+    ) -> List[Agent]:
         """
         Selects agents from the population to act as critics.
         """
         exclude_ids = {agent.agent_id for agent in agents_to_exclude}
-        critics = [
-            agent for agent in self.agents if agent.agent_id not in exclude_ids
-        ]
+        critics = [agent for agent in self.agents if agent.agent_id not in exclude_ids]
         return critics or [proposer]
 
-    def _apply_critique_based_scores(self, csc: CritiqueScoringContext):
-        """
-        Applies rewards or penalties to agents based on a critique score.
-        """
-        if csc.avg_critique_score > self.SUCCESS_THRESHOLD:
-            reward = csc.success_reward * csc.avg_critique_score
-            for agent in csc.agents_to_reward:
-                csc.scores[agent.agent_id] += reward
-        else:
-            penalty = csc.failure_penalty * (1 - csc.avg_critique_score)
-            for agent in csc.agents_to_penalize:
-                csc.scores[agent.agent_id] += penalty
-
-    def _handle_collaboration_request(self, ctx: CollaborationContext):
+    def handle_collaboration_request(self, ctx: CollaborationContext):
         """
         Manages the 'ask for help' scenario in collaborative evaluation.
         """
-        ctx.scores[ctx.proposer.agent_id] += self.REWARD_ASKING_FOR_HELP
+        ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
 
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
@@ -99,62 +96,46 @@ class CollaborativeEvaluator:
         critic_ltms = [c.long_term_memory for c in critics]
 
         full_critique_sequence = torch.cat([context, new_helper_tokens], dim=1)
-        avg_critique_score = self._batch_critique(
-            full_critique_sequence.expand(len(critics), -1), critic_ltms
+        avg_critique_score = self.scoring_engine.calculate_critique_score(
+            self.base_model,
+            full_critique_sequence.expand(len(critics), -1),
+            critic_ltms,
         )
         csc = CritiqueScoringContext(
             scores=ctx.scores,
             avg_critique_score=avg_critique_score,
-            success_reward=self.REWARD_GOOD_HELP,
-            failure_penalty=self.PENALTY_BAD_HELP,
+            success_reward=self.scoring_engine.reward_good_help,
+            failure_penalty=self.scoring_engine.penalty_bad_help,
             agents_to_reward=[helper, ctx.proposer],
             agents_to_penalize=[helper],
         )
-        self._apply_critique_based_scores(csc)
+        self.scoring_engine.apply_scores(csc)
 
-    def _handle_independent_response(self, ctx: IndependentResponseContext):
+    def handle_independent_response(self, ctx: IndependentResponseContext):
         """
         Manages the 'independent response' scenario in collaborative evaluation.
         """
         critics = self._get_critics(ctx.proposer, [ctx.proposer])
         new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
 
-        full_sequence = torch.cat(
-            [ctx.prompt_tokens, new_response_tokens], dim=1
-        ).expand(len(critics), -1)
+        full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
+            len(critics), -1
+        )
         critic_ltms = [critic.long_term_memory for critic in critics]
 
-        avg_critique_score = self._batch_critique(full_sequence, critic_ltms)
+        avg_critique_score = self.scoring_engine.calculate_critique_score(
+            self.base_model, full_sequence, critic_ltms
+        )
 
         csc = CritiqueScoringContext(
             scores=ctx.scores,
             avg_critique_score=avg_critique_score,
-            success_reward=self.REWARD_INDEPENDENT_SUCCESS,
-            failure_penalty=self.PENALTY_INDEPENDENT_FAILURE,
+            success_reward=self.scoring_engine.reward_independent_success,
+            failure_penalty=self.scoring_engine.penalty_independent_failure,
             agents_to_reward=[ctx.proposer],
             agents_to_penalize=[ctx.proposer],
         )
-        self._apply_critique_based_scores(csc)
-
-    def _batch_critique(self, full_sequence: torch.Tensor, critic_ltms: List[nn.Module]) -> float:
-        """
-        Performs a batched critique of a response using the base model.
-        """
-        with torch.no_grad():
-            h = self.base_model.layers.embedding(full_sequence) * math.sqrt(
-                self.base_model.config.model.d_model
-            )
-            ltm_states = torch.zeros(
-                (len(critic_ltms), 1, h.size(2)), device=h.device, dtype=h.dtype
-            )
-            for i, ltm in enumerate(critic_ltms):
-                if ltm:
-                    ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
-                    ltm_states[i], _ = ltm(ltm_input)
-            _, values, _ = self.base_model.forward(
-                full_sequence, ltm_state=ltm_states
-            )
-        return values.mean().item()
+        self.scoring_engine.apply_scores(csc)
 
     def _finalize_evaluation(self, scores, top_k):
         """
@@ -167,50 +148,5 @@ class CollaborativeEvaluator:
         )
         logging.info("  - Collaborative Evaluation Fitness scores:")
         for agent in sorted_agents:
-            logging.info(
-                "    - %s: %.4f", agent.agent_id, agent.get_fitness_score()
-            )
+            logging.info("    - %s: %.4f", agent.agent_id, agent.get_fitness_score())
         return sorted_agents[:top_k]
-
-    def _process_evaluation_prompts(self, evaluation_data, scores, tokens, device):
-        """
-        Iterates through evaluation data, creating prompts and triggering evaluation for each.
-        """
-        prompt_len = self.base_model.config.model.max_seq_len // 2
-        num_prompts = len(evaluation_data) // prompt_len
-        if num_prompts == 0:
-            logging.warning("Not enough validation data for evaluation.")
-            return
-
-        for i in range(min(num_prompts, len(self.agents) * 2)):
-            prompt_tokens_list = evaluation_data[i * prompt_len : (i + 1) * prompt_len]
-            prompt_tensor = torch.tensor([prompt_tokens_list], device=device)
-            self._evaluate_prompt_with_agents(prompt_tensor, scores, tokens)
-
-    def _evaluate_prompt_with_agents(self, prompt_tensor, scores, tokens):
-        """
-        Orchestrates the evaluation of a single prompt by having each agent propose a response.
-        """
-        for i, proposer in enumerate(self.agents):
-            response = proposer.generate_response(prompt_tensor)
-            response_list = response[0].tolist()
-
-            if tokens["ask_help"] in response_list:
-                ctx = CollaborationContext(
-                    proposer=proposer,
-                    prompt_tokens=prompt_tensor,
-                    scores=scores,
-                    proposer_index=i,
-                    response=response,
-                )
-                self._handle_collaboration_request(ctx)
-            elif tokens["i_dont_know"] in response_list:
-                scores[proposer.agent_id] += self.REWARD_ADMIT_IGNORANCE
-            else:
-                ctx = IndependentResponseContext(
-                    proposer=proposer,
-                    prompt_tokens=prompt_tensor,
-                    scores=scores,
-                    response=response,
-                )
-                self._handle_independent_response(ctx)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
-from src.config.core import DecoderBlockConfig, MultiHeadAttentionConfig
+from src.config.model_config import DecoderBlockConfig, MultiHeadAttentionConfig
 from src.model.layers.dropout import Dropout
 from src.model.layers.multi_head_attention import MultiHeadAttention
 from src.model.layers.rms_norm import RMSNorm

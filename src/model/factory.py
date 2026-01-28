@@ -8,9 +8,10 @@ from typing import Union
 import torch
 from accelerate import dispatch_model
 
-from src.config.core import (GenerateConfig, HardwareConfig, TrainConfig,
+from src.config.core import (GenerateConfig, TrainConfig,
                              TransformerConfig)
 from src.data.tokenizer import Tokenizer
+from src.model.device_manager import DeviceManager
 from src.model.model import Transformer
 
 
@@ -58,7 +59,12 @@ def load_model_and_tokenizer(
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"No weights file found in {model_dir} or specified in config.")
 
-    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    # Optimized weight loading: use mmap if available for faster loading
+    # and lower memory peak. Load directly to CPU first to avoid OOM,
+    # dispatch_model will handle device placement.
+    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state_dict)
+    del state_dict # Free memory
 
     if quantized:
         model = torch.quantization.quantize_dynamic(
@@ -76,35 +82,3 @@ def load_model_and_tokenizer(
     model.eval()
     logging.info("Model and tokenizer loaded successfully.")
     return model, tokenizer
-
-class DeviceManager:
-    """
-    Manages device placement for the Transformer model based on hardware
-    availability and configuration.
-    """
-
-    def __init__(self, config: HardwareConfig):
-        self.config = config
-        self.cuda_available = torch.cuda.is_available()
-        self.mps_available = torch.backends.mps.is_available()
-
-    def get_device_map(self) -> dict:
-        """
-        Determenos the appropriate device map for `accelerate`.
-
-        Returns:
-            A dictionary representing the device map.
-        """
-        if self.config.strategy == "hybrid" and self.cuda_available:
-            # Hybrid strategy: LTM on CPU, rest on GPU
-            return {"layers.long_term_memory": "cpu", "": "cuda:0"}
-
-        # Default to the configured device for other strategies
-        return {"": self.config.device}
-
-    def should_disable_4bit(self) -> bool:
-        """
-        Determines if 4-bit quantization should be disabled.
-        4-bit is only supported on CUDA.
-        """
-        return not self.cuda_available

@@ -8,6 +8,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Optional
 
+import torch
 from accelerate import Accelerator
 
 from src.config.core import TrainConfig
@@ -95,9 +96,17 @@ def prepare_training_environment(
     """
     config, model_dir, checkpoint_dir, resume_from = setup_environment(args)
 
+    # Determine best mixed precision strategy
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        mixed_precision = "bf16"
+    else:
+        mixed_precision = "fp16"
+
     accelerator = Accelerator(
-        mixed_precision="fp16", log_with="wandb" if args.wandb else None
+        mixed_precision=mixed_precision,
+        log_with="wandb" if args.wandb else None,
     )
+    logging.info("Using %s mixed precision.", mixed_precision)
     if accelerator.is_main_process and args.wandb:
         accelerator.init_trackers(
             project_name="transformer-project", config=config.model_dump()

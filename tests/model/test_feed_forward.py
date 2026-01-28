@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from src.config.core import FeedForwardConfig
+from src.config.model_config import FeedForwardConfig
 from src.model.layers.feed_forward import FeedForward
 
 
@@ -38,12 +38,10 @@ class TestFeedForward(unittest.TestCase):
         fake_loss.backward()
 
         # Check that gradients exist for all weights and biases
-        self.assertIsNotNone(ffn.w1.weight.grad)
-        self.assertIsNotNone(ffn.w1.bias.grad)
+        self.assertIsNotNone(ffn.w1_w3.weight.grad)
+        self.assertIsNotNone(ffn.w1_w3.bias.grad)
         self.assertIsNotNone(ffn.w2.weight.grad)
         self.assertIsNotNone(ffn.w2.bias.grad)
-        self.assertIsNotNone(ffn.w3.weight.grad)
-        self.assertIsNotNone(ffn.w3.bias.grad)
 
         self.assertIsNotNone(x.grad)
 

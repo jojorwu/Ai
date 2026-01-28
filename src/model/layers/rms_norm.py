@@ -17,13 +17,19 @@ class RMSNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass for RMSNorm.
+        Forward pass for RMSNorm, optimized for performance and numerical stability.
         Args:
             x: Input tensor of shape (batch_size, seq_len, d_model).
         Returns:
             Normalized tensor of the same shape.
         """
-        # Calculate the root mean square of the last dimension
-        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
-        # Normalize the input and scale by gamma
-        return (x / rms) * self.gamma
+        # Perform calculation in float32 for stability
+        input_dtype = x.dtype
+        x = x.to(torch.float32)
+
+        # Calculate the root mean square using rsqrt for efficiency
+        # rms = 1 / sqrt(mean(x^2) + eps)
+        inv_rms = torch.rsqrt(x.square().mean(-1, keepdim=True) + self.eps)
+
+        # Normalize the input, scale by gamma, and cast back to original dtype
+        return (x * inv_rms).to(input_dtype) * self.gamma

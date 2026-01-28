@@ -18,6 +18,22 @@ from src.data.data_loader import get_batches_torch as get_batches
 from src.training.loss import cross_entropy_with_label_smoothing
 
 
+def calculate_loss(model, x, y, evolution_config):
+    """
+    Common loss calculation logic for Transformer model with MoE support.
+    """
+    logits, _, aux_loss = model(x)
+    policy_loss = cross_entropy_with_label_smoothing(
+        logits,
+        y,
+        smoothing=evolution_config.label_smoothing,
+    )
+    total_loss = policy_loss + (
+        evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+    )
+    return total_loss, policy_loss
+
+
 class EvolutionRunner:  # pylint: disable=too-few-public-methods
     """Handles the evolutionary cycle."""
 
@@ -29,6 +45,7 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         val_data,
         tokenizer,
         evolution_config,
+        agent_manager: AgentManager,
     ):
         self.accelerator = accelerator
         self.model = model
@@ -36,22 +53,14 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         self.val_data = val_data
         self.tokenizer = tokenizer
         self.evolution_config = evolution_config
+        self.agent_manager = agent_manager
 
     def run(self):
         """Runs one full cycle of evolution."""
         logging.info("--- Starting new evolution cycle ---")
         start_time = time.time()
         device = self.accelerator.device
-        evaluator = CollaborativeEvaluator(
-            agents=[], base_model=self.model
-        )
-        agent_manager = AgentManager(
-            base_model=self.model,
-            num_agents=self.evolution_config.num_agents,
-            accelerator=self.accelerator,
-            evaluator=evaluator,
-        )
-        evaluator.agents = agent_manager.agents
+
         logging.info("Specializing %d agents...", self.evolution_config.num_agents)
         spec_config = SpecializationConfig(
             full_data=self.train_data,
@@ -59,20 +68,22 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
             batch_size=self.evolution_config.batch_size,
             steps_per_agent=10,
         )
-        agent_manager.specialize_agents_on_dataset(spec_config, device)
+        self.agent_manager.specialize_agents_on_dataset(spec_config, device)
+
         logging.info("Evaluating and selecting best agents...")
-        best_agents = agent_manager.collaborative_evaluation(
+        best_agents = self.agent_manager.collaborative_evaluation(
             evaluation_data=self.val_data[:50],
             tokenizer=self.tokenizer,
             top_k=self.evolution_config.num_survivors,
             device=device,
         )
+
         if best_agents:
             logging.info(
                 "Merging LTM from %d best agents into base model...",
                 len(best_agents),
             )
-            agent_manager.merge_agents(best_agents)
+            self.agent_manager.merge_agents(best_agents)
             if self.model.layers.long_term_memory:
                 self.model.layers.long_term_memory.to(device)
         else:
@@ -107,15 +118,8 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
 
     def _run_training_step(self, x, y):
         """Runs a single training step."""
-        logits, _, aux_loss = self.model(x)
-        policy_loss = cross_entropy_with_label_smoothing(
-            logits,
-            y,
-            smoothing=self.evolution_config.label_smoothing,
-            vocab_size=self.tokenizer.vocab_size,
-        )
-        total_loss = policy_loss + (
-            self.evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+        total_loss, policy_loss = calculate_loss(
+            self.model, x, y, self.evolution_config
         )
         loss_scaled = total_loss / self.evolution_config.gradient_accumulation_steps
         self.accelerator.backward(loss_scaled)
@@ -173,14 +177,10 @@ class ValidationRunner:  # pylint: disable=too-few-public-methods
         )
         with torch.no_grad():
             for x, y, _ in batch_iterator:
-                logits, _, _ = self.model(x)
-                loss = cross_entropy_with_label_smoothing(
-                    logits,
-                    y,
-                    smoothing=self.evolution_config.label_smoothing,
-                    vocab_size=self.tokenizer.vocab_size,
+                _, policy_loss = calculate_loss(
+                    self.model, x, y, self.evolution_config
                 )
-                total_loss += loss.item()
+                total_loss += policy_loss.item()
                 num_batches += 1
         self.model.train()
         return total_loss / num_batches if num_batches > 0 else float('inf')

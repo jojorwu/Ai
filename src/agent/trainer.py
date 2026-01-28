@@ -4,6 +4,7 @@ Trainer for the Agent class.
 import torch
 
 from src.agent.agent import Agent
+from src.agent.update_policy import SurpriseUpdatePolicy, UpdatePolicy
 
 
 class AgentTrainer:
@@ -11,13 +12,14 @@ class AgentTrainer:
     Handles the training process for a single agent, including the "experience" loop.
     """
 
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent, update_policy: UpdatePolicy = None):
         self.agent = agent
+        self.update_policy = update_policy or SurpriseUpdatePolicy()
 
     def _update_ltm_and_calc_surprise(self) -> float:
         """
         Calculates the gradient norm for LTM parameters ("surprise") and,
-        if it exceeds a threshold, performs an optimizer step.
+        if it exceeds a threshold (determined by policy), performs an optimizer step.
         """
         if not self.agent.long_term_memory:
             return 0.0
@@ -34,7 +36,7 @@ class AgentTrainer:
         surprise = torch.norm(torch.cat(grad_tensors)).item()
         self.agent.metrics.total_surprise += surprise
 
-        if surprise > self.agent.ltm_config.surprise_threshold:
+        if self.update_policy.should_update(surprise, self.agent.ltm_config):
             self.agent.ltm_optimizer.step()
 
         return surprise

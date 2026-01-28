@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.config.core import FeedForwardConfig, MoEConfig
+from src.config.model_config import FeedForwardConfig, MoEConfig
 from src.model.layers.feed_forward import FeedForward
 from src.model.layers.linear import Linear
 
@@ -51,10 +51,17 @@ class MixtureOfExperts(nn.Module):
 
         # 1. Route tokens to experts
         router_logits = self.gate(x_reshaped)
-        routing_weights, selected_experts = torch.topk(
-            router_logits, current_top_k, dim=-1
-        )
-        routing_weights = F.softmax(routing_weights, dim=-1, dtype=torch.float32)
+
+        if current_top_k == 1:
+            # Optimized path for top_k=1
+            routing_weights, selected_experts = router_logits.max(dim=-1, keepdim=True)
+            # Softmax on a single value is always 1.0, so we just use 1.0 directly.
+            routing_weights = torch.ones_like(routing_weights)
+        else:
+            routing_weights, selected_experts = torch.topk(
+                router_logits, current_top_k, dim=-1
+            )
+            routing_weights = F.softmax(routing_weights, dim=-1, dtype=torch.float32)
 
         # 2. Compute auxiliary load balancing loss
         aux_loss = self._compute_aux_loss(router_logits, selected_experts, batch_size, seq_len)
@@ -72,15 +79,21 @@ class MixtureOfExperts(nn.Module):
         )
 
         # 5. Process tokens by each expert in batches
-        for i, expert in enumerate(self.experts):
-            expert_mask = flat_selected_experts == i
-            if expert_mask.any():
-                # Select the tokens for the current expert
-                expert_inputs = x_reshaped[token_indices[expert_mask]]
-                # Run the expert on its tokens
-                expert_result = expert(expert_inputs)
-                # Store the results back in the flat tensor
-                expert_outputs.masked_scatter_(expert_mask.unsqueeze(-1), expert_result)
+        # We group tokens for the same expert to maximize GPU utilization.
+        # Loop only over experts that have at least one token assigned.
+        active_experts = torch.unique(flat_selected_experts)
+        for i in active_experts:
+            expert_idx = i.item()
+            expert = self.experts[expert_idx]
+
+            # Find which token-expert pairs in the flat list belong to this expert.
+            expert_mask = (flat_selected_experts == expert_idx)
+            # Get the indices of the selected tokens for this expert.
+            indices = torch.where(expert_mask)[0]
+            # Run the expert on its batch of tokens.
+            expert_result = expert(x_reshaped[token_indices[indices]])
+            # Store results using direct indexing, which is faster than masked_scatter_.
+            expert_outputs[indices] = expert_result
 
         # 6. Weight and combine the expert outputs
         weighted_outputs = expert_outputs * routing_weights.view(-1, 1)
