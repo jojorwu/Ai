@@ -2,23 +2,13 @@
 This module contains the ComplexityManager class, which dynamically adjusts
 generation parameters based on model 'surprise'.
 """
-from dataclasses import dataclass
+from src.config.model_config import ComplexityConfig
 
-
-@dataclass
-class DynamicParametersConfig:
-    """Configuration for dynamic parameter adjustment."""
-    low_complexity_threshold: float
-    medium_complexity_threshold: float
-    high_complexity_threshold: float
-    low_complexity_top_k: int
-    medium_complexity_top_k: int
-    high_complexity_top_k: int
 
 class ComplexityManager:
     """Manages the dynamic complexity level based on a moving average of 'surprise'."""
 
-    def __init__(self, config: DynamicParametersConfig, window_size: int = 5):
+    def __init__(self, config: ComplexityConfig, window_size: int = 5):
         self.config = config
         self.surprise_history = []
         self.window_size = window_size

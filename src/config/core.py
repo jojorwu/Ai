@@ -9,7 +9,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from src.config.hardware_config import HardwareConfig
-from src.config.model_config import ModelConfig, VisionConfig
+from src.config.model_config import ComplexityConfig, ModelConfig, VisionConfig
 from src.config.training_config import (EvolutionConfig, LTMConfig,
                                          OptimizerConfig, SchedulerConfig)
 
@@ -55,6 +55,7 @@ class BaseConfig(BaseModel):
     vision: VisionConfig
     ltm: LTMConfig
     hardware: HardwareConfig
+    complexity: Optional[ComplexityConfig] = Field(default_factory=ComplexityConfig)
 
     @classmethod
     def from_json(cls, file_path: str):

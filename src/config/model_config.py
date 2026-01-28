@@ -94,3 +94,13 @@ class VisionConfig(BaseModel):
                             description="Size of a single image patch.")
     num_channels: int = Field(
         3, description="Number of channels in the image (e.g., 3 for RGB).")
+
+
+class ComplexityConfig(BaseModel):
+    """Configuration for dynamic parameter adjustment."""
+    low_complexity_threshold: float = 0.5
+    medium_complexity_threshold: float = 1.5
+    high_complexity_threshold: float = 3.0
+    low_complexity_top_k: int = 1
+    medium_complexity_top_k: int = 10
+    high_complexity_top_k: int = 50

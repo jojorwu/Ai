@@ -9,6 +9,7 @@ from typing import List
 import torch
 from accelerate import Accelerator
 
+from src.agent.cache_manager import CacheManager
 from src.agent.dataclasses import AgentState
 from src.agent.tools import ToolRegistry, parse_tool_call
 from src.config.core import GenerateConfig
@@ -40,6 +41,7 @@ class AgentExecutor:
         self.config = config
         self.accelerator = accelerator
         self.tool_registry = ToolRegistry()
+        self.cache_manager = CacheManager(accelerator)
 
     def run(self):
         """Runs the main agent loop."""
@@ -51,6 +53,7 @@ class AgentExecutor:
             # Generate model response
             new_tokens = self._generate_model_response(agent_state)
             agent_state.append_tokens(new_tokens)
+            agent_state.prune_history(self.config.generation.context_window_size)
 
             generated_text = self.tokenizer.decode(new_tokens)
             logging.info("Model generated:\n%s", generated_text)
@@ -70,8 +73,8 @@ class AgentExecutor:
         start_text = self.config.generation.start_text
         logging.info("Initial task: %s", start_text)
         complexity_manager = (
-            ComplexityManager(self.config.dynamic_parameters)
-            if self.config.dynamic_parameters
+            ComplexityManager(self.config.complexity)
+            if self.config.complexity
             else None
         )
         return AgentState(
@@ -85,7 +88,7 @@ class AgentExecutor:
 
         # Initialize KV Caches if they don't exist yet.
         if agent_state.main_cache is None:
-            self._init_agent_caches(agent_state, unwrapped_model)
+            self.cache_manager.initialize_agent_caches(agent_state, unwrapped_model)
 
         # Use new_tokens from AgentState
         new_tokens = agent_state.get_new_tokens()
@@ -143,39 +146,3 @@ class AgentExecutor:
             agent_state.append_tokens(self.tokenizer.encode(tool_output_formatted))
             return True
         return False
-
-    def _init_agent_caches(self, agent_state: AgentState, unwrapped_model: Transformer):
-        """Initializes KV caches for the main and draft models."""
-        from src.model.layers.kv_cache import KVCache, KVCacheConfig
-        d_k = unwrapped_model.config.model.d_model // unwrapped_model.config.model.num_heads
-
-        agent_state.main_cache = KVCache(
-            KVCacheConfig(
-                num_layers=unwrapped_model.config.model.num_layers,
-                batch_size=1,
-                num_kv_heads=unwrapped_model.config.model.num_kv_heads,
-                d_k=d_k,
-                max_seq_len=unwrapped_model.config.model.max_seq_len,
-            ),
-            device=self.accelerator.device,
-            dtype=unwrapped_model.layers.embedding.weight.dtype,
-        )
-
-        if (
-            unwrapped_model.draft_model
-            and unwrapped_model.draft_model is not unwrapped_model
-        ):
-            agent_state.draft_cache = KVCache(
-                KVCacheConfig(
-                    num_layers=unwrapped_model.draft_model.config.model.num_layers,
-                    batch_size=1,
-                    num_kv_heads=unwrapped_model.draft_model.config.model.num_kv_heads,
-                    d_k=unwrapped_model.draft_model.config.model.d_model
-                    // unwrapped_model.draft_model.config.model.num_heads,
-                    max_seq_len=unwrapped_model.draft_model.config.model.max_seq_len,
-                ),
-                device=self.accelerator.device,
-                dtype=unwrapped_model.layers.embedding.weight.dtype,
-            )
-        else:
-            agent_state.draft_cache = agent_state.main_cache

@@ -31,6 +31,26 @@ class AgentState:
         """Appends new tokens to the conversation history."""
         self.conversation_history_tokens.extend(tokens)
 
+    def prune_history(self, context_window_size: int):
+        """
+        Prunes the conversation history to fit within the context window.
+        Adjusts the KV caches accordingly if they exist.
+        """
+        if len(self.conversation_history_tokens) <= context_window_size:
+            return
+
+        excess = len(self.conversation_history_tokens) - context_window_size
+        self.conversation_history_tokens = self.conversation_history_tokens[excess:]
+
+        # If we have caches, we need to reset them because the relative
+        # positions have changed. A more sophisticated approach would be
+        # to shift the cache, but for now, we'll just clear it so it
+        # re-populates on the next turn.
+        if self.main_cache:
+            self.main_cache.current_pos = 0
+        if self.draft_cache and self.draft_cache is not self.main_cache:
+            self.draft_cache.current_pos = 0
+
 
 @dataclass
 class LTMConfig:
