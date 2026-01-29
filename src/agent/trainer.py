@@ -33,7 +33,10 @@ class AgentTrainer:
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.norm(torch.cat(grad_tensors)).item()
+        # Optimized norm calculation to avoid large temporary tensor concatenation.
+        # ||[a, b]|| = sqrt(||a||^2 + ||b||^2)
+        total_norm_sq = sum(t.pow(2).sum() for t in grad_tensors)
+        surprise = torch.sqrt(total_norm_sq).item()
         self.agent.metrics.total_surprise += surprise
 
         if self.update_policy.should_update(surprise, self.agent.ltm_config):

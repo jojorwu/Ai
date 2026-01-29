@@ -77,7 +77,7 @@ class TitansForwardEngine:
         total_aux_loss = (
             torch.stack(aux_losses).sum()
             if aux_losses
-            else torch.tensor(0.0, device=h.device)
+            else torch.zeros((), device=h.device, dtype=h.dtype)
         )
 
         return h, total_aux_loss

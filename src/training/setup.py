@@ -26,8 +26,11 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
         raise ValueError(f"No data found in {data_dir}")
     all_text = " ".join([text for text, _ in multimodal_data])
     data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
-    split_idx = int(len(data_tokens) * (1 - validation_split))
-    return tokenizer, data_tokens[:split_idx], data_tokens[split_idx:]
+    # Convert to tensor early to optimize memory and training efficiency
+    data_tensor = torch.tensor(data_tokens, dtype=torch.long)
+
+    split_idx = int(len(data_tensor) * (1 - validation_split))
+    return tokenizer, data_tensor[:split_idx], data_tensor[split_idx:]
 
 
 def setup_environment(args: argparse.Namespace):

@@ -41,7 +41,7 @@ class FeedForwardSubLayer(nn.Module):
 
     def forward(self, x, ltm_state, dynamic_top_k):
         """Forward pass for the feed-forward sub-layer."""
-        aux_loss = torch.tensor(0.0, device=x.device)
+        aux_loss = torch.zeros((), device=x.device, dtype=x.dtype)
         x_norm = self.norm(x)
         if self.film:
             x_norm = self.film(x_norm, ltm_state)

@@ -50,9 +50,9 @@ class AgentSpecializer:
 
         def _train_single_agent(idx, agent):
             agent_trainer = AgentTrainer(agent)
-            agent_data = data_chunks[idx].tolist()
+            agent_data = data_chunks[idx]
 
-            if not agent_data or len(agent_data) < spec_config.seq_len + 1:
+            if agent_data.size(0) < spec_config.seq_len + 1:
                 logging.info("  - Skipping %s, not enough data.", agent.agent_id)
                 return
 
