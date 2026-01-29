@@ -49,29 +49,32 @@ class AgentSpecializer:
         logging.info("Specializing %d agents in parallel using %d workers...", num_agents, max_workers)
 
         def _train_single_agent(idx, agent):
-            agent_trainer = AgentTrainer(agent)
-            agent_data = data_chunks[idx]
+            try:
+                agent_trainer = AgentTrainer(agent)
+                agent_data = data_chunks[idx]
 
-            if agent_data.size(0) < spec_config.seq_len + 1:
-                logging.info("  - Skipping %s, not enough data.", agent.agent_id)
-                return
+                if agent_data.size(0) < spec_config.seq_len + 1:
+                    logging.info("  - Skipping %s, not enough data.", agent.agent_id)
+                    return
 
-            batch_generator = get_batches_torch(
-                agent_data,
-                spec_config.batch_size,
-                spec_config.seq_len,
-                device,
-                pin_memory=hardware_config.pin_memory if hardware_config else False,
-            )
+                batch_generator = get_batches_torch(
+                    agent_data,
+                    spec_config.batch_size,
+                    spec_config.seq_len,
+                    device,
+                    pin_memory=hardware_config.pin_memory if hardware_config else False,
+                )
 
-            steps_done = 0
-            for x_batch, y_batch, _ in batch_generator:
-                if steps_done >= spec_config.steps_per_agent:
-                    break
-                agent_trainer.experience(x_batch, y_batch)
-                steps_done += 1
+                steps_done = 0
+                for x_batch, y_batch, _ in batch_generator:
+                    if steps_done >= spec_config.steps_per_agent:
+                        break
+                    agent_trainer.experience(x_batch, y_batch)
+                    steps_done += 1
 
-            logging.info("  - Specialized %s in %d steps.", agent.agent_id, steps_done)
+                logging.info("  - Specialized %s in %d steps.", agent.agent_id, steps_done)
+            except Exception as e:  # pylint: disable=broad-except
+                logging.error("Failed to specialize agent %s: %s", agent.agent_id, e)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [

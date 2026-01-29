@@ -29,8 +29,19 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
     # Convert to tensor early to optimize memory and training efficiency
     data_tensor = torch.tensor(data_tokens, dtype=torch.long)
 
+    if len(data_tensor) < 100:  # Arbitrary minimum for basic sanity
+        raise ValueError(f"Dataset is too small: {len(data_tensor)} tokens.")
+
     split_idx = int(len(data_tensor) * (1 - validation_split))
-    return tokenizer, data_tensor[:split_idx], data_tensor[split_idx:]
+    train_data = data_tensor[:split_idx]
+    val_data = data_tensor[split_idx:]
+
+    if len(train_data) == 0:
+        raise ValueError("Training set is empty after split. Adjust validation_split or provide more data.")
+    if len(val_data) == 0:
+        logging.warning("Validation set is empty after split.")
+
+    return tokenizer, train_data, val_data
 
 
 def setup_environment(args: argparse.Namespace):

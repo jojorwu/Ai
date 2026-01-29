@@ -1,6 +1,8 @@
 """
 Trainer for the Agent class.
 """
+import logging
+import math
 import torch
 
 from src.agent.agent import Agent
@@ -73,6 +75,11 @@ class AgentTrainer:
         if aux_loss is not None:
             total_loss += aux_loss
 
+        # Check for NaN/Inf in loss to prevent weight corruption and autograd errors
+        if not torch.isfinite(total_loss):
+            logging.warning("Agent %s encountered non-finite loss (%.4f). Skipping update.", self.agent.agent_id, total_loss.item())
+            return
+
         # Compute gradients ONLY for LTM parameters to avoid touching the shared base_model's gradients.
         # This is essential for thread-safety during parallel agent training.
         ltm_params = list(self.agent.long_term_memory.parameters())
@@ -82,8 +89,14 @@ class AgentTrainer:
             if grad is not None:
                 param.grad = grad
 
+        # Perform gradient clipping for LTM parameters
+        torch.nn.utils.clip_grad_norm_(ltm_params, max_norm=1.0)
+
         # Update LTM based on surprise
-        self._update_ltm_and_calc_surprise()
+        surprise = self._update_ltm_and_calc_surprise()
+        if not math.isfinite(surprise):
+             logging.warning("Agent %s encountered non-finite surprise. Skipping optimizer step.", self.agent.agent_id)
+             return
 
         # Update metrics
         self.agent.metrics.value_score_sum += torch.mean(values).item()
