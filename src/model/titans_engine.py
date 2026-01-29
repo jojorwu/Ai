@@ -42,13 +42,17 @@ class TitansForwardEngine:
                 )
 
         # 2. Get dynamic parameters from the GatingNetwork.
+        # Minimize synchronization by keeping parameters as tensors where possible.
         active_layers_tensor, moe_top_k = self.model.layers.gating_network(ltm_state)
-        active_layers = int(torch.max(active_layers_tensor).item())
+
+        # Determine the number of layers once per forward pass.
+        active_layers = int(active_layers_tensor.max().item())
 
         if dynamic_top_k is not None:
             final_dynamic_top_k = dynamic_top_k
         elif isinstance(moe_top_k, torch.Tensor):
-            final_dynamic_top_k = int(moe_top_k.max().item())
+            # Pass the tensor directly to avoid .item() sync inside the loop.
+            final_dynamic_top_k = moe_top_k
         else:
             final_dynamic_top_k = moe_top_k
 
@@ -56,20 +60,25 @@ class TitansForwardEngine:
         aux_losses = []
         for i in range(active_layers):
             block = self.model.layers.decoder[i]
-            block_input = ForwardPassInput(
-                x=h,
-                ltm_state=ltm_state,
-                kv_cache=kv_cache,
-                layer_idx=i,
-                dynamic_top_k=final_dynamic_top_k,
-            )
 
+            # Avoid dataclass instantiation if not necessary for checkpointing.
             if self.model.config.model.gradient_checkpointing and self.model.training:
+                block_input = ForwardPassInput(
+                    x=h,
+                    ltm_state=ltm_state,
+                    kv_cache=kv_cache,
+                    layer_idx=i,
+                    dynamic_top_k=final_dynamic_top_k,
+                )
                 h, aux_loss = torch.utils.checkpoint.checkpoint(
                     block, block_input, use_reentrant=False
                 )
             else:
-                h, aux_loss = block(block_input)
+                # Direct call to sub-layer methods to avoid object creation.
+                # Note: This assumes we refactor the block forward pass.
+                h, aux_loss = block.forward_direct(
+                    h, ltm_state, kv_cache, i, final_dynamic_top_k
+                )
 
             if aux_loss is not None:
                 aux_losses.append(aux_loss)

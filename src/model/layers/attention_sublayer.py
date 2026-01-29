@@ -42,11 +42,17 @@ class AttentionSubLayer(nn.Module):
         return MultiHeadAttention(mha_config, linear_class=linear_class)
 
     def forward(self, inputs: AttentionSubLayerInput):
-        """Forward pass for the attention sub-layer."""
-        x_norm = self.norm(inputs.x)
-        if self.film:
-            x_norm = self.film(x_norm, inputs.ltm_state)
-        attn_output = self.mha(
-            x_norm, kv_cache=inputs.kv_cache, layer_idx=inputs.layer_idx
+        """Forward pass for the attention sub-layer using the input dataclass."""
+        return self.forward_direct(
+            inputs.x, inputs.ltm_state, inputs.kv_cache, inputs.layer_idx
         )
-        return inputs.x + self.dropout(attn_output)
+
+    def forward_direct(self, x, ltm_state, kv_cache, layer_idx):
+        """
+        Forward pass directly using parameters to avoid object creation.
+        """
+        x_norm = self.norm(x)
+        if self.film:
+            x_norm = self.film(x_norm, ltm_state)
+        attn_output = self.mha(x_norm, kv_cache=kv_cache, layer_idx=layer_idx)
+        return x + self.dropout(attn_output)

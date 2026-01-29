@@ -81,12 +81,14 @@ class MixtureOfExperts(nn.Module):
         # 5. Process tokens by each expert in batches
         # We group tokens for the same expert to maximize GPU utilization.
         # Use nonzero() to find indices of experts that have at least one token assigned.
-        # This avoids the enumerate() loop which can be a Python/CPU bottleneck.
         expert_counts = torch.bincount(flat_selected_experts, minlength=self.num_experts)
         active_expert_indices = expert_counts.nonzero().flatten()
 
-        for expert_idx_tensor in active_expert_indices:
-            expert_idx = expert_idx_tensor.item()
+        # We perform ONE synchronization to get the list of active expert IDs.
+        # This is much faster than calling .item() inside the loop.
+        active_expert_ids = active_expert_indices.tolist()
+
+        for expert_idx in active_expert_ids:
             expert = self.experts[expert_idx]
 
             # Find which token-expert pairs in the flat list belong to this expert.

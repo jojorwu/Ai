@@ -40,15 +40,19 @@ class DecoderBlock(nn.Module):
         self.ff_sublayer = FeedForwardSubLayer(config, self.use_moe, linear_class)
 
     def forward(self, inputs: ForwardPassInput):
-        """Performs the forward pass of the Decoder Block."""
-        attn_inputs = AttentionSubLayerInput(
-            x=inputs.x,
-            ltm_state=inputs.ltm_state,
-            kv_cache=inputs.kv_cache,
-            layer_idx=inputs.layer_idx,
+        """Performs the forward pass of the Decoder Block using the input dataclass."""
+        return self.forward_direct(
+            inputs.x,
+            inputs.ltm_state,
+            inputs.kv_cache,
+            inputs.layer_idx,
+            inputs.dynamic_top_k
         )
-        x = self.attention_sublayer(attn_inputs)
-        x, aux_loss = self.ff_sublayer(
-            x, inputs.ltm_state, inputs.dynamic_top_k
-        )
+
+    def forward_direct(self, x, ltm_state, kv_cache, layer_idx, dynamic_top_k):
+        """
+        Performs the forward pass directly using parameters to avoid object creation.
+        """
+        x = self.attention_sublayer.forward_direct(x, ltm_state, kv_cache, layer_idx)
+        x, aux_loss = self.ff_sublayer(x, ltm_state, dynamic_top_k)
         return x, aux_loss

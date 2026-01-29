@@ -38,9 +38,9 @@ class TestTitansEngine(unittest.TestCase):
 
         # Mock Decoder blocks
         mock_block1 = MagicMock()
-        mock_block1.return_value = (torch.randn(1, 10, 64), torch.tensor(0.1))
+        mock_block1.forward_direct.return_value = (torch.randn(1, 10, 64), torch.tensor(0.1))
         mock_block2 = MagicMock()
-        mock_block2.return_value = (torch.randn(1, 10, 64), torch.tensor(0.2))
+        mock_block2.forward_direct.return_value = (torch.randn(1, 10, 64), torch.tensor(0.2))
         self.mock_model.layers.decoder = [mock_block1, mock_block2]
 
         # Mock LTM
@@ -51,8 +51,8 @@ class TestTitansEngine(unittest.TestCase):
         self.assertEqual(out_h.shape, h.shape)
         self.assertAlmostEqual(total_aux.item(), 0.3)
         self.assertEqual(mock_gating.call_count, 1)
-        self.assertEqual(mock_block1.call_count, 1)
-        self.assertEqual(mock_block2.call_count, 1)
+        self.assertEqual(mock_block1.forward_direct.call_count, 1)
+        self.assertEqual(mock_block2.forward_direct.call_count, 1)
 
     def test_ltm_override(self):
         """Tests that LTM override is respected."""

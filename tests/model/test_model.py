@@ -30,7 +30,7 @@ class TestTransformer(unittest.TestCase):
         ) as mock_gate:
             from src.model.layers.decoder_block import DecoderBlock
             with patch.object(
-                DecoderBlock, 'forward',
+                DecoderBlock, 'forward_direct',
                 return_value=(torch.randn(1, 10, 16), None)
             ) as mock_decoder:
                 self.model(torch.randint(0, self.config.model.vocab_size, (1, 10)))
@@ -49,14 +49,15 @@ class TestTransformer(unittest.TestCase):
         ) as mock_gate:
             from src.model.layers.decoder_block import DecoderBlock
             with patch.object(
-                DecoderBlock, 'forward',
+                DecoderBlock, 'forward_direct',
                 return_value=(torch.randn(1, 10, 16), None)
             ) as mock_decoder:
                 self.model(torch.randint(0, self.config.model.vocab_size, (1, 10)))
                 mock_gate.assert_called_once()
-                # The 'dynamic_top_k' is passed within the ForwardPassInput dataclass
-                final_call_args = mock_decoder.call_args[0][0]
-                self.assertEqual(final_call_args.dynamic_top_k, 5)
+                # The 'dynamic_top_k' is passed as the last argument to forward_direct
+                # def forward_direct(self, x, ltm_state, kv_cache, layer_idx, dynamic_top_k)
+                final_call_args = mock_decoder.call_args[0]
+                self.assertEqual(final_call_args[4], 5)
 
 if __name__ == "__main__":
     unittest.main()
