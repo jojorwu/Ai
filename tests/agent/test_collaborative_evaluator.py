@@ -128,12 +128,12 @@ class TestCollaborativeEvaluator(unittest.TestCase):
         dummy_sequence = torch.randint(0, 100, (2, 10), device="cpu")
         mock_ltms = [agent.long_term_memory for agent in self.agents[:2]]
 
-        # Mock the LTMs to return a tuple, which was causing the bug
+        # Mock the LTMs to return (context, complexity, new_memory)
         for ltm in mock_ltms:
-            ltm.return_value = (torch.randn(1, 1, 16), torch.tensor([0.5]))
+            ltm.return_value = (torch.randn(1, 1, 16), torch.tensor([0.5]), None)
 
         # Mock the base model's forward pass
-        self.mock_model.forward.return_value = (None, torch.tensor([[0.8], [0.7]]), None)
+        self.mock_model.forward.return_value = (None, torch.tensor([[0.8], [0.7]]), None, None)
         self.mock_model.layers.embedding.return_value = torch.randn(2, 10, 16)
 
         # Call the method on scoring_engine

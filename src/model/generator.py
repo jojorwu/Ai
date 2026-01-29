@@ -28,7 +28,7 @@ class TextGenerator:
 
     def generate(
         self, inputs
-    ) -> Generator[Tuple[torch.Tensor, float], None, None]:
+    ) -> Generator[Tuple[torch.Tensor, float, torch.Tensor | None], None, None]:
         """
         Generates a sequence of tokens.
         """
@@ -41,7 +41,7 @@ class TextGenerator:
         main_cache, draft_cache = self._prepare_caches(inputs, draft_model, tokens)
 
         # Initial forward pass to populate caches if needed
-        last_logit = self._initial_sync(inputs, main_cache, tokens)
+        last_logit, current_ltm_memory = self._initial_sync(inputs, main_cache, tokens)
 
         while total_generated < inputs.max_new_tokens:
             # 1. Generate speculative chunk
@@ -56,9 +56,10 @@ class TextGenerator:
 
             # 2. Run main model on the speculative chunk
             with torch.enable_grad():
-                true_logits, value, _ = self.model(
+                true_logits, value, _, current_ltm_memory = self.model(
                     speculative_chunk,
                     ltm_override=inputs.ltm_override,
+                    ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
 
@@ -89,9 +90,10 @@ class TextGenerator:
 
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 with torch.enable_grad():
-                    corrected_logits, _, _ = self.model(
+                    corrected_logits, _, _, current_ltm_memory = self.model(
                         tokens[:, -1:],
                         ltm_override=inputs.ltm_override,
+                        ltm_memory=current_ltm_memory,
                         kv_cache=main_cache,
                     )
                     if draft_cache is not main_cache:
@@ -107,7 +109,7 @@ class TextGenerator:
             if draft_cache is not main_cache:
                 draft_cache.detach()
 
-            yield accepted_chunk, surprise
+            yield accepted_chunk, surprise, current_ltm_memory
             total_generated += accepted_len
 
     def _prepare_caches(self, inputs, draft_model, tokens):
@@ -151,11 +153,13 @@ class TextGenerator:
 
     def _initial_sync(self, inputs, main_cache, tokens):
         """Performs initial forward pass to synchronize the main cache."""
+        current_ltm_memory = inputs.ltm_memory
         if main_cache.current_pos == 0:
             with torch.no_grad():
-                initial_logits, _, _ = self.model(
+                initial_logits, _, _, current_ltm_memory = self.model(
                     tokens[:, -self.model.config.model.max_seq_len :],
                     ltm_override=inputs.ltm_override,
+                    ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
                 last_logit = initial_logits[:, -1:, :]
@@ -167,10 +171,11 @@ class TextGenerator:
                 # But wait, if the cache is already at current_pos, we need to rollback by 1
                 # to get the logits for that last token without duplicating it.
                 main_cache.rollback(1)
-                initial_logits, _, _ = self.model(
+                initial_logits, _, _, current_ltm_memory = self.model(
                     tokens[:, -1:],
                     ltm_override=inputs.ltm_override,
+                    ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
                 last_logit = initial_logits[:, -1:, :]
-        return last_logit
+        return last_logit, current_ltm_memory

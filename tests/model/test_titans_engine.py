@@ -46,7 +46,7 @@ class TestTitansEngine(unittest.TestCase):
         # Mock LTM
         self.mock_model.layers.long_term_memory = None
 
-        out_h, total_aux = self.engine.process_sequence(h)
+        out_h, total_aux, _ = self.engine.process_sequence(h)
 
         self.assertEqual(out_h.shape, h.shape)
         self.assertAlmostEqual(total_aux.item(), 0.3)
@@ -58,7 +58,8 @@ class TestTitansEngine(unittest.TestCase):
         """Tests that LTM override is respected."""
         h = torch.randn(1, 1, 64)
         mock_ltm = MagicMock()
-        mock_ltm.return_value = (torch.randn(1, 1, 64), None)
+        # Returns (context, complexity, new_memory)
+        mock_ltm.return_value = (torch.randn(1, 1, 64), torch.tensor([0.5]), None)
 
         # Mock GatingNetwork to skip decoder blocks for simplicity
         mock_gating = MagicMock()

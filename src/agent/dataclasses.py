@@ -19,6 +19,8 @@ class AgentState:
     complexity_manager: 'ComplexityManager' = None
     main_cache: 'KVCache' = None
     draft_cache: 'KVCache' = None
+    # Persistent memory matrix for the Linear Associative LTM
+    ltm_memory: torch.Tensor = None
     # Number of tokens from the current conversation_history_tokens that have been processed.
     _processed_count: int = 0
 

@@ -69,3 +69,4 @@ class GenerateInput:
     ltm_override: nn.Module | None = None
     kv_cache: Any = None
     draft_cache: Any = None
+    ltm_memory: Optional[torch.Tensor] = None

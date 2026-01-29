@@ -32,10 +32,10 @@ class SpeculativeEngine:
             if draft_cache and draft_cache.current_pos > 0:
                 # Synchronization logic as in previous turn
                 draft_cache.rollback(1)
-                draft_logits, _, _ = draft_model(tokens[:, -1:], kv_cache=draft_cache)
+                draft_logits, _, _, _ = draft_model(tokens[:, -1:], kv_cache=draft_cache)
             else:
                 # Standard prompt processing
-                draft_logits, _, _ = draft_model(tokens, kv_cache=draft_cache)
+                draft_logits, _, _, _ = draft_model(tokens, kv_cache=draft_cache)
 
             generated_chunks = []
             for i in range(speculative_steps):
@@ -49,7 +49,7 @@ class SpeculativeEngine:
                 generated_chunks.append(next_token)
 
                 if i < speculative_steps - 1:
-                    draft_logits, _, _ = draft_model(next_token, kv_cache=draft_cache)
+                    draft_logits, _, _, _ = draft_model(next_token, kv_cache=draft_cache)
 
             draft_tokens = torch.cat([tokens] + generated_chunks, dim=1)
 

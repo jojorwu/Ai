@@ -52,8 +52,9 @@ class ScoringEngine:
             summaries = h.mean(dim=1, keepdim=True)
             for i, ltm in enumerate(critic_ltms):
                 if ltm:
-                    ltm_states[i], _ = ltm(summaries[i : i + 1])
-            _, values, _ = base_model.forward(
+                    # Use a temporary state for critique as we don't persist memory matrix here.
+                    ltm_states[i], _, _ = ltm(summaries[i : i + 1])
+            _, values, _, _ = base_model.forward(
                 full_sequence, ltm_state=ltm_states
             )
         return values.mean().item()

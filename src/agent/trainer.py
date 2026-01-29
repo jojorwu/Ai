@@ -56,7 +56,7 @@ class AgentTrainer:
         self.agent.long_term_memory.train()
         self.agent.ltm_optimizer.zero_grad()
 
-        logits, values, aux_loss = self.agent.base_model.forward(
+        logits, values, aux_loss, _ = self.agent.base_model.forward(
             x_batch, ltm_override=self.agent.long_term_memory
         )
 

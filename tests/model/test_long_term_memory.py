@@ -19,10 +19,11 @@ class TestLongTermMemory(unittest.TestCase):
         ltm = LongTermMemory(d_model, d_hidden, num_layers)
 
         x = torch.randn(4, 1, d_model)  # Batch, SeqLen (1 for summary), Dim
-        context, complexity_score = ltm(x)
+        context, complexity_score, new_mem = ltm(x)
 
         self.assertEqual(context.shape, x.shape)
         self.assertEqual(complexity_score.shape, (4, 1, 1))
+        self.assertEqual(new_mem.shape, (4, d_hidden, d_model))
 
     def test_backward_pass_computes_grads(self):
         """
@@ -32,9 +33,11 @@ class TestLongTermMemory(unittest.TestCase):
         ltm = LongTermMemory(d_model, d_hidden, num_layers)
 
         x = torch.randn(4, 1, d_model, requires_grad=True)
+        # Provide prev_mem to ensure memory_decay gradient is non-zero
+        prev_mem = torch.randn(4, d_hidden, d_model, requires_grad=True)
 
         # Forward pass
-        context, complexity_score = ltm(x)
+        context, complexity_score, _ = ltm(x, prev_mem=prev_mem)
 
         # Simulate a loss and backward pass
         fake_loss = context.sum() + complexity_score.sum()

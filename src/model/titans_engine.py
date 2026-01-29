@@ -19,22 +19,27 @@ class TitansForwardEngine:
         self,
         h: torch.Tensor,
         ltm_state: torch.Tensor = None,
+        ltm_memory: torch.Tensor = None,
         dynamic_top_k: int = None,
         ltm_override: nn.Module = None,
         kv_cache: 'KVCache' = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """
         Processes the embedded sequence through the dynamic Titans layers.
         """
         # 1. Determine and compute the Long-Term Memory (LTM) state.
         long_term_memory = ltm_override or self.model.layers.long_term_memory
+        new_ltm_memory = ltm_memory
+
         if ltm_state is None:
             if long_term_memory:
                 # For autoregressive generation (seq_len=1), the mean is just the current token.
                 # In training (seq_len > 1), it's a summary of the whole window.
                 # We perform the mean in float32 for numerical stability.
                 summary = h.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
-                ltm_state, _ = long_term_memory(summary)
+
+                # Associative LTM returns (context, complexity, new_memory)
+                ltm_state, _, new_ltm_memory = long_term_memory(summary, prev_mem=ltm_memory)
             else:
                 # Placeholder zero tensor
                 ltm_state = torch.zeros(
@@ -89,4 +94,4 @@ class TitansForwardEngine:
             else torch.zeros((), device=h.device, dtype=h.dtype)
         )
 
-        return h, total_aux_loss
+        return h, total_aux_loss, new_ltm_memory

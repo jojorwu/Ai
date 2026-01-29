@@ -62,9 +62,9 @@ class DecoderBlockConfig(BaseModel):
 class LTMArchitectureConfig(BaseModel):
     """Configuration specific to the LTM architecture."""
     d_hidden: int | None = Field(
-        None, description="Размерность скрытого слоя в LTM.")
-    num_layers: int | None = Field(None,
-                                       description="Количество слоев в LTM.")
+        None, description="Размерность ассоциативного пространства LTM.")
+    num_layers: int | None = Field(
+        None, description="Количество слоев в LTM (применимо для MLP-компонентов).")
 
 
 class ModelConfig(BaseModel):

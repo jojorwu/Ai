@@ -68,10 +68,11 @@ class Transformer(nn.Module, GenerationMixin):
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
+        ltm_memory: torch.Tensor = None,
         dynamic_top_k: int = None,
         ltm_override: nn.Module | None = None,
         kv_cache: "KVCache" = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """
         Performs the forward pass, delegating Titans logic to TitansForwardEngine.
         """
@@ -79,9 +80,10 @@ class Transformer(nn.Module, GenerationMixin):
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
         # 2. Delegate sequence processing to the TitansForwardEngine
-        h, total_aux_loss = self.titans_engine.process_sequence(
+        h, total_aux_loss, new_ltm_memory = self.titans_engine.process_sequence(
             h=h,
             ltm_state=ltm_state,
+            ltm_memory=ltm_memory,
             dynamic_top_k=dynamic_top_k,
             ltm_override=ltm_override,
             kv_cache=kv_cache,
@@ -102,7 +104,7 @@ class Transformer(nn.Module, GenerationMixin):
         if kv_cache is not None:
             kv_cache.increment_pos(x.shape[1])
 
-        return logits, value, total_aux_loss
+        return logits, value, total_aux_loss, new_ltm_memory
 
     def generate(
         self, inputs: GenerateInput

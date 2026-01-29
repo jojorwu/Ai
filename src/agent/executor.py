@@ -133,11 +133,13 @@ class AgentExecutor:
             speculative_config=speculative_config,
             kv_cache=agent_state.main_cache,
             draft_cache=agent_state.draft_cache,
+            ltm_memory=agent_state.ltm_memory,
         )
 
         # Accumulate as tensors to minimize GPU-CPU synchronization points.
         generated_chunks = []
-        for chunk, surprise in unwrapped_model.generate(gen_input):
+        for chunk, surprise, new_ltm_memory in unwrapped_model.generate(gen_input):
+            agent_state.ltm_memory = new_ltm_memory
             generated_chunks.append(chunk)
             if agent_state.complexity_manager:
                 agent_state.complexity_manager.update_surprise(surprise)
