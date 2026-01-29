@@ -1,7 +1,7 @@
 
 import unittest
 import torch
-from src.model.layers.kv_cache import KVCache, KVCacheConfig
+from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
 from src.agent.dataclasses import AgentState
 
 class TestContextWindow(unittest.TestCase):

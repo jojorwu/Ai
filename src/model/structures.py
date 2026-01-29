@@ -7,11 +7,11 @@ from typing import Any, Optional
 import torch
 from torch import nn
 
-from src.model.layers.embedding import Embedding
-from src.model.layers.long_term_memory import LongTermMemory
-from src.model.layers.gating import GatingNetwork
-from src.model.layers.rms_norm import RMSNorm
-from src.model.layers.value_head import ValueHead
+from src.model.layers.core.embedding import Embedding
+from src.model.layers.titans.long_term_memory import LongTermMemory
+from src.model.layers.titans.gating import GatingNetwork
+from src.model.layers.core.rms_norm import RMSNorm
+from src.model.layers.heads.value_head import ValueHead
 
 
 @dataclass

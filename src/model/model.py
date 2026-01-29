@@ -11,10 +11,10 @@ from torch import nn
 from torch.nn import functional as F
 
 from src.config.core import TransformerConfig
-from src.model.generation import GenerationMixin
-from src.model.generator import TextGenerator
+from src.model.inference.generation import GenerationMixin
+from src.model.inference.generator import TextGenerator
 from src.model.initializer import ModelInitializer
-from src.model.titans_engine import TitansForwardEngine
+from src.model.titans.titans_engine import TitansForwardEngine
 from src.model.structures import (
     GenerateInput,
     ModelLayers,
@@ -22,12 +22,12 @@ from src.model.structures import (
     SamplingConfig,
     SpeculativeConfig,
 )
-from src.model.layers.decoder_block import DecoderBlock
-from src.model.layers.embedding import Embedding
-from src.model.layers.gating import GatingNetwork
-from src.model.layers.long_term_memory import LongTermMemory
-from src.model.layers.rms_norm import RMSNorm
-from src.model.layers.value_head import ValueHead
+from src.model.layers.blocks.decoder_block import DecoderBlock
+from src.model.layers.core.embedding import Embedding
+from src.model.layers.titans.gating import GatingNetwork
+from src.model.layers.titans.long_term_memory import LongTermMemory
+from src.model.layers.core.rms_norm import RMSNorm
+from src.model.layers.heads.value_head import ValueHead
 
 
 class Transformer(nn.Module, GenerationMixin):

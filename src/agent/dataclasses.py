@@ -7,8 +7,8 @@ from typing import List, TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from src.model.complexity_manager import ComplexityManager
-    from src.model.layers.kv_cache import KVCache
+    from src.model.titans.complexity_manager import ComplexityManager
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 @dataclass

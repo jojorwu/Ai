@@ -5,7 +5,7 @@ import torch
 from accelerate import Accelerator
 from src.agent.dataclasses import AgentState
 from src.model.model import Transformer
-from src.model.layers.kv_cache import KVCache, KVCacheConfig
+from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
 
 
 class CacheManager:

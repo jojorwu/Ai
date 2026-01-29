@@ -28,7 +28,7 @@ class TestTransformer(unittest.TestCase):
             'forward',
             return_value=(torch.tensor([3]), torch.tensor([1]))
         ) as mock_gate:
-            from src.model.layers.decoder_block import DecoderBlock
+            from src.model.layers.blocks.decoder_block import DecoderBlock
             with patch.object(
                 DecoderBlock, 'forward_direct',
                 return_value=(torch.randn(1, 10, 16), None)
@@ -47,7 +47,7 @@ class TestTransformer(unittest.TestCase):
             'forward',
             return_value=(torch.tensor([4]), torch.tensor([5]))
         ) as mock_gate:
-            from src.model.layers.decoder_block import DecoderBlock
+            from src.model.layers.blocks.decoder_block import DecoderBlock
             with patch.object(
                 DecoderBlock, 'forward_direct',
                 return_value=(torch.randn(1, 10, 16), None)

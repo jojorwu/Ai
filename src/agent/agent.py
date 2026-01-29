@@ -15,7 +15,7 @@ from src.model.model import Transformer
 from src.model.structures import GenerateInput, SamplingConfig
 
 if TYPE_CHECKING:
-    from src.model.layers.kv_cache import KVCache
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 @dataclass
