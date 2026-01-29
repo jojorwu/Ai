@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import torch
 
 
 class Tokenizer:
@@ -112,9 +113,13 @@ class Tokenizer:
         # Filter out any -1 tokens for characters not in vocab
         return [token for token in tokens if token != -1]
 
-    def decode(self, tokens: list[int]) -> str:
+    def decode(self, tokens: list[int] | torch.Tensor) -> str:
         """
         Converts a list of tokens back into a string.
-        Special tokens are preserved in the string, which is important for the model's context.
+        Special tokens are preserved in the string.
         """
+        if isinstance(tokens, torch.Tensor):
+            # Efficiently handle tensors (flatten and move to CPU if needed)
+            tokens = tokens.flatten().detach().cpu().tolist()
+
         return "".join([self.idx_to_char.get(token, '') for token in tokens])

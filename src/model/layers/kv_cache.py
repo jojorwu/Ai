@@ -98,6 +98,11 @@ class KVCache:
                 self.v_cache[layer_idx, :, :, :effective_pos, :]
             )
 
+        # Fast-path: if anchor_size is 0 and pos_in_sliding is 0, return everything
+        pos_in_sliding = (effective_pos - anchor_size) % sliding_capacity
+        if anchor_size == 0 and pos_in_sliding == 0:
+            return self.k_cache[layer_idx], self.v_cache[layer_idx]
+
         # Anchors are always the first anchor_size tokens
         k_anchors = self.k_cache[layer_idx, :, :, :anchor_size, :]
         v_anchors = self.v_cache[layer_idx, :, :, :anchor_size, :]
@@ -105,10 +110,12 @@ class KVCache:
         # The rest is a ring buffer starting from anchor_size
         # The oldest token in the sliding window is at:
         # anchor_size + (effective_pos - anchor_size) % sliding_capacity
-        pos_in_sliding = (effective_pos - anchor_size) % sliding_capacity
 
         if pos_in_sliding == 0:
             # Perfectly aligned sliding part
+            if anchor_size == 0:
+                return self.k_cache[layer_idx], self.v_cache[layer_idx]
+
             return (
                 torch.cat([k_anchors, self.k_cache[layer_idx, :, :, anchor_size:, :]], dim=2),
                 torch.cat([v_anchors, self.v_cache[layer_idx, :, :, anchor_size:, :]], dim=2)
@@ -123,6 +130,9 @@ class KVCache:
             self.v_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
             self.v_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
         ], dim=2)
+
+        if anchor_size == 0:
+            return k_sliding, v_sliding
 
         return (
             torch.cat([k_anchors, k_sliding], dim=2),
