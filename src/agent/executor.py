@@ -133,12 +133,19 @@ class AgentExecutor:
             draft_cache=agent_state.draft_cache,
         )
 
-        newly_generated_tokens = []
+        # Accumulate as tensors to minimize GPU-CPU synchronization points.
+        generated_chunks = []
         for chunk, surprise in unwrapped_model.generate(gen_input):
-            newly_generated_tokens.extend(chunk[0].tolist())
+            generated_chunks.append(chunk)
             if agent_state.complexity_manager:
                 agent_state.complexity_manager.update_surprise(surprise)
-        return newly_generated_tokens
+
+        if not generated_chunks:
+            return []
+
+        # Perform a single cat and tolist conversion at the end of the turn.
+        newly_generated_tokens_tensor = torch.cat(generated_chunks, dim=1)
+        return newly_generated_tokens_tensor[0].tolist()
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
         """Processes a tool call if one is present in the conversation history."""

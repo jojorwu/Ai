@@ -48,10 +48,10 @@ class Transformer(nn.Module, GenerationMixin):
         self._config = config  # Keep a copy of the full config
         self.load_in_4bit = load_in_4bit
 
-        initializer = ModelInitializer(self)
-        self.rope_embeddings = initializer.init_rope_embeddings()
-        self.layers = initializer.init_layers()
-        self.draft_model = initializer.init_draft_model()
+        self.initializer = ModelInitializer(self)
+        self.rope_embeddings = self.initializer.init_rope_embeddings()
+        self.layers = self.initializer.init_layers()
+        self._draft_model = None
 
         # Weight tying: share weights between embedding and policy head
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
@@ -117,8 +117,8 @@ class Transformer(nn.Module, GenerationMixin):
         Overrides the default `train` method to also set the mode for the draft model.
         """
         super().train(mode)
-        if self.draft_model:
-            self.draft_model.train(mode)
+        if self._draft_model:
+            self._draft_model.train(mode)
         return self
 
     def eval(self):
@@ -126,9 +126,16 @@ class Transformer(nn.Module, GenerationMixin):
         Overrides the default `eval` method to also set the mode for the draft model.
         """
         super().eval()
-        if self.draft_model:
-            self.draft_model.eval()
+        if self._draft_model:
+            self._draft_model.eval()
         return self
+
+    @property
+    def draft_model(self):
+        """Lazy-initializes the draft model for speculative decoding."""
+        if self._draft_model is None:
+            self._draft_model = self.initializer.init_draft_model()
+        return self._draft_model
 
     @property
     def device(self):

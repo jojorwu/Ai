@@ -28,8 +28,9 @@ class GenerationMixin:
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.linalg.norm(
-            torch.cat([t.flatten() for t in grad_tensors])
-        ).item()
+        # Optimized norm calculation to avoid large temporary tensor concatenation.
+        # ||[a, b]|| = sqrt(||a||^2 + ||b||^2)
+        total_norm_sq = sum(t.pow(2).sum() for t in grad_tensors)
+        surprise = torch.sqrt(total_norm_sq).item()
         long_term_memory.zero_grad()
         return surprise

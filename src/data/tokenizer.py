@@ -85,6 +85,10 @@ class Tokenizer:
         if add_special_tokens:
             text = f"<THINK>{text}<ANSWER>"
 
+        # Fast-path for simple text without special tokens to avoid regex overhead.
+        if not self.special_token_pattern.search(text):
+            return [self.char_to_idx.get(char, -1) for char in text if self.char_to_idx.get(char, -1) != -1]
+
         tokens = []
         last_idx = 0
         # Find all special tokens and process the text around them
