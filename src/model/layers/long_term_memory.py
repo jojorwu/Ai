@@ -1,16 +1,17 @@
 """
-PyTorch implementation of the Long-Term Memory (LTM) module using Linear Associative Memory.
+PyTorch implementation of the Long-Term Memory (LTM) module using Gated Linear Associative Memory.
 """
 import torch
 from torch import nn
 
 from src.model.layers.linear import Linear
+from src.model.layers.rms_norm import RMSNorm
 
 
 class LongTermMemory(nn.Module):
     """
-    Linear Associative Memory (Fast Weights) implementation for LTM.
-    This architecture uses key-value associations to store and retrieve information.
+    Gated Linear Associative Memory (Fast Weights) implementation for LTM.
+    This architecture uses input-dependent gating to manage information persistence.
     """
     def __init__(self, d_model: int, d_hidden: int, num_layers: int = 1):
         super().__init__()
@@ -22,11 +23,20 @@ class LongTermMemory(nn.Module):
         self.k_proj = Linear(d_model, d_hidden, bias=False)
         self.v_proj = Linear(d_model, d_model, bias=False)
 
-        # Learnable decay for the memory matrix
-        self.memory_decay = nn.Parameter(torch.tensor(0.9))
+        # Gating projections for selective forgetting and updating
+        self.forget_gate = nn.Sequential(
+            Linear(d_model, d_hidden),
+            nn.Sigmoid()
+        )
+        self.input_gate = nn.Sequential(
+            Linear(d_model, d_hidden),
+            nn.Sigmoid()
+        )
+
+        # Retrieval normalization for stability
+        self.retrieval_norm = RMSNorm(d_model)
 
         # Complexity head processes the query to determine sequence difficulty
-        # Use a small MLP if d_hidden is large enough, otherwise simple linear
         if d_hidden > 1:
             self.complexity_head = nn.Sequential(
                 Linear(d_hidden, d_hidden // 2),
@@ -44,7 +54,7 @@ class LongTermMemory(nn.Module):
         self, x: torch.Tensor, prev_mem: torch.Tensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Forward pass for the Linear Associative LTM.
+        Forward pass for the Gated Linear Associative LTM.
         Args:
             x: Input tensor summary [batch, 1, d_model]
             prev_mem: Previous memory matrix [batch, d_hidden, d_model]
@@ -59,17 +69,24 @@ class LongTermMemory(nn.Module):
         k = self.k_proj(x)  # [batch, 1, d_hidden]
         v = self.v_proj(x)  # [batch, 1, d_model]
 
+        # Compute gates [batch, 1, d_hidden]
+        f = self.forget_gate(x)
+        i = self.input_gate(x)
+
         if prev_mem is None:
             prev_mem = torch.zeros(
                 batch_size, self.d_hidden, self.d_model, device=x.device, dtype=x.dtype
             )
 
-        # Update memory: M_t = decay * M_{t-1} + k^T @ v
-        # This stores the association between the key and the value.
-        new_mem = self.memory_decay * prev_mem + torch.matmul(k.transpose(1, 2), v)
+        # Gated update: M_t = f * M_{t-1} + i * (k^T @ v)
+        # We apply f row-wise to the memory matrix.
+        new_mem = f.transpose(1, 2) * prev_mem + i.transpose(1, 2) * torch.matmul(k.transpose(1, 2), v)
 
         # Retrieval: context = q @ M_t
         context = torch.matmul(q, new_mem)  # [batch, 1, d_model]
+
+        # Apply normalization to the retrieved context
+        context = self.retrieval_norm(context)
 
         # Complexity head uses the query to score the input
         complexity_score = self.complexity_head(q)
