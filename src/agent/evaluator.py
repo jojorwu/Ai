@@ -72,10 +72,22 @@ class CollaborativeEvaluator:
         self, proposer: Agent, agents_to_exclude: List[Agent]
     ) -> List[Agent]:
         """
-        Selects agents from the population to act as critics.
+        Selects top-performing agents from the population to act as critics.
+        Higher fitness agents provide more reliable critiques.
         """
         exclude_ids = {agent.agent_id for agent in agents_to_exclude}
-        critics = [agent for agent in self.agents if agent.agent_id not in exclude_ids]
+
+        # Sort agents by fitness (descending) and exclude proposer/helpers
+        potential_critics = sorted(
+            [a for a in self.agents if a.agent_id not in exclude_ids],
+            key=lambda a: a.get_fitness_score(),
+            reverse=True
+        )
+
+        # Use top 50% of available agents as critics (at least 1)
+        num_critics = max(1, len(potential_critics) // 2)
+        critics = potential_critics[:num_critics]
+
         return critics or [proposer]
 
     def handle_collaboration_request(self, ctx: CollaborationContext):

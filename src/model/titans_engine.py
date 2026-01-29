@@ -30,8 +30,11 @@ class TitansForwardEngine:
         long_term_memory = ltm_override or self.model.layers.long_term_memory
         if ltm_state is None:
             if long_term_memory:
-                # Use mean of sequence as summary
-                ltm_state, _ = long_term_memory(h.mean(dim=1, keepdim=True))
+                # For autoregressive generation (seq_len=1), the mean is just the current token.
+                # In training (seq_len > 1), it's a summary of the whole window.
+                # We perform the mean in float32 for numerical stability.
+                summary = h.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
+                ltm_state, _ = long_term_memory(summary)
             else:
                 # Placeholder zero tensor
                 ltm_state = torch.zeros(
