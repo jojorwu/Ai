@@ -96,6 +96,9 @@ class ModelConfig(BaseModel):
     anchor_window_size: int = Field(
         4, description="Размер фиксированного окна 'якорей' (Attention Sinks) для контекста."
     )
+    rope_ntk_factor: float = Field(
+        1.0, description="Фактор масштабирования NTK-aware RoPE для расширения контекста."
+    )
 
 
 class VisionConfig(BaseModel):

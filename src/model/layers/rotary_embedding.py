@@ -1,17 +1,30 @@
 """
-PyTorch implementation of Rotary Positional Embeddings (RoPE).
+PyTorch implementation of Rotary Positional Embeddings (RoPE) with NTK-aware scaling.
 """
 import torch
 
 
-def precompute_rope_embeddings(d_k: int, max_seq_len: int):
+def precompute_rope_embeddings(d_k: int, max_seq_len: int, ntk_factor: float = 1.0):
     """
     Precomputes RoPE frequencies and embeddings for a given dimension and max sequence length.
+    Supports NTK-aware scaling for context window extension.
 
-    Returns a tuple of (cosines, sines) tensors.
+    Args:
+        d_k: Dimension of the keys/queries.
+        max_seq_len: Maximum sequence length.
+        ntk_factor: Scaling factor for NTK-aware RoPE.
+                    If > 1.0, the base frequency is adjusted to handle longer sequences.
+    Returns:
+        A tuple of (cosines, sines) tensors.
     """
+    base = 10000.0
+    if ntk_factor > 1.0:
+        # NTK-aware scaling: base' = base * (factor ^ (d / (d-2)))
+        # This spreads the frequencies to better accommodate longer sequences.
+        base = base * (ntk_factor ** (d_k / (d_k - 2)))
+
     # Create the theta term for RoPE
-    theta = 1.0 / (10000 ** (torch.arange(0, d_k, 2).float() / d_k))
+    theta = 1.0 / (base ** (torch.arange(0, d_k, 2).float() / d_k))
 
     # Create the sequence positions
     seq_indices = torch.arange(max_seq_len, dtype=torch.float)
@@ -19,11 +32,11 @@ def precompute_rope_embeddings(d_k: int, max_seq_len: int):
     # Outer product to get all theta * m values
     idx_theta = torch.outer(seq_indices, theta)
 
-    # Precompute cosines and sines
+    # Precompute cosines and sines using polar form for stability
     freqs = torch.polar(torch.ones_like(idx_theta), idx_theta)
 
     # freqs is now a complex tensor, split into real (cos) and imag (sin)
-    # and reshape for broadcasting: (max_seq_len, 1, d_k)
+    # and reshape for broadcasting: (max_seq_len, 1, d_k/2)
     cos = freqs.real.unsqueeze(1)
     sin = freqs.imag.unsqueeze(1)
 
@@ -46,26 +59,31 @@ def apply_rope_embeddings(
     """
     batch, heads, seq_len, d_k = x.shape
 
+    # Handle cases where the sequence exceeds precomputed RoPE limit.
+    max_rope_len = cos.size(0)
+    actual_offset = seq_offset
+    if seq_offset + seq_len > max_rope_len:
+        # For stability, we use a circular approach if precomputation was insufficient.
+        # This is a safe fallback to prevent crashes during extreme context extension.
+        actual_offset = seq_offset % max_rope_len
+        if actual_offset + seq_len > max_rope_len:
+            # If even the wrapped window overflows, we fallback to identity (no rotation)
+            return x
+
     # Reshape x into complex numbers: (batch, heads, seq_len, d_k/2)
-    # We do this in the original dtype to avoid unnecessary casting where possible,
-    # though view_as_complex requires the last dimension to be 2.
     x_complex = torch.view_as_complex(x.reshape(batch, heads, seq_len, -1, 2))
 
     # Slice and prepare RoPE frequencies for the current sequence window.
-    # cos/sin are pre-calculated as (max_seq_len, 1, d_k/2)
-    rope_cos = cos[seq_offset : seq_offset + seq_len, :, :]
-    rope_sin = sin[seq_offset : seq_offset + seq_len, :, :]
+    # We use actual_offset which handles the circular buffer case.
+    rope_cos = cos[actual_offset : actual_offset + seq_len, :, :]
+    rope_sin = sin[actual_offset : actual_offset + seq_len, :, :]
 
     # Create complex rotation vector: (seq_len, 1, d_k/2)
-    # This is more efficient than repeatedly unsqueezing.
     rope_embed = torch.complex(rope_cos, rope_sin)
 
     # Apply rotation using broadcasting:
     # x_complex: (batch, heads, seq_len, d_k/2)
-    # rope_embed: (seq_len, 1, d_k/2) -> will broadcast to (batch, heads, seq_len, d_k/2)
-    # Note: rope_embed needs to be (seq_len, d_k/2) and then broadcasted.
-    # Current rope_embed is (seq_len, 1, d_k/2). Let's transpose it to be (1, 1, seq_len, d_k/2)
-    # for cleaner broadcasting with (batch, heads, seq_len, d_k/2).
+    # rope_embed: (seq_len, 1, d_k/2)
     x_rotated = x_complex * rope_embed.view(1, 1, seq_len, -1)
 
     # Reshape back to real numbers and return

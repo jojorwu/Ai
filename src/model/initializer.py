@@ -38,7 +38,9 @@ class ModelInitializer:
         """Initializes and registers Rotary Positional Embeddings (RoPE)."""
         d_k = self.config.model.d_model // self.config.model.num_heads
         rope_cos, rope_sin = precompute_rope_embeddings(
-            d_k, self.config.model.max_seq_len
+            d_k,
+            self.config.model.max_seq_len,
+            ntk_factor=self.config.model.rope_ntk_factor
         )
         self.model.register_buffer("rope_cos_buf", rope_cos.clone())
         self.model.register_buffer("rope_sin_buf", rope_sin.clone())

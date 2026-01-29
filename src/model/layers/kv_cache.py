@@ -2,6 +2,7 @@
 PyTorch implementation of the K-V Cache for efficient Transformer generation.
 """
 from dataclasses import dataclass
+import logging
 
 import torch
 
@@ -23,6 +24,11 @@ class KVCache:
     """
     def __init__(self, config: KVCacheConfig, device="cpu", dtype=torch.float32):
         self.config = config
+        # Ensure anchor_size is reasonable
+        if self.config.anchor_size >= self.config.max_seq_len:
+            logging.warning("anchor_size >= max_seq_len. Disabling anchors for stability.")
+            self.config.anchor_size = 0
+
         cache_shape = (
             config.num_layers,
             config.batch_size,
@@ -43,6 +49,17 @@ class KVCache:
         anchor_size = self.config.anchor_size
         max_seq_len = self.config.max_seq_len
         sliding_capacity = max_seq_len - anchor_size
+
+        # Safety check for sliding capacity
+        if sliding_capacity <= 0:
+            # If no sliding window is possible, we just fill up to max_seq_len and stop updating
+            # or treat everything as an anchor. Here we treat everything as an anchor.
+            fill_len = min(seq_len, max_seq_len - self.current_pos)
+            if fill_len > 0:
+                indices = torch.arange(fill_len, device=k.device) + self.current_pos
+                self.k_cache[layer_idx, :, :, indices, :] = k[:, :, :fill_len, :]
+                self.v_cache[layer_idx, :, :, indices, :] = v[:, :, :fill_len, :]
+            return
 
         # For very large prompts, we can only keep anchor_size + sliding_capacity tokens.
         if seq_len > max_seq_len:
@@ -98,6 +115,10 @@ class KVCache:
                 self.v_cache[layer_idx, :, :, :effective_pos, :]
             )
 
+        # If sliding window is disabled (capacity <= 0), we just return the full cache.
+        if sliding_capacity <= 0:
+            return self.k_cache[layer_idx], self.v_cache[layer_idx]
+
         # Fast-path: if anchor_size is 0 and pos_in_sliding is 0, return everything
         pos_in_sliding = (effective_pos - anchor_size) % sliding_capacity
         if anchor_size == 0 and pos_in_sliding == 0:
@@ -107,29 +128,19 @@ class KVCache:
         k_anchors = self.k_cache[layer_idx, :, :, :anchor_size, :]
         v_anchors = self.v_cache[layer_idx, :, :, :anchor_size, :]
 
-        # The rest is a ring buffer starting from anchor_size
-        # The oldest token in the sliding window is at:
-        # anchor_size + (effective_pos - anchor_size) % sliding_capacity
-
-        if pos_in_sliding == 0:
-            # Perfectly aligned sliding part
-            if anchor_size == 0:
-                return self.k_cache[layer_idx], self.v_cache[layer_idx]
-
-            return (
-                torch.cat([k_anchors, self.k_cache[layer_idx, :, :, anchor_size:, :]], dim=2),
-                torch.cat([v_anchors, self.v_cache[layer_idx, :, :, anchor_size:, :]], dim=2)
-            )
-
         # Re-order sliding part
-        k_sliding = torch.cat([
-            self.k_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
-            self.k_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
-        ], dim=2)
-        v_sliding = torch.cat([
-            self.v_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
-            self.v_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
-        ], dim=2)
+        if pos_in_sliding == 0:
+            k_sliding = self.k_cache[layer_idx, :, :, anchor_size:, :]
+            v_sliding = self.v_cache[layer_idx, :, :, anchor_size:, :]
+        else:
+            k_sliding = torch.cat([
+                self.k_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
+                self.k_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
+            ], dim=2)
+            v_sliding = torch.cat([
+                self.v_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
+                self.v_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
+            ], dim=2)
 
         if anchor_size == 0:
             return k_sliding, v_sliding

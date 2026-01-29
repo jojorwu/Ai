@@ -26,28 +26,38 @@ class TitansForwardEngine:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """
         Processes the embedded sequence through the dynamic Titans layers.
+        Supports sequential (chunked) LTM updates for long sequences.
         """
         # 1. Determine and compute the Long-Term Memory (LTM) state.
         long_term_memory = ltm_override or self.model.layers.long_term_memory
         new_ltm_memory = ltm_memory
 
+        batch_size, seq_len, d_model = h.shape
+
         if ltm_state is None:
             if long_term_memory:
-                # For autoregressive generation (seq_len=1), the mean is just the current token.
-                # In training (seq_len > 1), it's a summary of the whole window.
-                # We perform the mean in float32 for numerical stability.
-                summary = h.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
-
-                # Associative LTM returns (context, complexity, new_memory)
-                ltm_state, _, new_ltm_memory = long_term_memory(summary, prev_mem=ltm_memory)
+                # For long sequences, we update the associative memory matrix sequentially
+                # in chunks to better capture context and maintain stability.
+                chunk_size = 512
+                if seq_len > chunk_size:
+                    # Sequential update through chunks
+                    for i in range(0, seq_len, chunk_size):
+                        chunk = h[:, i : i + chunk_size, :]
+                        chunk_summary = chunk.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
+                        # We only care about the final context for the decoder blocks,
+                        # but we must propagate the memory matrix update.
+                        ltm_state, _, new_ltm_memory = long_term_memory(chunk_summary, prev_mem=new_ltm_memory)
+                else:
+                    # Single update for short sequences or single tokens
+                    summary = h.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
+                    ltm_state, _, new_ltm_memory = long_term_memory(summary, prev_mem=new_ltm_memory)
             else:
                 # Placeholder zero tensor
                 ltm_state = torch.zeros(
-                    (h.size(0), 1, h.size(2)), device=h.device, dtype=h.dtype
+                    (batch_size, 1, d_model), device=h.device, dtype=h.dtype
                 )
 
         # 2. Get dynamic parameters from the GatingNetwork.
-        # Minimize synchronization by keeping parameters as tensors where possible.
         active_layers_tensor, moe_top_k = self.model.layers.gating_network(ltm_state)
 
         # Determine the number of layers once per forward pass.
@@ -56,7 +66,6 @@ class TitansForwardEngine:
         if dynamic_top_k is not None:
             final_dynamic_top_k = dynamic_top_k
         elif isinstance(moe_top_k, torch.Tensor):
-            # Pass the tensor directly to avoid .item() sync inside the loop.
             final_dynamic_top_k = moe_top_k
         else:
             final_dynamic_top_k = moe_top_k
@@ -66,7 +75,6 @@ class TitansForwardEngine:
         for i in range(active_layers):
             block = self.model.layers.decoder[i]
 
-            # Avoid dataclass instantiation if not necessary for checkpointing.
             if self.model.config.model.gradient_checkpointing and self.model.training:
                 block_input = ForwardPassInput(
                     x=h,
@@ -79,8 +87,6 @@ class TitansForwardEngine:
                     block, block_input, use_reentrant=False
                 )
             else:
-                # Direct call to sub-layer methods to avoid object creation.
-                # Note: This assumes we refactor the block forward pass.
                 h, aux_loss = block.forward_direct(
                     h, ltm_state, kv_cache, i, final_dynamic_top_k
                 )
