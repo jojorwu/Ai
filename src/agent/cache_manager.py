@@ -28,6 +28,7 @@ class CacheManager:
                 num_kv_heads=unwrapped_model.config.model.num_kv_heads,
                 d_k=d_k,
                 max_seq_len=unwrapped_model.config.model.max_seq_len,
+                anchor_size=unwrapped_model.config.model.anchor_window_size,
             ),
             device=self.accelerator.device,
             dtype=unwrapped_model.layers.embedding.weight.dtype,
@@ -45,6 +46,7 @@ class CacheManager:
                     d_k=unwrapped_model.draft_model.config.model.d_model
                     // unwrapped_model.draft_model.config.model.num_heads,
                     max_seq_len=unwrapped_model.draft_model.config.model.max_seq_len,
+                    anchor_size=unwrapped_model.draft_model.config.model.anchor_window_size,
                 ),
                 device=self.accelerator.device,
                 dtype=unwrapped_model.layers.embedding.weight.dtype,

@@ -14,11 +14,12 @@ class KVCacheConfig:
     num_kv_heads: int
     d_k: int
     max_seq_len: int
+    anchor_size: int = 4
 
 class KVCache:
     """
     A Key-Value cache for the Transformer, implemented as a fixed-size ring buffer
-    using PyTorch tensors. This is crucial for efficient auto-regressive generation.
+    with support for fixed anchors (Attention Sinks).
     """
     def __init__(self, config: KVCacheConfig, device="cpu", dtype=torch.float32):
         self.config = config
@@ -36,32 +37,35 @@ class KVCache:
     def update(self, k: torch.Tensor, v: torch.Tensor, layer_idx: int):
         """
         Updates the cache with new key and value tensors for a specific layer.
-        Uses efficient slicing instead of indexing where possible.
+        Preserves anchors and uses a ring buffer for the rest.
         """
         seq_len = k.shape[2]
+        anchor_size = self.config.anchor_size
+        max_seq_len = self.config.max_seq_len
+        sliding_capacity = max_seq_len - anchor_size
 
-        # If seq_len > max_seq_len, only take the last max_seq_len tokens
-        if seq_len > self.config.max_seq_len:
-            k = k[:, :, -self.config.max_seq_len:, :]
-            v = v[:, :, -self.config.max_seq_len:, :]
-            seq_len = self.config.max_seq_len
+        # For very large prompts, we can only keep anchor_size + sliding_capacity tokens.
+        if seq_len > max_seq_len:
+            k_anchors = k[:, :, :anchor_size, :]
+            v_anchors = v[:, :, :anchor_size, :]
+            k_sliding = k[:, :, -sliding_capacity:, :]
+            v_sliding = v[:, :, -sliding_capacity:, :]
 
-        start = self.current_pos % self.config.max_seq_len
-        end = start + seq_len
+            self.k_cache[layer_idx, :, :, :anchor_size, :] = k_anchors
+            self.v_cache[layer_idx, :, :, :anchor_size, :] = v_anchors
+            self.k_cache[layer_idx, :, :, anchor_size:, :] = k_sliding
+            self.v_cache[layer_idx, :, :, anchor_size:, :] = v_sliding
+            return
 
-        if end <= self.config.max_seq_len:
-            # Normal insertion (no wrap-around within this update)
-            self.k_cache[layer_idx, :, :, start:end, :] = k
-            self.v_cache[layer_idx, :, :, start:end, :] = v
-        else:
-            # Wrap-around insertion
-            first_part_len = self.config.max_seq_len - start
-            self.k_cache[layer_idx, :, :, start:, :] = k[:, :, :first_part_len, :]
-            self.v_cache[layer_idx, :, :, start:, :] = v[:, :, :first_part_len, :]
+        for i in range(seq_len):
+            curr_idx = self.current_pos + i
+            if curr_idx < anchor_size:
+                cache_idx = curr_idx
+            else:
+                cache_idx = anchor_size + (curr_idx - anchor_size) % sliding_capacity
 
-            second_part_len = seq_len - first_part_len
-            self.k_cache[layer_idx, :, :, :second_part_len, :] = k[:, :, first_part_len:, :]
-            self.v_cache[layer_idx, :, :, :second_part_len, :] = v[:, :, first_part_len:, :]
+            self.k_cache[layer_idx, :, :, cache_idx, :] = k[:, :, i, :]
+            self.v_cache[layer_idx, :, :, cache_idx, :] = v[:, :, i, :]
 
     def increment_pos(self, seq_len: int):
         """Increments the current position in the cache."""
@@ -74,41 +78,55 @@ class KVCache:
     def get(self, layer_idx: int, seq_len: int = 0):
         """
         Retrieves the cached keys and values for a specific layer in correct chronological order.
-        Includes `seq_len` additional tokens that were just added via `update` but not yet
-        accounted for in `self.current_pos`.
         """
         effective_pos = self.current_pos + seq_len
+        anchor_size = self.config.anchor_size
+        max_seq_len = self.config.max_seq_len
+        sliding_capacity = max_seq_len - anchor_size
+
         if effective_pos == 0:
             return (
                 self.k_cache[layer_idx, :, :, :0, :],
                 self.v_cache[layer_idx, :, :, :0, :]
             )
 
-        if effective_pos <= self.config.max_seq_len:
-            # Cache is not yet full, no wrap-around needed for retrieval
+        if effective_pos <= max_seq_len:
+            # No wrap-around yet
             return (
                 self.k_cache[layer_idx, :, :, :effective_pos, :],
                 self.v_cache[layer_idx, :, :, :effective_pos, :]
             )
 
-        # Cache is full or has wrapped around.
-        # effective_pos % max_seq_len is the index of the "next" token to be overwritten,
-        # which means it's the index of the OLDEST token if we've wrapped around.
-        pos = effective_pos % self.config.max_seq_len
-        if pos == 0:
-            # Perfectly aligned
-            return self.k_cache[layer_idx], self.v_cache[layer_idx]
+        # Anchors are always the first anchor_size tokens
+        k_anchors = self.k_cache[layer_idx, :, :, :anchor_size, :]
+        v_anchors = self.v_cache[layer_idx, :, :, :anchor_size, :]
 
-        # Re-order the ring buffer to be chronological
-        k = torch.cat([
-            self.k_cache[layer_idx, :, :, pos:, :],
-            self.k_cache[layer_idx, :, :, :pos, :]
+        # The rest is a ring buffer starting from anchor_size
+        # The oldest token in the sliding window is at:
+        # anchor_size + (effective_pos - anchor_size) % sliding_capacity
+        pos_in_sliding = (effective_pos - anchor_size) % sliding_capacity
+
+        if pos_in_sliding == 0:
+            # Perfectly aligned sliding part
+            return (
+                torch.cat([k_anchors, self.k_cache[layer_idx, :, :, anchor_size:, :]], dim=2),
+                torch.cat([v_anchors, self.v_cache[layer_idx, :, :, anchor_size:, :]], dim=2)
+            )
+
+        # Re-order sliding part
+        k_sliding = torch.cat([
+            self.k_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
+            self.k_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
         ], dim=2)
-        v = torch.cat([
-            self.v_cache[layer_idx, :, :, pos:, :],
-            self.v_cache[layer_idx, :, :, :pos, :]
+        v_sliding = torch.cat([
+            self.v_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
+            self.v_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
         ], dim=2)
-        return k, v
+
+        return (
+            torch.cat([k_anchors, k_sliding], dim=2),
+            torch.cat([v_anchors, v_sliding], dim=2)
+        )
 
     def detach(self):
         """Detaches the cache tensors from the current computation graph."""

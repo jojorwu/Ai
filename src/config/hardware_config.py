@@ -25,3 +25,5 @@ class HardwareConfig(BaseModel):
         4, description="Количество рабочих процессов для загрузки данных.")
     pin_memory: bool = Field(
         True, description="Включить закрепленную память для ускорения передачи данных CPU->GPU.")
+    dynamic_quantization: bool = Field(
+        False, description="Включить динамическое квантование (Linear слои в qint8) для CPU.")

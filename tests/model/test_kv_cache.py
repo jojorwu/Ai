@@ -20,7 +20,8 @@ class TestKVCache(unittest.TestCase):
             batch_size=4,
             num_kv_heads=8,
             d_k=64,
-            max_seq_len=10
+            max_seq_len=10,
+            anchor_size=2
         )
         self.kv_cache = KVCache(self.config)
 
@@ -101,8 +102,16 @@ class TestKVCache(unittest.TestCase):
         # The total length of the cached sequence should not exceed max_seq_len
         self.assertEqual(k_cached.shape[2], self.config.max_seq_len)
 
-        # Check that the cached data is correct
-        k_expected = torch.cat([k1[:, :, -5:], k2[:, :, :5]], dim=2)
+        # Check that the cached data is correct (Anchor-Sliding principle)
+        # k1 (7 tokens) + k2 (5 tokens) = 12 tokens
+        # anchors: k1[:2]
+        # sliding part (size 8): last 8 tokens from the rest [k1[2:7], k2[:5]]
+        # tokens from k1: 5 tokens. tokens from k2: 5 tokens. Total 10 tokens in sliding pool.
+        # last 8 from pool: [k1[4:7], k2[:5]]
+        k_anchors = k1[:, :, :2, :]
+        k_sliding = torch.cat([k1[:, :, 4:, :], k2[:, :, :, :]], dim=2)
+        k_expected = torch.cat([k_anchors, k_sliding], dim=2)
+
         self.assertTrue(torch.equal(k_cached, k_expected))
 
     def test_get_with_seq_len(self):

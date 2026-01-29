@@ -53,6 +53,8 @@ class AgentExecutor:
             # Generate model response
             new_tokens = self._generate_model_response(agent_state)
             agent_state.append_tokens(new_tokens)
+            # Newly generated tokens are already in the cache because of generate()
+            agent_state.mark_as_processed(len(new_tokens))
             agent_state.prune_history(self.config.generation.context_window_size)
 
             generated_text = self.tokenizer.decode(new_tokens)
@@ -93,7 +95,12 @@ class AgentExecutor:
         # Use new_tokens from AgentState
         new_tokens = agent_state.get_new_tokens()
         if not new_tokens:
+            # If everything is already in cache, start with the last token
+            # to trigger next-token generation.
             new_tokens = agent_state.conversation_history_tokens[-1:]
+        else:
+            # Mark these as processed as they are about to be sent to the model.
+            agent_state.mark_as_processed(len(new_tokens))
 
         input_tokens = torch.tensor([new_tokens], device=self.accelerator.device)
 

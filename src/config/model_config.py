@@ -93,6 +93,9 @@ class ModelConfig(BaseModel):
         None, description="Количество 'экспертов', выбираемых для каждого токена.")
     gradient_checkpointing: bool = Field(
         False, description="Включить чекпоинты градиентов для экономии памяти.")
+    anchor_window_size: int = Field(
+        4, description="Размер фиксированного окна 'якорей' (Attention Sinks) для контекста."
+    )
 
 
 class VisionConfig(BaseModel):
