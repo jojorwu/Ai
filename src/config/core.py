@@ -35,6 +35,7 @@ class DynamicParametersConfig(BaseModel):
     temperature: float = Field(..., description="Температура для сэмплирования.")
     top_k: int = Field(..., description="Параметр Top-k для сэмплирования.")
     top_p: float = Field(..., description="Параметр Top-p (nucleus) для сэмплирования.")
+    min_p: float = Field(0.05, description="Параметр Min-p для сэмплирования.")
     speculative_steps: int = Field(...,
                                    description="Количество шагов спекулятивного декодирования.")
     value_threshold: float = Field(

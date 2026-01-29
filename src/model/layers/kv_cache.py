@@ -57,15 +57,16 @@ class KVCache:
             self.v_cache[layer_idx, :, :, anchor_size:, :] = v_sliding
             return
 
-        for i in range(seq_len):
-            curr_idx = self.current_pos + i
-            if curr_idx < anchor_size:
-                cache_idx = curr_idx
-            else:
-                cache_idx = anchor_size + (curr_idx - anchor_size) % sliding_capacity
+        indices = torch.arange(seq_len, device=k.device) + self.current_pos
+        cache_indices = torch.where(
+            indices < anchor_size,
+            indices,
+            anchor_size + (indices - anchor_size) % sliding_capacity
+        )
 
-            self.k_cache[layer_idx, :, :, cache_idx, :] = k[:, :, i, :]
-            self.v_cache[layer_idx, :, :, cache_idx, :] = v[:, :, i, :]
+        # Vectorized assignment to the cache
+        self.k_cache[layer_idx, :, :, cache_indices, :] = k
+        self.v_cache[layer_idx, :, :, cache_indices, :] = v
 
     def increment_pos(self, seq_len: int):
         """Increments the current position in the cache."""

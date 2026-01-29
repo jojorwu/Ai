@@ -37,17 +37,21 @@ class SpeculativeEngine:
                 # Standard prompt processing
                 draft_logits, _, _ = draft_model(tokens, kv_cache=draft_cache)
 
+            generated_chunks = []
             for i in range(speculative_steps):
                 next_token = self.sampler.sample(
                     draft_logits[:, -1, :],
                     sampling_config.temperature,
                     sampling_config.dynamic_top_k or sampling_config.top_k,
                     sampling_config.top_p,
+                    sampling_config.min_p,
                 )
-                draft_tokens = torch.cat((draft_tokens, next_token), dim=1)
+                generated_chunks.append(next_token)
 
                 if i < speculative_steps - 1:
                     draft_logits, _, _ = draft_model(next_token, kv_cache=draft_cache)
+
+            draft_tokens = torch.cat([tokens] + generated_chunks, dim=1)
 
         return draft_tokens[:, tokens.size(1) :], draft_tokens
 
@@ -70,6 +74,7 @@ class SpeculativeEngine:
             sampling_config.temperature,
             sampling_config.dynamic_top_k or sampling_config.top_k,
             sampling_config.top_p,
+            sampling_config.min_p,
         ).view(speculative_chunk.shape)
 
         mismatches = (speculative_chunk != verification_tokens).long()

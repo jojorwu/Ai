@@ -46,6 +46,7 @@ class SamplingConfig:
     temperature: float = 1.0
     top_k: int = 0
     top_p: float = 0.9
+    min_p: float = 0.05
     dynamic_top_k: int = None
 
 

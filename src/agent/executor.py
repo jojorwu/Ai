@@ -119,6 +119,8 @@ class AgentExecutor:
         sampling_config = SamplingConfig(
             temperature=self.config.generation.temperature,
             top_k=self.config.generation.top_k,
+            top_p=self.config.generation.top_p,
+            min_p=self.config.generation.min_p,
             dynamic_top_k=dynamic_top_k,
         )
         speculative_config = SpeculativeConfig(

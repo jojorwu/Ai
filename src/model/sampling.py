@@ -12,7 +12,7 @@ class LogitSampler:
     """
 
     @staticmethod
-    def sample(logits, temperature: float = 1.0, top_k: int = 0, top_p: float = 0.0):
+    def sample(logits, temperature: float = 1.0, top_k: int = 0, top_p: float = 0.0, min_p: float = 0.0):
         """
         Samples a token from the given logits.
 
@@ -22,6 +22,7 @@ class LogitSampler:
             top_k: If > 0, only sample from the top-k most likely tokens.
             top_p: If > 0.0, only sample from the smallest set of tokens whose cumulative
                    probability exceeds top_p.
+            min_p: If > 0.0, any token with probability less than min_p * max_prob is removed.
 
         Returns:
             A tensor containing the index of the sampled token.
@@ -33,6 +34,12 @@ class LogitSampler:
 
         # Apply temperature
         logits = logits / temperature
+
+        # Apply Min-P filtering
+        if min_p > 0.0:
+            probs = F.softmax(logits, dim=-1)
+            max_prob = probs.max(dim=-1, keepdim=True).values
+            logits[probs < min_p * max_prob] = -float("Inf")
 
         # Apply top-k filtering
         if top_k > 0:
