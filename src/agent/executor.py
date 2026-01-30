@@ -110,7 +110,18 @@ class AgentExecutor:
         max_new_tokens: int | None = None,
         stop_tokens: list[int] | None = None,
     ) -> List[int]:
-        """Generates a response from the model, utilizing persistent KV caching."""
+        """
+        Generates a sequence of tokens from the model, utilizing persistent KV caching
+        and speculative decoding.
+
+        Args:
+            agent_state: The current state of the agent, including caches and history.
+            max_new_tokens: Optional override for the maximum tokens to generate.
+            stop_tokens: Optional list of token IDs to terminate generation.
+
+        Returns:
+            The newly generated tokens as a list of integers.
+        """
         unwrapped_model = self.accelerator.unwrap_model(self.model)
 
         # Initialize KV Caches if they don't exist yet.

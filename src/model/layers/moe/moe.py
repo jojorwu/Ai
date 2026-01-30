@@ -53,10 +53,10 @@ class MixtureOfExperts(nn.Module):
         router_logits = self.gate(x_reshaped)
 
         if current_top_k == 1:
-            # Optimized path for top_k=1
-            routing_weights, selected_experts = router_logits.max(dim=-1, keepdim=True)
-            # Softmax on a single value is always 1.0, so we just use 1.0 directly.
-            routing_weights = torch.ones_like(routing_weights)
+            # Optimized path for top_k=1. We use the actual gate probability
+            # to maintain differentiability and allow the router to scale expert contribution.
+            gate_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+            routing_weights, selected_experts = gate_probs.max(dim=-1, keepdim=True)
         else:
             routing_weights, selected_experts = torch.topk(
                 router_logits, current_top_k, dim=-1

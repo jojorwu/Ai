@@ -83,7 +83,18 @@ class Agent:
         sampling_config: SamplingConfig | None = None,
     ) -> torch.Tensor:
         """
-        Triggers the agent's thinking process.
+        Triggers the agent's explicit "Chain-of-Thought" phase.
+
+        Args:
+            prompt_tokens: Input tokens to think about.
+            max_thought_len: Maximum number of tokens for the thinking phase.
+            stop_tokens: Token IDs that should terminate the thinking process (e.g., </THINK>).
+            kv_cache: Optional persistent KV cache for the main model.
+            draft_cache: Optional persistent KV cache for the draft model.
+            sampling_config: Parameters for token sampling.
+
+        Returns:
+            A tensor containing both the prompt and the generated thought tokens.
         """
         return self.generate_response(
             prompt_tokens=prompt_tokens,
@@ -106,6 +117,18 @@ class Agent:
     ) -> torch.Tensor:
         """
         Generates a full response tensor based on a prompt, utilizing optional KV caches.
+        This method manages model state and utilizes the speculative decoding pipeline.
+
+        Args:
+            prompt_tokens: The initial sequence of tokens.
+            max_new_tokens: Maximum number of tokens to generate.
+            stop_tokens: Optional list of token IDs to stop generation at.
+            kv_cache: Main model KV cache.
+            draft_cache: Draft model KV cache for speculative decoding.
+            sampling_config: Configuration for the sampling strategy.
+
+        Returns:
+            A concatenated tensor of [prompt_tokens, generated_tokens].
         """
         self.base_model.eval()
         if self.long_term_memory:

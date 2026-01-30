@@ -186,8 +186,9 @@ class TextGenerator:
         current_ltm_memory = inputs.ltm_memory
         if main_cache.current_pos == 0:
             with torch.no_grad():
+                # Process the entire prompt to ensure LTM and KV cache are fully synchronized.
                 outputs = self.model(
-                    tokens[:, -self.model.config.model.max_seq_len :],
+                    tokens,
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,

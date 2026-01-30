@@ -63,12 +63,9 @@ class TitansForwardEngine:
         # Determine the number of layers once per forward pass.
         active_layers = int(active_layers_tensor.max().item())
 
-        if dynamic_top_k is not None:
-            final_dynamic_top_k = dynamic_top_k
-        elif isinstance(moe_top_k, torch.Tensor):
-            final_dynamic_top_k = moe_top_k
-        else:
-            final_dynamic_top_k = moe_top_k
+        final_dynamic_top_k = (
+            dynamic_top_k if dynamic_top_k is not None else moe_top_k
+        )
 
         # 3. Pass through the dynamically selected number of decoder blocks.
         aux_losses = []
