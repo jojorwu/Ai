@@ -32,6 +32,12 @@ def setup_from_args(
     - Loads the appropriate configuration file.
     - Applies CLI arguments to override the config.
     """
+    # Check for --explain early to avoid required argument errors
+    import sys
+    if '--explain' in sys.argv:
+        config_class.print_explanations(config_class)
+        raise SystemExit(0)
+
     parser = create_main_parser()
     if add_extra_args:
         add_extra_args(parser)

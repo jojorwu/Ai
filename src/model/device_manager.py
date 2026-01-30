@@ -16,6 +16,25 @@ class DeviceManager:
         self.cuda_available = torch.cuda.is_available()
         self.mps_available = torch.backends.mps.is_available()
 
+    def optimize_environment(self):
+        """Applies hardware-specific optimizations."""
+        if self.config.device == "cpu":
+            if self.config.num_threads > 0:
+                torch.set_num_threads(self.config.num_threads)
+            if self.config.num_interop_threads > 0:
+                torch.set_num_interop_threads(self.config.num_interop_threads)
+
+            torch.backends.mkldnn.enabled = self.config.enable_mkldnn
+
+            if self.config.flush_denormals:
+                torch.set_flush_denormal(True)
+
+        elif self.config.device == "gpu" or self.cuda_available:
+            torch.backends.cudnn.benchmark = True
+            # Allows for some more parallelism in CUDA operations
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+
     def get_device_map(self) -> dict:
         """
         Determines the appropriate device map for `accelerate`.

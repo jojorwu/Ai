@@ -52,6 +52,7 @@ def create_trainer(
         tokenizer=tokenizer,
         evolution_config=config.evolution,
         accelerator=accelerator,
+        hardware_config=config.hardware,
     )
     pretraining_runner = PretrainingRunner(
         accelerator=accelerator,
@@ -62,6 +63,7 @@ def create_trainer(
         tokenizer=tokenizer,
         evolution_config=config.evolution,
         optimizer_config=config.optimizer,
+        hardware_config=config.hardware,
     )
     evaluator = CollaborativeEvaluator(agents=[], base_model=model)
     agent_manager = AgentManager(
@@ -69,6 +71,7 @@ def create_trainer(
         num_agents=config.evolution.num_agents,
         accelerator=accelerator,
         evaluator=evaluator,
+        hardware_config=config.hardware,
     )
     evaluator.agents = agent_manager.agents
 

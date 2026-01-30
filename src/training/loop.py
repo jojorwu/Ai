@@ -3,6 +3,7 @@ Implements the main training loop and training state management.
 """
 import gc
 import logging
+import math
 import os
 
 import torch
@@ -105,7 +106,10 @@ class TrainingLoop:
                 epoch_time,
             )
 
-            if val_loss < best_val_loss:
+            # Check for non-finite validation loss before proceeding or saving
+            if not math.isfinite(val_loss):
+                logging.warning("Non-finite validation loss encountered. Skipping checkpoint saving.")
+            elif val_loss < best_val_loss:
                 best_val_loss = val_loss
                 epochs_no_improve = 0
                 self.accelerator.save_state(checkpoint_dir)
@@ -124,7 +128,9 @@ class TrainingLoop:
                 logging.warning("Early stopping triggered.")
                 break
 
-            # Explicit memory management after each epoch/cycle
+            # Explicit memory management after each epoch/cycle.
+            # Free Accelerator's internal state alongside standard garbage collection.
+            self.accelerator.free_memory()
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

@@ -9,14 +9,14 @@ from torch import nn
 
 from src.config.core import TransformerConfig
 from src.config.model_config import DecoderBlockConfig
-from src.model.layers.decoder_block import DecoderBlock
-from src.model.layers.embedding import Embedding
-from src.model.layers.gating import GatingNetwork
-from src.model.layers.linear import Linear
-from src.model.layers.long_term_memory import LongTermMemory
-from src.model.layers.rms_norm import RMSNorm
-from src.model.layers.rotary_embedding import precompute_rope_embeddings
-from src.model.layers.value_head import ValueHead
+from src.model.layers.blocks.decoder_block import DecoderBlock
+from src.model.layers.core.embedding import Embedding
+from src.model.layers.titans.gating import GatingNetwork
+from src.model.layers.core.linear import Linear
+from src.model.layers.titans.long_term_memory import LongTermMemory
+from src.model.layers.core.rms_norm import RMSNorm
+from src.model.layers.attention.rotary_embedding import precompute_rope_embeddings
+from src.model.layers.heads.value_head import ValueHead
 from src.model.structures import ModelLayers, RopeEmbeddings
 
 if TYPE_CHECKING:
@@ -38,7 +38,9 @@ class ModelInitializer:
         """Initializes and registers Rotary Positional Embeddings (RoPE)."""
         d_k = self.config.model.d_model // self.config.model.num_heads
         rope_cos, rope_sin = precompute_rope_embeddings(
-            d_k, self.config.model.max_seq_len
+            d_k,
+            self.config.model.max_seq_len,
+            ntk_factor=self.config.model.rope_ntk_factor
         )
         self.model.register_buffer("rope_cos_buf", rope_cos.clone())
         self.model.register_buffer("rope_sin_buf", rope_sin.clone())

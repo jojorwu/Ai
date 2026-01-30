@@ -7,8 +7,8 @@ from typing import List, TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from src.model.complexity_manager import ComplexityManager
-    from src.model.layers.kv_cache import KVCache
+    from src.model.titans.complexity_manager import ComplexityManager
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 @dataclass
@@ -19,13 +19,18 @@ class AgentState:
     complexity_manager: 'ComplexityManager' = None
     main_cache: 'KVCache' = None
     draft_cache: 'KVCache' = None
+    # Persistent memory matrix for the Linear Associative LTM
+    ltm_memory: torch.Tensor = None
+    # Number of tokens from the current conversation_history_tokens that have been processed.
+    _processed_count: int = 0
 
     def get_new_tokens(self) -> List[int]:
         """Returns the tokens that have not yet been processed by the KV cache."""
-        if self.main_cache is None:
-            return self.conversation_history_tokens
-        cached_len = self.main_cache.current_pos
-        return self.conversation_history_tokens[cached_len:]
+        return self.conversation_history_tokens[self._processed_count:]
+
+    def mark_as_processed(self, count: int):
+        """Marks the given number of tokens as processed."""
+        self._processed_count = min(len(self.conversation_history_tokens), self._processed_count + count)
 
     def append_tokens(self, tokens: List[int]):
         """Appends new tokens to the conversation history."""
@@ -33,23 +38,31 @@ class AgentState:
 
     def prune_history(self, context_window_size: int):
         """
-        Prunes the conversation history to fit within the context window.
-        Adjusts the KV caches accordingly if they exist.
+        Prunes the conversation history to fit within the context window
+        using the "Attention Sink" principle (Anchors + Sliding Window).
+        This optimizes processor usage by allowing the KV cache to remain persistent.
         """
         if len(self.conversation_history_tokens) <= context_window_size:
             return
 
-        excess = len(self.conversation_history_tokens) - context_window_size
-        self.conversation_history_tokens = self.conversation_history_tokens[excess:]
-
-        # If we have caches, we need to reset them because the relative
-        # positions have changed. A more sophisticated approach would be
-        # to shift the cache, but for now, we'll just clear it so it
-        # re-populates on the next turn.
+        # Determine anchor size from cache if available, else default to 4
+        anchor_size = 4
         if self.main_cache:
-            self.main_cache.current_pos = 0
-        if self.draft_cache and self.draft_cache is not self.main_cache:
-            self.draft_cache.current_pos = 0
+            anchor_size = self.main_cache.config.anchor_size
+
+        # Keep anchors and the most recent tokens
+        anchors = self.conversation_history_tokens[:anchor_size]
+        recent_tokens_count = context_window_size - anchor_size
+        recent = self.conversation_history_tokens[-recent_tokens_count:]
+
+        self.conversation_history_tokens = anchors + recent
+
+        # After pruning, all tokens in the new history are already in the cache.
+        self._processed_count = len(self.conversation_history_tokens)
+
+        # IMPORTANT: We do NOT reset the KV cache positions here.
+        # The Anchor-Aware KVCache handles the sliding window logically.
+        # This prevents expensive re-encoding of the prompt on the CPU/GPU.
 
 
 @dataclass

@@ -2,6 +2,7 @@
 Handles the collaborative evaluation of agents.
 """
 import logging
+import threading
 from typing import List
 
 import torch
@@ -32,6 +33,7 @@ class CollaborativeEvaluator:
         self.base_model = base_model
         self.scoring_engine = scoring_engine or ScoringEngine()
         self.population_evaluator = PopulationEvaluator()
+        self._score_lock = threading.Lock()
 
     def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
         """
@@ -70,17 +72,30 @@ class CollaborativeEvaluator:
         self, proposer: Agent, agents_to_exclude: List[Agent]
     ) -> List[Agent]:
         """
-        Selects agents from the population to act as critics.
+        Selects top-performing agents from the population to act as critics.
+        Higher fitness agents provide more reliable critiques.
         """
         exclude_ids = {agent.agent_id for agent in agents_to_exclude}
-        critics = [agent for agent in self.agents if agent.agent_id not in exclude_ids]
+
+        # Sort agents by fitness (descending) and exclude proposer/helpers
+        potential_critics = sorted(
+            [a for a in self.agents if a.agent_id not in exclude_ids],
+            key=lambda a: a.get_fitness_score(),
+            reverse=True
+        )
+
+        # Use top 50% of available agents as critics (at least 1)
+        num_critics = max(1, len(potential_critics) // 2)
+        critics = potential_critics[:num_critics]
+
         return critics or [proposer]
 
     def handle_collaboration_request(self, ctx: CollaborationContext):
         """
         Manages the 'ask for help' scenario in collaborative evaluation.
         """
-        ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
+        with self._score_lock:
+            ctx.scores[ctx.proposer.agent_id] += self.scoring_engine.reward_asking_for_help
 
         helper = self.agents[(ctx.proposer_index + 1) % len(self.agents)]
         if helper.agent_id == ctx.proposer.agent_id:
@@ -109,7 +124,8 @@ class CollaborativeEvaluator:
             agents_to_reward=[helper, ctx.proposer],
             agents_to_penalize=[helper],
         )
-        self.scoring_engine.apply_scores(csc)
+        with self._score_lock:
+            self.scoring_engine.apply_scores(csc)
 
     def handle_independent_response(self, ctx: IndependentResponseContext):
         """
@@ -135,7 +151,8 @@ class CollaborativeEvaluator:
             agents_to_reward=[ctx.proposer],
             agents_to_penalize=[ctx.proposer],
         )
-        self.scoring_engine.apply_scores(csc)
+        with self._score_lock:
+            self.scoring_engine.apply_scores(csc)
 
     def _finalize_evaluation(self, scores, top_k):
         """

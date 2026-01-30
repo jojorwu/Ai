@@ -1,6 +1,8 @@
 """
 Trainer for the Agent class.
 """
+import logging
+import math
 import torch
 
 from src.agent.agent import Agent
@@ -33,7 +35,10 @@ class AgentTrainer:
         if not grad_tensors:
             return 0.0
 
-        surprise = torch.norm(torch.cat(grad_tensors)).item()
+        # Optimized norm calculation to avoid large temporary tensor concatenation.
+        # ||[a, b]|| = sqrt(||a||^2 + ||b||^2)
+        total_norm_sq = sum(t.pow(2).sum() for t in grad_tensors)
+        surprise = torch.sqrt(total_norm_sq).item()
         self.agent.metrics.total_surprise += surprise
 
         if self.update_policy.should_update(surprise, self.agent.ltm_config):
@@ -53,7 +58,7 @@ class AgentTrainer:
         self.agent.long_term_memory.train()
         self.agent.ltm_optimizer.zero_grad()
 
-        logits, values, aux_loss = self.agent.base_model.forward(
+        logits, values, aux_loss, _ = self.agent.base_model.forward(
             x_batch, ltm_override=self.agent.long_term_memory
         )
 
@@ -62,7 +67,6 @@ class AgentTrainer:
         )
 
         # Calculate value loss (encouraging the model to predict high values)
-        # We train the value head to predict 1.0 for any given sequence.
         target_values = torch.ones_like(values)
         loss_value = self.agent.value_loss_fn(values, target_values)
 
@@ -71,14 +75,29 @@ class AgentTrainer:
         if aux_loss is not None:
             total_loss += aux_loss
 
-        # Backward pass to compute gradients for LTM
-        total_loss.backward()
+        # Check for NaN/Inf in loss to prevent weight corruption and autograd errors
+        if not torch.isfinite(total_loss):
+            logging.warning("Agent %s encountered non-finite loss (%.4f). Skipping update.", self.agent.agent_id, total_loss.item())
+            return
+
+        # Compute gradients ONLY for LTM parameters to avoid touching the shared base_model's gradients.
+        # This is essential for thread-safety during parallel agent training.
+        ltm_params = list(self.agent.long_term_memory.parameters())
+        grads = torch.autograd.grad(total_loss, ltm_params, allow_unused=True)
+
+        for param, grad in zip(ltm_params, grads):
+            if grad is not None:
+                param.grad = grad
+
+        # Perform gradient clipping for LTM parameters
+        torch.nn.utils.clip_grad_norm_(ltm_params, max_norm=1.0)
 
         # Update LTM based on surprise
-        self._update_ltm_and_calc_surprise()
+        surprise = self._update_ltm_and_calc_surprise()
+        if not math.isfinite(surprise):
+             logging.warning("Agent %s encountered non-finite surprise. Skipping optimizer step.", self.agent.agent_id)
+             return
 
         # Update metrics
         self.agent.metrics.value_score_sum += torch.mean(values).item()
         self.agent.metrics.experience_count += 1
-
-        self.agent.ltm_optimizer.zero_grad()

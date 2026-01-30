@@ -3,8 +3,11 @@ This module contains the PopulationEvaluator class, which manages the
 outer loop of collaborative evaluation.
 """
 import logging
-import torch
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, TYPE_CHECKING
+
+import torch
 
 from src.agent.agent import Agent
 from src.agent.dataclasses import CollaborationContext, IndependentResponseContext
@@ -62,28 +65,44 @@ class PopulationEvaluator:
         Orchestrates the evaluation of a single prompt by having each agent
         propose a response and delegating the scoring to CollaborativeEvaluator.
         """
-        for i, proposer in enumerate(agents):
-            response = proposer.generate_response(prompt_tensor)
-            response_list = response[0].tolist()
 
-            if tokens["ask_help"] in response_list:
-                ctx = CollaborationContext(
-                    proposer=proposer,
-                    prompt_tokens=prompt_tensor,
-                    scores=scores,
-                    proposer_index=i,
-                    response=response,
-                )
-                collaborative_evaluator.handle_collaboration_request(ctx)
-            elif tokens["i_dont_know"] in response_list:
-                # Direct scoring for simple responses
-                scoring_engine = collaborative_evaluator.scoring_engine
-                scores[proposer.agent_id] += scoring_engine.reward_admit_ignorance
-            else:
-                ctx = IndependentResponseContext(
-                    proposer=proposer,
-                    prompt_tokens=prompt_tensor,
-                    scores=scores,
-                    response=response,
-                )
-                collaborative_evaluator.handle_independent_response(ctx)
+        def _get_response_and_score(i, proposer):
+            try:
+                response = proposer.generate_response(prompt_tensor)
+
+                # Vectorized token check to avoid expensive tolist() and GPU-CPU sync
+                has_ask_help = (response == tokens["ask_help"]).any().item()
+                has_i_dont_know = (response == tokens["i_dont_know"]).any().item()
+
+                if has_ask_help:
+                    ctx = CollaborationContext(
+                        proposer=proposer,
+                        prompt_tokens=prompt_tensor,
+                        scores=scores,
+                        proposer_index=i,
+                        response=response,
+                    )
+                    collaborative_evaluator.handle_collaboration_request(ctx)
+                elif has_i_dont_know:
+                    # Direct scoring for simple responses
+                    scoring_engine = collaborative_evaluator.scoring_engine
+                    scores[proposer.agent_id] += scoring_engine.reward_admit_ignorance
+                else:
+                    ctx = IndependentResponseContext(
+                        proposer=proposer,
+                        prompt_tokens=prompt_tensor,
+                        scores=scores,
+                        response=response,
+                    )
+                    collaborative_evaluator.handle_independent_response(ctx)
+            except Exception as e:  # pylint: disable=broad-except
+                logging.error("Failed to evaluate agent %s: %s", proposer.agent_id, e)
+
+        max_workers = min(len(agents), os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_get_response_and_score, i, proposer)
+                for i, proposer in enumerate(agents)
+            ]
+            for future in futures:
+                future.result()

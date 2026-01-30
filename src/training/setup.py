@@ -14,19 +14,38 @@ from accelerate import Accelerator
 from src.config.core import TrainConfig
 from src.data.data_loader import load_multimodal_data_from_directory
 from src.data.tokenizer import Tokenizer
+from src.model.device_manager import DeviceManager
 from src.utils.setup import setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
-    """Initializes tokenizer and loads data."""
+    """Initializes tokenizer and loads data in a memory-safe manner."""
     tokenizer = Tokenizer(tokenizer_path)
     multimodal_data = load_multimodal_data_from_directory(data_dir)
     if not multimodal_data:
         raise ValueError(f"No data found in {data_dir}")
-    all_text = " ".join([text for text, _ in multimodal_data])
-    data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
-    split_idx = int(len(data_tokens) * (1 - validation_split))
-    return tokenizer, data_tokens[:split_idx], data_tokens[split_idx:]
+
+    # Efficiently encode text item-by-item to avoid massive string concatenation.
+    data_tokens = []
+    for text, _ in multimodal_data:
+        data_tokens.extend(tokenizer.encode(text, add_special_tokens=True))
+
+    # Convert to tensor early to optimize memory and training efficiency
+    data_tensor = torch.tensor(data_tokens, dtype=torch.long)
+
+    if len(data_tensor) < 100:  # Arbitrary minimum for basic sanity
+        raise ValueError(f"Dataset is too small: {len(data_tensor)} tokens.")
+
+    split_idx = int(len(data_tensor) * (1 - validation_split))
+    train_data = data_tensor[:split_idx]
+    val_data = data_tensor[split_idx:]
+
+    if len(train_data) == 0:
+        raise ValueError("Training set is empty after split. Adjust validation_split or provide more data.")
+    if len(val_data) == 0:
+        logging.warning("Validation set is empty after split.")
+
+    return tokenizer, train_data, val_data
 
 
 def setup_environment(args: argparse.Namespace):
@@ -96,11 +115,22 @@ def prepare_training_environment(
     """
     config, model_dir, checkpoint_dir, resume_from = setup_environment(args)
 
+    # Apply hardware optimizations
+    device_manager = DeviceManager(config.hardware)
+    device_manager.optimize_environment()
+
     # Determine best mixed precision strategy
-    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+    if torch.cuda.is_available():
+        mixed_precision = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
+    elif (
+        hasattr(torch, "cpu")
+        and hasattr(torch.cpu, "is_bf16_supported")
+        and torch.cpu.is_bf16_supported()
+    ):
         mixed_precision = "bf16"
     else:
-        mixed_precision = "fp16"
+        # Avoid fp16 on CPU as it is often not native and slower than fp32
+        mixed_precision = "no"
 
     accelerator = Accelerator(
         mixed_precision=mixed_precision,

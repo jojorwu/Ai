@@ -51,9 +51,11 @@ class TestAgentManager(unittest.TestCase):
             ltm_state_1[key_to_test].fill_(1.0)
             ltm_state_2[key_to_test].fill_(3.0)
 
-        # Mock the agents to return these controlled states
+        # Mock the agents to return these controlled states and set fitness
         manager.agents[0].get_ltm_state = MagicMock(return_value=ltm_state_1)
+        manager.agents[0].get_fitness_score = MagicMock(return_value=0.0)
         manager.agents[1].get_ltm_state = MagicMock(return_value=ltm_state_2)
+        manager.agents[1].get_fitness_score = MagicMock(return_value=0.0)
 
         manager.merge_agents(manager.agents)
 

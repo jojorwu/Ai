@@ -22,7 +22,7 @@ def calculate_loss(model, x, y, evolution_config):
     """
     Common loss calculation logic for Transformer model with MoE support.
     """
-    logits, _, aux_loss = model(x)
+    logits, _, aux_loss, _ = model(x)
     policy_loss = cross_entropy_with_label_smoothing(
         logits,
         y,
@@ -85,7 +85,7 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
             )
             self.agent_manager.merge_agents(best_agents)
             if self.model.layers.long_term_memory:
-                self.model.layers.long_term_memory.to(device)
+                self.model.layers.long_term_memory.to(device, non_blocking=True)
         else:
             logging.warning("No suitable agents found for merging. Skipping merge.")
         epoch_time = time.time() - start_time
@@ -106,6 +106,7 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
         tokenizer,
         evolution_config,
         optimizer_config,
+        hardware_config=None,
     ):
         self.accelerator = accelerator
         self.model = model
@@ -115,6 +116,7 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
         self.tokenizer = tokenizer
         self.evolution_config = evolution_config
         self.optimizer_config = optimizer_config
+        self.hardware_config = hardware_config
 
     def _run_training_step(self, x, y):
         """Runs a single training step."""
@@ -135,6 +137,7 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
             self.evolution_config.batch_size,
             self.evolution_config.seq_len,
             self.accelerator.device,
+            pin_memory=self.hardware_config.pin_memory if self.hardware_config else False,
         )
         self.model.train()
         self.optimizer.zero_grad()
@@ -157,12 +160,21 @@ class PretrainingRunner:  # pylint: disable=too-few-public-methods
 class ValidationRunner:  # pylint: disable=too-few-public-methods
     """Handles the validation loop."""
 
-    def __init__(self, model, val_data, tokenizer, evolution_config, accelerator):
+    def __init__(
+        self,
+        model,
+        val_data,
+        tokenizer,
+        evolution_config,
+        accelerator,
+        hardware_config=None,
+    ):
         self.model = model
         self.val_data = val_data
         self.tokenizer = tokenizer
         self.evolution_config = evolution_config
         self.accelerator = accelerator
+        self.hardware_config = hardware_config
 
     def run(self) -> float:
         """Runs validation on the model."""
@@ -174,8 +186,9 @@ class ValidationRunner:  # pylint: disable=too-few-public-methods
             self.evolution_config.batch_size,
             self.evolution_config.seq_len,
             self.accelerator.device,
+            pin_memory=self.hardware_config.pin_memory if self.hardware_config else False,
         )
-        with torch.no_grad():
+        with torch.inference_mode():
             for x, y, _ in batch_iterator:
                 _, policy_loss = calculate_loss(
                     self.model, x, y, self.evolution_config

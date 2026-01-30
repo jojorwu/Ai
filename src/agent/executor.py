@@ -14,7 +14,7 @@ from src.agent.dataclasses import AgentState
 from src.agent.tools import ToolRegistry, parse_tool_call
 from src.config.core import GenerateConfig
 from src.data.tokenizer import Tokenizer
-from src.model.complexity_manager import ComplexityManager
+from src.model.titans.complexity_manager import ComplexityManager
 from src.model.model import Transformer
 from src.model.structures import (
     GenerateInput,
@@ -53,6 +53,8 @@ class AgentExecutor:
             # Generate model response
             new_tokens = self._generate_model_response(agent_state)
             agent_state.append_tokens(new_tokens)
+            # Newly generated tokens are already in the cache because of generate()
+            agent_state.mark_as_processed(len(new_tokens))
             agent_state.prune_history(self.config.generation.context_window_size)
 
             generated_text = self.tokenizer.decode(new_tokens)
@@ -93,7 +95,12 @@ class AgentExecutor:
         # Use new_tokens from AgentState
         new_tokens = agent_state.get_new_tokens()
         if not new_tokens:
+            # If everything is already in cache, start with the last token
+            # to trigger next-token generation.
             new_tokens = agent_state.conversation_history_tokens[-1:]
+        else:
+            # Mark these as processed as they are about to be sent to the model.
+            agent_state.mark_as_processed(len(new_tokens))
 
         input_tokens = torch.tensor([new_tokens], device=self.accelerator.device)
 
@@ -112,6 +119,8 @@ class AgentExecutor:
         sampling_config = SamplingConfig(
             temperature=self.config.generation.temperature,
             top_k=self.config.generation.top_k,
+            top_p=self.config.generation.top_p,
+            min_p=self.config.generation.min_p,
             dynamic_top_k=dynamic_top_k,
         )
         speculative_config = SpeculativeConfig(
@@ -124,14 +133,23 @@ class AgentExecutor:
             speculative_config=speculative_config,
             kv_cache=agent_state.main_cache,
             draft_cache=agent_state.draft_cache,
+            ltm_memory=agent_state.ltm_memory,
         )
 
-        newly_generated_tokens = []
-        for chunk, surprise in unwrapped_model.generate(gen_input):
-            newly_generated_tokens.extend(chunk[0].tolist())
+        # Accumulate as tensors to minimize GPU-CPU synchronization points.
+        generated_chunks = []
+        for chunk, surprise, new_ltm_memory in unwrapped_model.generate(gen_input):
+            agent_state.ltm_memory = new_ltm_memory
+            generated_chunks.append(chunk)
             if agent_state.complexity_manager:
                 agent_state.complexity_manager.update_surprise(surprise)
-        return newly_generated_tokens
+
+        if not generated_chunks:
+            return []
+
+        # Perform a single cat and tolist conversion at the end of the turn.
+        newly_generated_tokens_tensor = torch.cat(generated_chunks, dim=1)
+        return newly_generated_tokens_tensor[0].tolist()
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
         """Processes a tool call if one is present in the conversation history."""

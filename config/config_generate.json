@@ -35,6 +35,7 @@
     "temperature": 0.0,
     "top_k": 1,
     "top_p": 0.0,
+    "min_p": 0.05,
     "speculative_steps": 0,
     "value_threshold": -1.0,
     "max_thought_len": 50,

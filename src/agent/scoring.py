@@ -41,18 +41,20 @@ class ScoringEngine:
         """
         Performs a batched critique of a response using the base model.
         """
-        with torch.no_grad():
+        with torch.inference_mode():
             h = base_model.layers.embedding(full_sequence) * math.sqrt(
                 base_model.config.model.d_model
             )
             ltm_states = torch.zeros(
                 (len(critic_ltms), 1, h.size(2)), device=h.device, dtype=h.dtype
             )
+            # Vectorized summary calculation across all critics
+            summaries = h.mean(dim=1, keepdim=True)
             for i, ltm in enumerate(critic_ltms):
                 if ltm:
-                    ltm_input = h[i].mean(dim=0, keepdim=True).unsqueeze(0)
-                    ltm_states[i], _ = ltm(ltm_input)
-            _, values, _ = base_model.forward(
+                    # Use a temporary state for critique as we don't persist memory matrix here.
+                    ltm_states[i], _, _ = ltm(summaries[i : i + 1])
+            _, values, _, _ = base_model.forward(
                 full_sequence, ltm_state=ltm_states
             )
         return values.mean().item()

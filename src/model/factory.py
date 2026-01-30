@@ -41,6 +41,7 @@ def load_model_and_tokenizer(
         tokenizer=tokenizer,
     )
     device_manager = DeviceManager(config.hardware)
+    device_manager.optimize_environment()
     if device_manager.should_disable_4bit() and load_in_4bit:
         logging.warning("4-bit quantization is not supported on this hardware, disabling.")
         load_in_4bit = False
@@ -66,10 +67,14 @@ def load_model_and_tokenizer(
     model.load_state_dict(state_dict)
     del state_dict # Free memory
 
-    if quantized:
-        model = torch.quantization.quantize_dynamic(
-            model, {torch.nn.Linear}, dtype=torch.qint8
-        )
+    if quantized or config.hardware.dynamic_quantization:
+        if config.hardware.device == "cpu":
+            logging.info("Applying dynamic quantization for CPU...")
+            model = torch.quantization.quantize_dynamic(
+                model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+        else:
+            logging.warning("Dynamic quantization is only supported on CPU device. Skipping.")
 
     if dispatch:
         device_map = device_manager.get_device_map()

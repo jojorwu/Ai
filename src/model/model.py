@@ -11,10 +11,10 @@ from torch import nn
 from torch.nn import functional as F
 
 from src.config.core import TransformerConfig
-from src.model.generation import GenerationMixin
-from src.model.generator import TextGenerator
+from src.model.inference.generation import GenerationMixin
+from src.model.inference.generator import TextGenerator
 from src.model.initializer import ModelInitializer
-from src.model.titans_engine import TitansForwardEngine
+from src.model.titans.titans_engine import TitansForwardEngine
 from src.model.structures import (
     GenerateInput,
     ModelLayers,
@@ -22,12 +22,12 @@ from src.model.structures import (
     SamplingConfig,
     SpeculativeConfig,
 )
-from src.model.layers.decoder_block import DecoderBlock
-from src.model.layers.embedding import Embedding
-from src.model.layers.gating import GatingNetwork
-from src.model.layers.long_term_memory import LongTermMemory
-from src.model.layers.rms_norm import RMSNorm
-from src.model.layers.value_head import ValueHead
+from src.model.layers.blocks.decoder_block import DecoderBlock
+from src.model.layers.core.embedding import Embedding
+from src.model.layers.titans.gating import GatingNetwork
+from src.model.layers.titans.long_term_memory import LongTermMemory
+from src.model.layers.core.rms_norm import RMSNorm
+from src.model.layers.heads.value_head import ValueHead
 
 
 class Transformer(nn.Module, GenerationMixin):
@@ -48,10 +48,10 @@ class Transformer(nn.Module, GenerationMixin):
         self._config = config  # Keep a copy of the full config
         self.load_in_4bit = load_in_4bit
 
-        initializer = ModelInitializer(self)
-        self.rope_embeddings = initializer.init_rope_embeddings()
-        self.layers = initializer.init_layers()
-        self.draft_model = initializer.init_draft_model()
+        self.initializer = ModelInitializer(self)
+        self.rope_embeddings = self.initializer.init_rope_embeddings()
+        self.layers = self.initializer.init_layers()
+        self._draft_model = None
 
         # Weight tying: share weights between embedding and policy head
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
@@ -68,10 +68,11 @@ class Transformer(nn.Module, GenerationMixin):
         self,
         x: torch.Tensor,
         ltm_state: torch.Tensor = None,
+        ltm_memory: torch.Tensor = None,
         dynamic_top_k: int = None,
         ltm_override: nn.Module | None = None,
         kv_cache: "KVCache" = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """
         Performs the forward pass, delegating Titans logic to TitansForwardEngine.
         """
@@ -79,9 +80,10 @@ class Transformer(nn.Module, GenerationMixin):
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
         # 2. Delegate sequence processing to the TitansForwardEngine
-        h, total_aux_loss = self.titans_engine.process_sequence(
+        h, total_aux_loss, new_ltm_memory = self.titans_engine.process_sequence(
             h=h,
             ltm_state=ltm_state,
+            ltm_memory=ltm_memory,
             dynamic_top_k=dynamic_top_k,
             ltm_override=ltm_override,
             kv_cache=kv_cache,
@@ -102,7 +104,7 @@ class Transformer(nn.Module, GenerationMixin):
         if kv_cache is not None:
             kv_cache.increment_pos(x.shape[1])
 
-        return logits, value, total_aux_loss
+        return logits, value, total_aux_loss, new_ltm_memory
 
     def generate(
         self, inputs: GenerateInput
@@ -117,8 +119,8 @@ class Transformer(nn.Module, GenerationMixin):
         Overrides the default `train` method to also set the mode for the draft model.
         """
         super().train(mode)
-        if self.draft_model:
-            self.draft_model.train(mode)
+        if self._draft_model:
+            self._draft_model.train(mode)
         return self
 
     def eval(self):
@@ -126,9 +128,16 @@ class Transformer(nn.Module, GenerationMixin):
         Overrides the default `eval` method to also set the mode for the draft model.
         """
         super().eval()
-        if self.draft_model:
-            self.draft_model.eval()
+        if self._draft_model:
+            self._draft_model.eval()
         return self
+
+    @property
+    def draft_model(self):
+        """Lazy-initializes the draft model for speculative decoding."""
+        if self._draft_model is None:
+            self._draft_model = self.initializer.init_draft_model()
+        return self._draft_model
 
     @property
     def device(self):

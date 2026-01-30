@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import torch
 
 
 class Tokenizer:
@@ -80,37 +81,49 @@ class Tokenizer:
     def encode(self, text: str, add_special_tokens=False) -> list[int]:
         """
         Converts a string of text into a list of tokens, correctly handling
-        special tokens within the string.
+        special tokens within the string. Optimized to avoid redundant lookups.
         """
         if add_special_tokens:
             text = f"<THINK>{text}<ANSWER>"
 
+        # Fast-path for simple text without special tokens to avoid regex overhead.
+        # Uses list comprehension for speed.
+        if not self.special_token_pattern.search(text):
+            char_to_idx = self.char_to_idx
+            return [char_to_idx[c] for c in text if c in char_to_idx]
+
         tokens = []
         last_idx = 0
+        char_to_idx = self.char_to_idx
+
         # Find all special tokens and process the text around them
         for match in self.special_token_pattern.finditer(text):
             start, end = match.span()
             # Add the text before the special token
             if start > last_idx:
                 pre_text = text[last_idx:start]
-                tokens.extend([self.char_to_idx.get(char, -1) for char in pre_text])
+                tokens.extend([char_to_idx[c] for c in pre_text if c in char_to_idx])
 
             # Add the special token itself
             special_token = match.group(0)
-            tokens.append(self.char_to_idx[special_token])
+            tokens.append(char_to_idx[special_token])
             last_idx = end
 
         # Add any remaining text after the last special token
         if last_idx < len(text):
             post_text = text[last_idx:]
-            tokens.extend([self.char_to_idx.get(char, -1) for char in post_text])
+            tokens.extend([char_to_idx[c] for c in post_text if c in char_to_idx])
 
-        # Filter out any -1 tokens for characters not in vocab
-        return [token for token in tokens if token != -1]
+        return tokens
 
-    def decode(self, tokens: list[int]) -> str:
+    def decode(self, tokens: list[int] | torch.Tensor) -> str:
         """
         Converts a list of tokens back into a string.
-        Special tokens are preserved in the string, which is important for the model's context.
+        Special tokens are preserved. Uses a fallback for unknown tokens.
         """
-        return "".join([self.idx_to_char.get(token, '') for token in tokens])
+        if isinstance(tokens, torch.Tensor):
+            # Efficiently handle tensors (flatten and move to CPU if needed)
+            tokens = tokens.flatten().detach().cpu().tolist()
+
+        idx_to_char = self.idx_to_char
+        return "".join([idx_to_char.get(token, '') for token in tokens])

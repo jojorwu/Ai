@@ -15,7 +15,7 @@ from src.model.model import Transformer
 from src.model.structures import GenerateInput, SamplingConfig
 
 if TYPE_CHECKING:
-    from src.model.layers.kv_cache import KVCache
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 @dataclass
@@ -106,7 +106,7 @@ class Agent:
 
         # Accumulate all chunks from the generator in a list to avoid O(N^2) copying.
         chunks = [prompt_tokens]
-        for chunk, _ in self.base_model.generate(generate_input):
+        for chunk, _, _ in self.base_model.generate(generate_input):
             chunks.append(chunk)
 
         return torch.cat(chunks, dim=1)
