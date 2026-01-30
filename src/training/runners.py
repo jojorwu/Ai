@@ -22,14 +22,14 @@ def calculate_loss(model, x, y, evolution_config):
     """
     Common loss calculation logic for Transformer model with MoE support.
     """
-    logits, _, aux_loss, _ = model(x)
+    outputs = model(x)
     policy_loss = cross_entropy_with_label_smoothing(
-        logits,
+        outputs.logits,
         y,
         smoothing=evolution_config.label_smoothing,
     )
     total_loss = policy_loss + (
-        evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+        evolution_config.moe_aux_loss_coeff * outputs.aux_loss if outputs.aux_loss else 0
     )
     return total_loss, policy_loss
 

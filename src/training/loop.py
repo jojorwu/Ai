@@ -7,6 +7,7 @@ import math
 import os
 
 import torch
+from src.training.callbacks import TrainerCallback, LoggingCallback, CheckpointCallback
 
 
 class TrainingState:
@@ -27,23 +28,38 @@ class TrainingState:
 class TrainingLoop:
     """Encapsulates the main training loop logic."""
 
-    def __init__(self, trainer: "Trainer", config: "TrainConfig"):
+    def __init__(
+        self,
+        trainer: "Trainer",
+        config: "TrainConfig",
+        callbacks: list[TrainerCallback] = None
+    ):
         self.trainer = trainer
         self.config = config
         self.accelerator = trainer.accelerator
+        self.callbacks = callbacks or []
+
+    def _invoke_callbacks(self, method_name: str, *args, **kwargs):
+        for callback in self.callbacks:
+            method = getattr(callback, method_name, None)
+            if callable(method):
+                method(*args, **kwargs)
 
     def run(self, checkpoint_dir: str, resume_from: str | None):
         """Runs the main training loop."""
-        if self.accelerator.is_main_process:
-            logging.info("Starting training loop...")
+        if not self.callbacks:
+             self.callbacks = [
+                 LoggingCallback(),
+                 CheckpointCallback(checkpoint_dir)
+             ]
 
-        best_val_loss = float("inf")
-        epochs_no_improve = 0
         total_epochs = (
             self.config.evolution.pretrain_epochs + self.config.evolution.evolution_epochs
         )
         training_state = TrainingState()
         self.accelerator.register_for_checkpointing(training_state)
+
+        self._invoke_callbacks("on_train_begin", config=self.config, state=training_state)
 
         if self.accelerator.is_main_process and resume_from:
             checkpoint_path = os.path.join("models", resume_from, "checkpoints")
@@ -63,69 +79,50 @@ class TrainingLoop:
         start_epoch = training_state.epoch
         for epoch in range(start_epoch, total_epochs):
             training_state.epoch = epoch
+            self._invoke_callbacks(
+                "on_epoch_begin", epoch=epoch, config=self.config, state=training_state
+            )
+
             is_pretrain = epoch < self.config.evolution.pretrain_epochs
-            phase = "Pre-training" if is_pretrain else "Evolution"
-            phase_epoch = (
-                epoch if is_pretrain else epoch - self.config.evolution.pretrain_epochs
-            )
-            total_phase_epochs = (
-                self.config.evolution.pretrain_epochs
-                if is_pretrain
-                else self.config.evolution.evolution_epochs
-            )
-            logging.info(
-                "\n--- %s Epoch %d/%d ---",
-                phase,
-                phase_epoch + 1,
-                total_phase_epochs,
-            )
+            metrics = {}
 
             if is_pretrain:
                 avg_loss, epoch_time = self.trainer.train_pretrain_epoch()
-                if self.accelerator.is_main_process:
-                    self.accelerator.log(
-                        {
-                            "avg_loss": avg_loss,
-                            "epoch_time": epoch_time,
-                            "learning_rate": self.trainer.get_learning_rate(),
-                        },
-                        step=epoch,
-                    )
-                logging.info("    - Average Loss: %.4f", avg_loss)
+                metrics.update({
+                    "avg_loss": avg_loss,
+                    "epoch_time": epoch_time,
+                    "learning_rate": self.trainer.get_learning_rate(),
+                })
             else:
                 epoch_time = self.trainer.run_evolution_cycle()
-                if self.accelerator.is_main_process:
-                    self.accelerator.log({"epoch_time": epoch_time}, step=epoch)
+                metrics["epoch_time"] = epoch_time
 
             val_loss = self.trainer.run_validation()
-            if self.accelerator.is_main_process:
-                self.accelerator.log({"val_loss": val_loss}, step=epoch)
-            logging.info(
-                "    - Validation Loss: %.4f, Epoch Time: %.2fs",
-                val_loss,
-                epoch_time,
+            metrics["val_loss"] = val_loss
+
+            self._invoke_callbacks(
+                "on_epoch_end",
+                epoch=epoch,
+                config=self.config,
+                state=training_state,
+                metrics=metrics,
+                accelerator=self.accelerator
             )
 
-            # Check for non-finite validation loss before proceeding or saving
-            if not math.isfinite(val_loss):
-                logging.warning("Non-finite validation loss encountered. Skipping checkpoint saving.")
-            elif val_loss < best_val_loss:
-                best_val_loss = val_loss
-                epochs_no_improve = 0
-                self.accelerator.save_state(checkpoint_dir)
-                logging.info(
-                    "    - New best checkpoint saved (Val Loss: %.4f)",
-                    best_val_loss,
-                )
+            # Check early stopping status from callbacks if needed,
+            # or just rely on the CheckpointCallback's internal state.
+            # For simplicity, we check if any callback wants to stop.
+            # Here we just check the CheckpointCallback specifically if it's in the list.
+            for cb in self.callbacks:
+                 if isinstance(cb, CheckpointCallback):
+                      if cb.epochs_no_improve >= self.config.evolution.early_stopping_patience:
+                           logging.warning("Early stopping triggered by callback.")
+                           break
             else:
-                epochs_no_improve += 1
-                logging.info(
-                    "    - No improvement in validation loss for %d epochs.",
-                    epochs_no_improve,
-                )
+                 # Continue loop
+                 pass
 
-            if epochs_no_improve >= self.config.evolution.early_stopping_patience:
-                logging.warning("Early stopping triggered.")
+            if any(isinstance(cb, CheckpointCallback) and cb.epochs_no_improve >= self.config.evolution.early_stopping_patience for cb in self.callbacks):
                 break
 
             # Explicit memory management after each epoch/cycle.
@@ -134,3 +131,5 @@ class TrainingLoop:
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
+        self._invoke_callbacks("on_train_end", config=self.config, state=training_state)

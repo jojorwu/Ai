@@ -33,7 +33,7 @@ class TextGenerator:
 
     def generate(
         self, inputs: "GenerateInput"
-    ) -> Generator[Tuple[torch.Tensor, float, torch.Tensor | None], None, None]:
+    ) -> Generator["GenerationResult", None, None]:
         """
         Generates a sequence of tokens.
 
@@ -64,19 +64,20 @@ class TextGenerator:
 
             # 2. Run main model on the speculative chunk
             with torch.enable_grad():
-                true_logits, value, _, current_ltm_memory = self.model(
+                outputs = self.model(
                     speculative_chunk,
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
+                current_ltm_memory = outputs.ltm_memory
 
             # 3. Surprise calculation (remains a model-specific detail for now)
             # We assume the model has a way to calculate surprise from its heads.
-            surprise = self.model.calculate_surprise(value, inputs.ltm_override)
+            surprise = self.model.calculate_surprise(outputs.value, inputs.ltm_override)
 
             # 4. Validate chunk
-            all_validation_logits = torch.cat([last_logit, true_logits[:, :-1, :]], dim=1)
+            all_validation_logits = torch.cat([last_logit, outputs.logits[:, :-1, :]], dim=1)
             accepted_chunk = self.speculative_engine.validate_chunk(
                 all_validation_logits,
                 speculative_chunk,
@@ -98,26 +99,32 @@ class TextGenerator:
 
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
                 with torch.enable_grad():
-                    corrected_logits, _, _, current_ltm_memory = self.model(
+                    corrected_outputs = self.model(
                         tokens[:, -1:],
                         ltm_override=inputs.ltm_override,
                         ltm_memory=current_ltm_memory,
                         kv_cache=main_cache,
                     )
+                    current_ltm_memory = corrected_outputs.ltm_memory
                     if draft_cache is not main_cache:
                         with torch.no_grad():
                             draft_model(tokens[:, -1:], kv_cache=draft_cache)
-                    last_logit = corrected_logits[:, -1:, :]
+                    last_logit = corrected_outputs.logits[:, -1:, :]
             else:
                 # Everything accepted
                 tokens = torch.cat((tokens, accepted_chunk), dim=1)
-                last_logit = true_logits[:, -1:, :]
+                last_logit = outputs.logits[:, -1:, :]
 
             main_cache.detach()
             if draft_cache is not main_cache:
                 draft_cache.detach()
 
-            yield accepted_chunk, surprise, current_ltm_memory
+            from src.model.structures import GenerationResult
+            yield GenerationResult(
+                tokens=accepted_chunk,
+                surprise=surprise,
+                ltm_memory=current_ltm_memory
+            )
             total_generated += accepted_len
 
     def _prepare_caches(
@@ -168,13 +175,14 @@ class TextGenerator:
         current_ltm_memory = inputs.ltm_memory
         if main_cache.current_pos == 0:
             with torch.no_grad():
-                initial_logits, _, _, current_ltm_memory = self.model(
+                outputs = self.model(
                     tokens[:, -self.model.config.model.max_seq_len :],
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
-                last_logit = initial_logits[:, -1:, :]
+                current_ltm_memory = outputs.ltm_memory
+                last_logit = outputs.logits[:, -1:, :]
         else:
             # Assume cache is already in sync with prompt
             with torch.no_grad():
@@ -183,11 +191,12 @@ class TextGenerator:
                 # But wait, if the cache is already at current_pos, we need to rollback by 1
                 # to get the logits for that last token without duplicating it.
                 main_cache.rollback(1)
-                initial_logits, _, _, current_ltm_memory = self.model(
+                outputs = self.model(
                     tokens[:, -1:],
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
                 )
-                last_logit = initial_logits[:, -1:, :]
+                current_ltm_memory = outputs.ltm_memory
+                last_logit = outputs.logits[:, -1:, :]
         return last_logit, current_ltm_memory

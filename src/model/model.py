@@ -16,7 +16,9 @@ from src.model.inference.generator import TextGenerator
 from src.model.initializer import ModelInitializer
 from src.model.titans.titans_engine import TitansForwardEngine
 from src.model.structures import (
+    ForwardOutput,
     GenerateInput,
+    GenerationResult,
     ModelLayers,
     RopeEmbeddings,
     SamplingConfig,
@@ -71,7 +73,7 @@ class Transformer(nn.Module, GenerationMixin):
         dynamic_top_k: int = None,
         ltm_override: nn.Module | None = None,
         kv_cache: "KVCache" = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    ) -> ForwardOutput:
         """
         Performs the forward pass, delegating Titans logic to TitansForwardEngine.
         """
@@ -103,11 +105,16 @@ class Transformer(nn.Module, GenerationMixin):
         if kv_cache is not None:
             kv_cache.increment_pos(x.shape[1])
 
-        return logits, value, total_aux_loss, new_ltm_memory
+        return ForwardOutput(
+            logits=logits,
+            value=value,
+            aux_loss=total_aux_loss,
+            ltm_memory=new_ltm_memory,
+        )
 
     def generate(
         self, inputs: GenerateInput
-    ) -> Generator[Tuple[torch.Tensor, float], None, None]:
+    ) -> Generator[GenerationResult, None, None]:
         """
         Generates a sequence of tokens, delegating to the TextGenerator pipeline.
         """

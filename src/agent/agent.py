@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
-from src.agent.dataclasses import LTMConfig
+from src.agent.dataclasses import AgentMetrics, LTMConfig
 from src.model.model import Transformer
 from src.model.structures import GenerateInput, SamplingConfig
 
@@ -18,19 +18,20 @@ if TYPE_CHECKING:
     from src.model.layers.attention.kv_cache import KVCache
 
 
-@dataclass
-class AgentMetrics:
-    """Keeps track of an agent's performance metrics."""
-    total_surprise: float = 0.0
-    experience_count: int = 0
-    value_score_sum: float = 0.0
-    fitness_score: float = field(default=-float('inf'))
-
 class Agent:
     """
     Represents a single "agent" with its own long-term memory (LTM), adapted for PyTorch.
     The agent shares the base model's weights but has a unique LTM.
     """
+
+    agent_id: str
+    base_model: Transformer
+    ltm_config: LTMConfig
+    long_term_memory: nn.Module | None
+    ltm_optimizer: Adam | None
+    policy_loss_fn: nn.CrossEntropyLoss
+    value_loss_fn: nn.MSELoss
+    metrics: AgentMetrics
 
     def __init__(
         self,
@@ -106,7 +107,7 @@ class Agent:
 
         # Accumulate all chunks from the generator in a list to avoid O(N^2) copying.
         chunks = [prompt_tokens]
-        for chunk, _, _ in self.base_model.generate(generate_input):
-            chunks.append(chunk)
+        for result in self.base_model.generate(generate_input):
+            chunks.append(result.tokens)
 
         return torch.cat(chunks, dim=1)

@@ -1,10 +1,15 @@
 """
 Implements speculative decoding logic for the Transformer model.
 """
-from typing import Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import torch
 from src.model.inference.sampling import LogitSampler
+
+if TYPE_CHECKING:
+    from src.model.model import Transformer
+    from src.model.structures import SamplingConfig
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 class SpeculativeEngine:
@@ -17,11 +22,11 @@ class SpeculativeEngine:
 
     def generate_chunk(
         self,
-        draft_model,
+        draft_model: "Transformer",
         tokens: torch.Tensor,
         speculative_steps: int,
-        sampling_config,
-        draft_cache=None,
+        sampling_config: "SamplingConfig",
+        draft_cache: Optional["KVCache"] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Generates a speculative chunk of tokens using a draft model.
@@ -32,12 +37,13 @@ class SpeculativeEngine:
             if draft_cache and draft_cache.current_pos > 0:
                 # Synchronization logic as in previous turn
                 draft_cache.rollback(1)
-                draft_logits, _, _, _ = draft_model(tokens[:, -1:], kv_cache=draft_cache)
+                draft_outputs = draft_model(tokens[:, -1:], kv_cache=draft_cache)
             else:
                 # Standard prompt processing
-                draft_logits, _, _, _ = draft_model(tokens, kv_cache=draft_cache)
+                draft_outputs = draft_model(tokens, kv_cache=draft_cache)
 
             generated_chunks = []
+            draft_logits = draft_outputs.logits
             for i in range(speculative_steps):
                 next_token = self.sampler.sample(
                     draft_logits[:, -1, :],
@@ -49,7 +55,8 @@ class SpeculativeEngine:
                 generated_chunks.append(next_token)
 
                 if i < speculative_steps - 1:
-                    draft_logits, _, _, _ = draft_model(next_token, kv_cache=draft_cache)
+                    draft_outputs = draft_model(next_token, kv_cache=draft_cache)
+                    draft_logits = draft_outputs.logits
 
             draft_tokens = torch.cat([tokens] + generated_chunks, dim=1)
 
@@ -59,7 +66,7 @@ class SpeculativeEngine:
         self,
         true_logits: torch.Tensor,
         speculative_chunk: torch.Tensor,
-        sampling_config,
+        sampling_config: "SamplingConfig",
     ) -> torch.Tensor:
         """
         Validates a speculative chunk against logits from the main model.

@@ -136,8 +136,10 @@ class AgentExecutor:
             ltm_memory=agent_state.ltm_memory,
         )
 
-        for chunk, surprise, new_ltm_memory in unwrapped_model.generate(gen_input):
-            agent_state.accumulate_generation_result(chunk, surprise, new_ltm_memory)
+        for result in unwrapped_model.generate(gen_input):
+            agent_state.accumulate_generation_result(
+                result.tokens, result.surprise, result.ltm_memory
+            )
 
         return agent_state.finalize_turn()
 

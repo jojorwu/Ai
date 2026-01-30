@@ -11,6 +11,7 @@ from src.agent.evolution import EvolutionaryOrchestrator
 from src.agent.dataclasses import LTMConfig
 from src.agent.trainer import AgentTrainer
 from src.model.inference.sampling import LogitSampler
+from src.model.structures import ForwardOutput
 from src.training.loop import TrainingLoop, TrainingState
 from tests.test_utils import create_test_config
 
@@ -42,11 +43,11 @@ class TestStability(unittest.TestCase):
 
         # Mock forward to return NaN
         nan_logits = torch.full((1, 1, self.config.model.vocab_size), float('nan'))
-        self.mock_model.forward.return_value = (
-            nan_logits,          # logits
-            torch.tensor([[0.5]]),           # values
-            torch.tensor(0.1),               # aux_loss
-            None                             # ltm_memory
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=nan_logits,
+            value=torch.tensor([[0.5]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
         )
 
         # This should not raise an exception and should skip optimizer.step()
@@ -62,11 +63,11 @@ class TestStability(unittest.TestCase):
 
         # Mock forward to return Inf
         inf_logits = torch.full((1, 1, self.config.model.vocab_size), float('inf'))
-        self.mock_model.forward.return_value = (
-            inf_logits,          # logits
-            torch.tensor([[0.5]]),           # values
-            torch.tensor(0.1),               # aux_loss
-            None                             # ltm_memory
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=inf_logits,
+            value=torch.tensor([[0.5]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
         )
 
         self.trainer.experience(x, y)
@@ -132,11 +133,11 @@ class TestStability(unittest.TestCase):
         y = torch.randint(0, self.config.model.vocab_size, (1, 1))
 
         # Mock forward to return NaN value but finite logits
-        self.mock_model.forward.return_value = (
-            torch.randn(1, 1, self.config.model.vocab_size), # logits
-            torch.tensor([[float('nan')]]),                  # values (NaN)
-            torch.tensor(0.1),                               # aux_loss
-            None                                             # ltm_memory
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=torch.randn(1, 1, self.config.model.vocab_size),
+            value=torch.tensor([[float('nan')]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
         )
 
         initial_count = self.agent.metrics.experience_count

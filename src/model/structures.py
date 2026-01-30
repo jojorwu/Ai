@@ -70,3 +70,22 @@ class GenerateInput:
     kv_cache: Any = None
     draft_cache: Any = None
     ltm_memory: Optional[torch.Tensor] = None
+
+
+@dataclass
+class ForwardOutput:
+    """Dataclass for the model's forward pass output."""
+
+    logits: torch.Tensor
+    value: torch.Tensor
+    aux_loss: torch.Tensor
+    ltm_memory: Optional[torch.Tensor] = None
+
+
+@dataclass
+class GenerationResult:
+    """Dataclass for a single step of token generation."""
+
+    tokens: torch.Tensor
+    surprise: float
+    ltm_memory: Optional[torch.Tensor] = None

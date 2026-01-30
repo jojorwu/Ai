@@ -61,22 +61,22 @@ class AgentTrainer:
         self.agent.long_term_memory.train()
         self.agent.ltm_optimizer.zero_grad()
 
-        logits, values, aux_loss, _ = self.agent.base_model.forward(
+        outputs = self.agent.base_model.forward(
             x_batch, ltm_override=self.agent.long_term_memory
         )
 
         loss_policy = self.agent.policy_loss_fn(
-            logits.view(-1, logits.size(-1)), y_batch.view(-1)
+            outputs.logits.view(-1, outputs.logits.size(-1)), y_batch.view(-1)
         )
 
         # Calculate value loss (encouraging the model to predict high values)
-        target_values = torch.ones_like(values)
-        loss_value = self.agent.value_loss_fn(values, target_values)
+        target_values = torch.ones_like(outputs.value)
+        loss_value = self.agent.value_loss_fn(outputs.value, target_values)
 
         # Total loss is what drives the LTM update
         total_loss = loss_policy + loss_value
-        if aux_loss is not None:
-            total_loss += aux_loss
+        if outputs.aux_loss is not None:
+            total_loss += outputs.aux_loss
 
         # Check for NaN/Inf in loss to prevent weight corruption and autograd errors
         if not torch.isfinite(total_loss):
@@ -99,7 +99,7 @@ class AgentTrainer:
         self._update_ltm_and_calc_surprise()
 
         # Update metrics only if the value is finite
-        mean_value = torch.mean(values).item()
+        mean_value = torch.mean(outputs.value).item()
         if math.isfinite(mean_value):
             self.agent.metrics.value_score_sum += mean_value
             self.agent.metrics.experience_count += 1

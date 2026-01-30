@@ -12,6 +12,15 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class AgentMetrics:
+    """Keeps track of an agent's performance metrics."""
+    total_surprise: float = 0.0
+    experience_count: int = 0
+    value_score_sum: float = 0.0
+    fitness_score: float = field(default=-float('inf'))
+
+
+@dataclass
 class AgentState:
     """Keeps track of the agent's state during a conversation."""
 
