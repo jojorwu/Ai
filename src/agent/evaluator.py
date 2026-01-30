@@ -101,9 +101,7 @@ class CollaborativeEvaluator:
         if helper.agent_id == ctx.proposer.agent_id:
             return
 
-        context = torch.cat([ctx.prompt_tokens, ctx.response], dim=1).to(
-            helper.base_model.device
-        )
+        context = ctx.response.to(helper.base_model.device)
         helper_response = helper.generate_response(context)
         new_helper_tokens = helper_response[:, context.shape[1] :]
 
@@ -132,11 +130,7 @@ class CollaborativeEvaluator:
         Manages the 'independent response' scenario in collaborative evaluation.
         """
         critics = self._get_critics(ctx.proposer, [ctx.proposer])
-        new_response_tokens = ctx.response[:, ctx.prompt_tokens.shape[1] :]
-
-        full_sequence = torch.cat([ctx.prompt_tokens, new_response_tokens], dim=1).expand(
-            len(critics), -1
-        )
+        full_sequence = ctx.response.expand(len(critics), -1)
         critic_ltms = [critic.long_term_memory for critic in critics]
 
         avg_critique_score = self.scoring_engine.calculate_critique_score(

@@ -41,7 +41,8 @@ class AgentSpecializer:
             logging.warning("No agents provided for specialization.")
             return
 
-        data_tensor = torch.tensor(spec_config.full_data)
+        # Optimized: use as_tensor to avoid unnecessary copies if it's already a tensor.
+        data_tensor = torch.as_tensor(spec_config.full_data)
         data_chunks = torch.tensor_split(data_tensor, num_agents)
 
         # Limit workers to avoid excessive thread overhead

@@ -56,16 +56,16 @@ class TrainingLoop:
     def run(self, checkpoint_dir: str, resume_from: str | None):
         """Runs the main training loop."""
         if not self.callbacks:
-             # Default callbacks if none provided.
-             # We assume standard structure if not provided.
-             import os
-             self.callbacks = [
-                 LoggingCallback(),
-                 CheckpointCallback(
-                     best_dir=os.path.join(checkpoint_dir, "best"),
-                     latest_dir=os.path.join(checkpoint_dir, "latest")
-                 )
-             ]
+            # Default callbacks if none provided.
+            # We assume standard structure if not provided.
+            import os
+            self.callbacks = [
+                LoggingCallback(),
+                CheckpointCallback(
+                    best_dir=os.path.join(checkpoint_dir, "best"),
+                    latest_dir=os.path.join(checkpoint_dir, "latest")
+                )
+            ]
 
         total_epochs = (
             self.config.evolution.pretrain_epochs + self.config.evolution.evolution_epochs
@@ -141,11 +141,11 @@ class TrainingLoop:
                 # Check early stopping status from callbacks
                 should_stop = False
                 for cb in self.callbacks:
-                     if isinstance(cb, CheckpointCallback):
-                          if cb.epochs_no_improve >= self.config.evolution.early_stopping_patience:
-                               logging.warning("Early stopping triggered by callback.")
-                               should_stop = True
-                               break
+                    if isinstance(cb, CheckpointCallback):
+                        if cb.epochs_no_improve >= self.config.evolution.early_stopping_patience:
+                            logging.warning("Early stopping triggered by callback.")
+                            should_stop = True
+                            break
                 if should_stop:
                     break
 

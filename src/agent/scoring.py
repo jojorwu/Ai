@@ -53,7 +53,9 @@ class ScoringEngine:
             for i, ltm in enumerate(critic_ltms):
                 if ltm:
                     # Use a temporary state for critique as we don't persist memory matrix here.
-                    ltm_states[i], _, _ = ltm(summaries[i : i + 1])
+                    # Squeeze dimension 1 to match ltm_states[i] which is (1, d_model)
+                    context, _, _ = ltm(summaries[i : i + 1])
+                    ltm_states[i] = context.squeeze(1)
             _, values, _, _ = base_model.forward(
                 full_sequence, ltm_state=ltm_states
             )
