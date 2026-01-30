@@ -37,7 +37,7 @@ class Agent:
         base_model: Transformer,
         ltm_config: LTMConfig,
         agent_id: str | None = None,
-    ):
+    ) -> None:
         self.agent_id = agent_id or str(uuid.uuid4())
         self.base_model = base_model
         self.ltm_config = ltm_config
@@ -67,7 +67,7 @@ class Agent:
         """Calculates the agent's fitness."""
         return self.metrics.fitness_score
 
-    def update_fitness_score(self, score: float):
+    def update_fitness_score(self, score: float) -> None:
         """Updates the agent's fitness score."""
         self.metrics.fitness_score = score
 

@@ -3,6 +3,7 @@ Encapsulates generation-related utility methods for the Transformer model.
 """
 import torch
 from torch import nn
+from src.utils.training import calculate_gradient_norm
 
 
 class GenerationMixin:
@@ -20,17 +21,8 @@ class GenerationMixin:
 
         long_term_memory.zero_grad()
         value.backward(retain_graph=False)
-        grad_tensors = [
-            p.grad.detach()
-            for p in long_term_memory.parameters()
-            if p.grad is not None
-        ]
-        if not grad_tensors:
-            return 0.0
 
-        # Optimized norm calculation to avoid large temporary tensor concatenation.
-        # ||[a, b]|| = sqrt(||a||^2 + ||b||^2)
-        total_norm_sq = sum(t.pow(2).sum() for t in grad_tensors)
-        surprise = torch.sqrt(total_norm_sq).item()
+        surprise = calculate_gradient_norm(long_term_memory.parameters())
+
         long_term_memory.zero_grad()
         return surprise

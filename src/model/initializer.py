@@ -28,10 +28,9 @@ class ModelInitializer:
     Encapsulates the initialization logic for the Transformer model.
     """
 
-    def __init__(self, model: "Transformer"):
+    def __init__(self, model: "Transformer") -> None:
         self.model = model
         self.config = model.config
-        self._config = model._config  # pylint: disable=protected-access
         self.load_in_4bit = model.load_in_4bit
 
     def init_rope_embeddings(self) -> RopeEmbeddings:
@@ -127,7 +126,7 @@ class ModelInitializer:
         if self.config.model.num_layers < 2:
             return None
 
-        draft_config_dict = self._config.model_dump()
+        draft_config_dict = self.config.model_dump()
         draft_config_dict["model"]["num_layers"] //= 2
         draft_config = TransformerConfig(**draft_config_dict)
 
@@ -135,6 +134,4 @@ class ModelInitializer:
             "Creating a draft model with %d layers.",
             draft_config.model.num_layers,
         )
-        # This will cause a circular import if Transformer is imported directly
-        from src.model.model import Transformer
-        return Transformer(draft_config, self.load_in_4bit)
+        return self.model.__class__(draft_config, self.load_in_4bit)

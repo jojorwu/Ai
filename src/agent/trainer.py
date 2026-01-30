@@ -7,6 +7,7 @@ import torch
 
 from src.agent.agent import Agent
 from src.agent.update_policy import SurpriseUpdatePolicy, UpdatePolicy
+from src.utils.training import calculate_gradient_norm
 
 
 class AgentTrainer:
@@ -14,7 +15,9 @@ class AgentTrainer:
     Handles the training process for a single agent, including the "experience" loop.
     """
 
-    def __init__(self, agent: Agent, update_policy: UpdatePolicy = None):
+    def __init__(
+        self, agent: Agent, update_policy: UpdatePolicy | None = None
+    ) -> None:
         self.agent = agent
         self.update_policy = update_policy or SurpriseUpdatePolicy()
 
@@ -26,19 +29,7 @@ class AgentTrainer:
         if not self.agent.long_term_memory:
             return 0.0
 
-        grad_tensors = [
-            p.grad.detach().flatten()
-            for p in self.agent.long_term_memory.parameters()
-            if p.grad is not None
-        ]
-
-        if not grad_tensors:
-            return 0.0
-
-        # Optimized norm calculation to avoid large temporary tensor concatenation.
-        # ||[a, b]|| = sqrt(||a||^2 + ||b||^2)
-        total_norm_sq = sum(t.pow(2).sum() for t in grad_tensors)
-        surprise = torch.sqrt(total_norm_sq).item()
+        surprise = calculate_gradient_norm(self.agent.long_term_memory.parameters())
         self.agent.metrics.total_surprise += surprise
 
         if self.update_policy.should_update(surprise, self.agent.ltm_config):
@@ -46,10 +37,14 @@ class AgentTrainer:
 
         return surprise
 
-    def experience(self, x_batch: torch.Tensor, y_batch: torch.Tensor):
+    def experience(self, x_batch: torch.Tensor, y_batch: torch.Tensor) -> None:
         """
         The process of an agent gaining "experience" in a batch training mode.
         This method updates the agent's LTM based on the surprise metric.
+
+        Args:
+            x_batch: Input token indices of shape [batch, seq_len].
+            y_batch: Target token indices of shape [batch, seq_len].
         """
         if not self.agent.long_term_memory or self.agent.ltm_optimizer is None:
             return

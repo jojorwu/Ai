@@ -2,9 +2,14 @@
 Implements the main text generation pipeline for the Transformer model.
 """
 import logging
-from typing import Generator, Tuple
+from typing import Generator, Tuple, TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from src.model.model import Transformer
+    from src.model.structures import GenerateInput
+    from src.model.layers.attention.kv_cache import KVCache
 from src.model.inference.sampling import LogitSampler
 from src.model.inference.speculative import SpeculativeEngine
 
@@ -27,10 +32,13 @@ class TextGenerator:
         )
 
     def generate(
-        self, inputs
+        self, inputs: "GenerateInput"
     ) -> Generator[Tuple[torch.Tensor, float, torch.Tensor | None], None, None]:
         """
         Generates a sequence of tokens.
+
+        Args:
+            inputs: Configuration and initial state for generation.
         """
         self.model.eval()
         draft_model = self.model.draft_model or self.model
@@ -112,7 +120,9 @@ class TextGenerator:
             yield accepted_chunk, surprise, current_ltm_memory
             total_generated += accepted_len
 
-    def _prepare_caches(self, inputs, draft_model, tokens):
+    def _prepare_caches(
+        self, inputs: "GenerateInput", draft_model: "Transformer", tokens: torch.Tensor
+    ) -> Tuple["KVCache", "KVCache"]:
         """Prepares or initializes KV caches for main and draft models."""
         from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
 
@@ -151,7 +161,9 @@ class TextGenerator:
 
         return main_cache, draft_cache
 
-    def _initial_sync(self, inputs, main_cache, tokens):
+    def _initial_sync(
+        self, inputs: "GenerateInput", main_cache: "KVCache", tokens: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor | None]:
         """Performs initial forward pass to synchronize the main cache."""
         current_ltm_memory = inputs.ltm_memory
         if main_cache.current_pos == 0:

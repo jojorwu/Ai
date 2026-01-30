@@ -42,10 +42,9 @@ class Transformer(nn.Module, GenerationMixin):
 
     _no_split_modules = ["DecoderBlock"]
 
-    def __init__(self, config: TransformerConfig, load_in_4bit: bool = False):
+    def __init__(self, config: TransformerConfig, load_in_4bit: bool = False) -> None:
         super().__init__()
         self.config = config
-        self._config = config  # Keep a copy of the full config
         self.load_in_4bit = load_in_4bit
 
         self.initializer = ModelInitializer(self)
@@ -60,7 +59,7 @@ class Transformer(nn.Module, GenerationMixin):
         self.generator = TextGenerator(self)
         self.titans_engine = TitansForwardEngine(self)
 
-    def count_parameters(self):
+    def count_parameters(self) -> int:
         """Counts the number of trainable parameters in the model."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
@@ -133,13 +132,13 @@ class Transformer(nn.Module, GenerationMixin):
         return self
 
     @property
-    def draft_model(self):
+    def draft_model(self) -> "Transformer | None":
         """Lazy-initializes the draft model for speculative decoding."""
         if self._draft_model is None:
             self._draft_model = self.initializer.init_draft_model()
         return self._draft_model
 
     @property
-    def device(self):
+    def device(self) -> torch.device:
         """Returns the device of the model's embedding layer."""
         return self.layers.embedding.embedding.weight.device

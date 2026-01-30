@@ -35,7 +35,7 @@ class AgentExecutor:
         tokenizer: Tokenizer,
         config: GenerateConfig,
         accelerator: Accelerator,
-    ):
+    ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
@@ -43,8 +43,11 @@ class AgentExecutor:
         self.tool_registry = ToolRegistry()
         self.cache_manager = CacheManager(accelerator)
 
-    def run(self):
-        """Runs the main agent loop."""
+    def run(self) -> None:
+        """
+        Runs the main agent loop, including response generation, history pruning,
+        and tool execution.
+        """
         agent_state = self._initialize_agent_state()
 
         for turn in range(self.config.generation.max_turns):
@@ -52,9 +55,6 @@ class AgentExecutor:
 
             # Generate model response
             new_tokens = self._generate_model_response(agent_state)
-            agent_state.append_tokens(new_tokens)
-            # Newly generated tokens are already in the cache because of generate()
-            agent_state.mark_as_processed(len(new_tokens))
             agent_state.prune_history(self.config.generation.context_window_size)
 
             generated_text = self.tokenizer.decode(new_tokens)
@@ -136,20 +136,10 @@ class AgentExecutor:
             ltm_memory=agent_state.ltm_memory,
         )
 
-        # Accumulate as tensors to minimize GPU-CPU synchronization points.
-        generated_chunks = []
         for chunk, surprise, new_ltm_memory in unwrapped_model.generate(gen_input):
-            agent_state.ltm_memory = new_ltm_memory
-            generated_chunks.append(chunk)
-            if agent_state.complexity_manager:
-                agent_state.complexity_manager.update_surprise(surprise)
+            agent_state.accumulate_generation_result(chunk, surprise, new_ltm_memory)
 
-        if not generated_chunks:
-            return []
-
-        # Perform a single cat and tolist conversion at the end of the turn.
-        newly_generated_tokens_tensor = torch.cat(generated_chunks, dim=1)
-        return newly_generated_tokens_tensor[0].tolist()
+        return agent_state.finalize_turn()
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
         """Processes a tool call if one is present in the conversation history."""
