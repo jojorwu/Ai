@@ -67,7 +67,33 @@ class ModelInitializer:
         # 3. Initialize output and value heads
         layers_dict.update(self._init_head_layers())
 
-        return ModelLayers(layers_dict)
+        model_layers = ModelLayers(layers_dict)
+
+        # 4. Apply robust weight initialization
+        self._init_weights(model_layers)
+
+        return model_layers
+
+    def _init_weights(self, module: nn.Module):
+        """
+        Recursively initializes weights for all sub-modules using a combination
+        of Kaiming (for hidden layers) and specialized strategies.
+        """
+        for m in module.modules():
+            if isinstance(m, nn.Linear):
+                # GPT-2 style small standard deviation for hidden weights
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Embedding):
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            elif isinstance(m, (nn.LayerNorm, RMSNorm)):
+                if hasattr(m, 'gamma') and m.gamma is not None:
+                    nn.init.ones_(m.gamma)
+                if hasattr(m, 'weight') and m.weight is not None:
+                    nn.init.ones_(m.weight)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def _init_core_layers(self, ltm: LongTermMemory | None) -> dict:
         """Initializes input, memory, and gating layers."""

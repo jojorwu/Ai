@@ -40,16 +40,16 @@ class TitansForwardEngine:
                 # in chunks to better capture context and maintain stability.
                 chunk_size = 512
                 if seq_len > chunk_size:
-                    # Sequential update through chunks
+                    # Sequential update through chunks for better long-range dependency capture.
                     for i in range(0, seq_len, chunk_size):
                         chunk = h[:, i : i + chunk_size, :]
-                        chunk_summary = chunk.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
-                        # We only care about the final context for the decoder blocks,
-                        # but we must propagate the memory matrix update.
+                        # Perform pooling in float32 for numerical precision
+                        chunk_summary = chunk.mean(dim=1, keepdim=True, dtype=torch.float32).to(h.dtype)
+                        # Update LTM state sequentially
                         ltm_state, _, new_ltm_memory = long_term_memory(chunk_summary, prev_mem=new_ltm_memory)
                 else:
                     # Single update for short sequences or single tokens
-                    summary = h.to(torch.float32).mean(dim=1, keepdim=True).to(h.dtype)
+                    summary = h.mean(dim=1, keepdim=True, dtype=torch.float32).to(h.dtype)
                     ltm_state, _, new_ltm_memory = long_term_memory(summary, prev_mem=new_ltm_memory)
             else:
                 # Placeholder zero tensor

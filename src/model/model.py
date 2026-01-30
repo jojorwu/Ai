@@ -1,12 +1,16 @@
 """
 PyTorch implementation of the main Transformer model.
 """
+from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Generator, Tuple
+from typing import Generator, Tuple, TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from src.model.layers.attention.kv_cache import KVCache
 from torch import nn
 from torch.nn import functional as F
 
@@ -68,14 +72,25 @@ class Transformer(nn.Module, GenerationMixin):
     def forward(
         self,
         x: torch.Tensor,
-        ltm_state: torch.Tensor = None,
-        ltm_memory: torch.Tensor = None,
-        dynamic_top_k: int = None,
+        ltm_state: torch.Tensor | None = None,
+        ltm_memory: torch.Tensor | None = None,
+        dynamic_top_k: int | None = None,
         ltm_override: nn.Module | None = None,
-        kv_cache: "KVCache" = None,
+        kv_cache: KVCache | None = None,
     ) -> ForwardOutput:
         """
-        Performs the forward pass, delegating Titans logic to TitansForwardEngine.
+        Performs the forward pass of the Transformer model.
+
+        Args:
+            x: Input token IDs [batch, seq_len].
+            ltm_state: Optional pre-calculated Long-Term Memory state.
+            ltm_memory: Optional persistent LTM associative matrix.
+            dynamic_top_k: Optional override for MoE top_k.
+            ltm_override: Optional LTM module to use instead of the model's own.
+            kv_cache: Optional persistent Key-Value cache for inference.
+
+        Returns:
+            A ForwardOutput dataclass containing logits, value, and memory states.
         """
         # 1. Embed input sequence
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)

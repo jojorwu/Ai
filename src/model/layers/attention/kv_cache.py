@@ -78,11 +78,11 @@ class KVCache:
             return
 
         indices = torch.arange(seq_len, device=k.device) + self.current_pos
-        cache_indices = torch.where(
-            indices < anchor_size,
-            indices,
-            anchor_size + (indices - anchor_size) % sliding_capacity
-        )
+        is_anchor = indices < anchor_size
+
+        # Ring buffer logic for non-anchor tokens
+        sliding_indices = anchor_size + (indices - anchor_size) % sliding_capacity
+        cache_indices = torch.where(is_anchor, indices, sliding_indices)
 
         # Stability: Ensure indices are within valid range [0, max_seq_len-1]
         cache_indices = torch.clamp(cache_indices, 0, max_seq_len - 1)
@@ -134,18 +134,20 @@ class KVCache:
         k_anchors = self.k_cache[layer_idx, :, :, :anchor_size, :]
         v_anchors = self.v_cache[layer_idx, :, :, :anchor_size, :]
 
-        # Re-order sliding part
+        # Re-order sliding part to maintain chronological consistency
+        k_sliding_part = self.k_cache[layer_idx, :, :, anchor_size:, :]
+        v_sliding_part = self.v_cache[layer_idx, :, :, anchor_size:, :]
+
         if pos_in_sliding == 0:
-            k_sliding = self.k_cache[layer_idx, :, :, anchor_size:, :]
-            v_sliding = self.v_cache[layer_idx, :, :, anchor_size:, :]
+            k_sliding, v_sliding = k_sliding_part, v_sliding_part
         else:
             k_sliding = torch.cat([
-                self.k_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
-                self.k_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
+                k_sliding_part[:, :, pos_in_sliding:, :],
+                k_sliding_part[:, :, :pos_in_sliding, :]
             ], dim=2)
             v_sliding = torch.cat([
-                self.v_cache[layer_idx, :, :, (anchor_size + pos_in_sliding):, :],
-                self.v_cache[layer_idx, :, :, anchor_size:(anchor_size + pos_in_sliding), :]
+                v_sliding_part[:, :, pos_in_sliding:, :],
+                v_sliding_part[:, :, :pos_in_sliding, :]
             ], dim=2)
 
         if anchor_size == 0:
