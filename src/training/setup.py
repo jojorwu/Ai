@@ -19,13 +19,17 @@ from src.utils.setup import setup_logging
 
 
 def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: float):
-    """Initializes tokenizer and loads data."""
+    """Initializes tokenizer and loads data in a memory-safe manner."""
     tokenizer = Tokenizer(tokenizer_path)
     multimodal_data = load_multimodal_data_from_directory(data_dir)
     if not multimodal_data:
         raise ValueError(f"No data found in {data_dir}")
-    all_text = " ".join([text for text, _ in multimodal_data])
-    data_tokens = tokenizer.encode(all_text, add_special_tokens=True)
+
+    # Efficiently encode text item-by-item to avoid massive string concatenation.
+    data_tokens = []
+    for text, _ in multimodal_data:
+        data_tokens.extend(tokenizer.encode(text, add_special_tokens=True))
+
     # Convert to tensor early to optimize memory and training efficiency
     data_tensor = torch.tensor(data_tokens, dtype=torch.long)
 

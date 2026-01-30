@@ -3,6 +3,7 @@ This module contains the EvolutionaryOrchestrator class, which handles
 population-level evolutionary logic like weight merging.
 """
 import logging
+import math
 import torch
 from typing import List
 
@@ -47,19 +48,30 @@ class EvolutionaryOrchestrator:
             "Merging LTM weights from %d best agents on %s...", len(ltm_states), device
         )
 
+        # Filter again to ensure we have valid fitness scores
+        valid_agents = [a for a in best_agents if math.isfinite(a.get_fitness_score())]
+        if not valid_agents:
+            logging.warning("No agents with finite fitness scores found. Skipping merge.")
+            return
+
         # Calculate weights based on fitness scores using Softmax to ensure they sum to 1.
-        # We shift by max fitness for numerical stability.
         fitness_scores = torch.tensor(
-            [a.get_fitness_score() for a in best_agents],
+            [a.get_fitness_score() for a in valid_agents],
             device=device,
             dtype=torch.float32,
         )
 
         # Handle cases where all agents have the same fitness (e.g., initial state)
-        if torch.all(fitness_scores == fitness_scores[0]):
-            weights = torch.full_like(fitness_scores, 1.0 / len(best_agents))
+        if len(valid_agents) == 1:
+            weights = torch.tensor([1.0], device=device)
+        elif torch.all(fitness_scores == fitness_scores[0]):
+            weights = torch.full_like(fitness_scores, 1.0 / len(valid_agents))
         else:
             weights = torch.softmax(fitness_scores, dim=0)
+
+        # Re-assign best_agents and ltm_states to match valid_agents
+        best_agents = valid_agents
+        ltm_states = [a.get_ltm_state() for a in best_agents if a.get_ltm_state()]
 
         logging.info(
             "Merging LTM weights from %d agents using weighted averaging (max weight: %.4f)...",

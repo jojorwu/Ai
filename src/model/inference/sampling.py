@@ -66,5 +66,12 @@ class LogitSampler:
 
         # Sample from the filtered distribution
         probs = F.softmax(logits, dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1)
+
+        # Safety check: if all probabilities are zero or NaN (due to extreme filtering or numerical instability)
+        # fallback to greedy sampling from the original (unfiltered) logits.
+        if torch.isnan(probs).any() or (probs.sum(dim=-1) <= 0).any():
+            _, next_token = torch.topk(logits, k=1, dim=-1)
+        else:
+            next_token = torch.multinomial(probs, num_samples=1)
+
         return next_token

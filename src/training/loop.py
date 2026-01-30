@@ -128,7 +128,9 @@ class TrainingLoop:
                 logging.warning("Early stopping triggered.")
                 break
 
-            # Explicit memory management after each epoch/cycle
+            # Explicit memory management after each epoch/cycle.
+            # Free Accelerator's internal state alongside standard garbage collection.
+            self.accelerator.free_memory()
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

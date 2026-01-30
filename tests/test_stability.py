@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 from src.agent.agent import Agent
 from src.agent.dataclasses import LTMConfig
 from src.agent.trainer import AgentTrainer
+from src.model.inference.sampling import LogitSampler
 from src.training.loop import TrainingLoop, TrainingState
 from tests.test_utils import create_test_config
 
@@ -88,6 +89,17 @@ class TestStability(unittest.TestCase):
 
         # Verify save_state was NOT called because val_loss was NaN
         mock_trainer.accelerator.save_state.assert_not_called()
+
+    def test_logit_sampler_handles_nan_logits(self):
+        """Tests that LogitSampler falls back to greedy if logits are all NaN/filtered."""
+        sampler = LogitSampler()
+        # All logits are -inf after filtering or NaN originally
+        logits = torch.full((1, 10), float('nan'))
+
+        # This should fallback to greedy and return an index (not crash)
+        token = sampler.sample(logits, temperature=1.0)
+        self.assertEqual(token.shape, (1, 1))
+        self.assertTrue(0 <= token.item() < 10)
 
 if __name__ == "__main__":
     unittest.main()
