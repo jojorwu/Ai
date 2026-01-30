@@ -30,10 +30,18 @@ class AgentTrainer:
             return 0.0
 
         surprise = calculate_gradient_norm(self.agent.long_term_memory.parameters())
-        self.agent.metrics.total_surprise += surprise
 
-        if self.update_policy.should_update(surprise, self.agent.ltm_config):
-            self.agent.ltm_optimizer.step()
+        # Only update metrics and perform optimizer step if surprise is finite.
+        if math.isfinite(surprise):
+            self.agent.metrics.total_surprise += surprise
+
+            if self.update_policy.should_update(surprise, self.agent.ltm_config):
+                self.agent.ltm_optimizer.step()
+        else:
+            logging.warning(
+                "Agent %s: Non-finite surprise (%.4f) detected. Skipping optimizer step.",
+                self.agent.agent_id, surprise
+            )
 
         return surprise
 
@@ -87,12 +95,16 @@ class AgentTrainer:
         # Perform gradient clipping for LTM parameters
         torch.nn.utils.clip_grad_norm_(ltm_params, max_norm=1.0)
 
-        # Update LTM based on surprise
-        surprise = self._update_ltm_and_calc_surprise()
-        if not math.isfinite(surprise):
-             logging.warning("Agent %s encountered non-finite surprise. Skipping optimizer step.", self.agent.agent_id)
-             return
+        # Update LTM based on surprise (handles its own finite checks)
+        self._update_ltm_and_calc_surprise()
 
-        # Update metrics
-        self.agent.metrics.value_score_sum += torch.mean(values).item()
-        self.agent.metrics.experience_count += 1
+        # Update metrics only if the value is finite
+        mean_value = torch.mean(values).item()
+        if math.isfinite(mean_value):
+            self.agent.metrics.value_score_sum += mean_value
+            self.agent.metrics.experience_count += 1
+        else:
+            logging.warning(
+                "Agent %s: Non-finite value detected during experience. Skipping metric update.",
+                self.agent.agent_id
+            )

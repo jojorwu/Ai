@@ -45,6 +45,9 @@ class KVCache:
         Updates the cache with new key and value tensors for a specific layer.
         Preserves anchors and uses a ring buffer for the rest.
         """
+        if k.numel() == 0:
+            return
+
         seq_len = k.shape[2]
         anchor_size = self.config.anchor_size
         max_seq_len = self.config.max_seq_len
@@ -80,6 +83,9 @@ class KVCache:
             indices,
             anchor_size + (indices - anchor_size) % sliding_capacity
         )
+
+        # Stability: Ensure indices are within valid range [0, max_seq_len-1]
+        cache_indices = torch.clamp(cache_indices, 0, max_seq_len - 1)
 
         # Vectorized assignment to the cache
         self.k_cache[layer_idx, :, :, cache_indices, :] = k
