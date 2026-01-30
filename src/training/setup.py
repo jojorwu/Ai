@@ -51,7 +51,9 @@ def load_and_prepare_data(data_dir: str, tokenizer_path: str, validation_split: 
 def setup_environment(args: argparse.Namespace):
     """Sets up directories, logging, and configuration."""
     model_dir = os.path.join("models", args.model_name)
-    checkpoint_dir = os.path.join(model_dir, "checkpoints")
+    base_checkpoint_dir = os.path.join(model_dir, "checkpoints")
+    checkpoint_dir = os.path.join(base_checkpoint_dir, "best")
+    latest_checkpoint_dir = os.path.join(base_checkpoint_dir, "latest")
     resume_from = args.resume_from
 
     if resume_from:
@@ -69,6 +71,7 @@ def setup_environment(args: argparse.Namespace):
             raise FileExistsError(f"Model directory '{model_dir}' already exists.")
         os.makedirs(model_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
+        os.makedirs(latest_checkpoint_dir, exist_ok=True)
 
         # Make training run self-contained by copying the config
         root_config_path = "config/config_train.json"
@@ -84,7 +87,7 @@ def setup_environment(args: argparse.Namespace):
         logging.info("Starting new training run: '%s'.", args.model_name)
 
     config = TrainConfig.from_json(config_path)
-    return config, model_dir, checkpoint_dir, resume_from
+    return config, model_dir, checkpoint_dir, latest_checkpoint_dir, resume_from
 
 
 def save_updated_config(config: TrainConfig, tokenizer: Tokenizer, model_dir: str):
@@ -104,6 +107,7 @@ class TrainingEnvironment:
     train_data: list
     val_data: list
     checkpoint_dir: str
+    latest_checkpoint_dir: str
     model_dir: str
 
 
@@ -113,7 +117,7 @@ def prepare_training_environment(
     """
     Orchestrates the setup of the entire training environment.
     """
-    config, model_dir, checkpoint_dir, resume_from = setup_environment(args)
+    config, model_dir, checkpoint_dir, latest_checkpoint_dir, resume_from = setup_environment(args)
 
     # Apply hardware optimizations
     device_manager = DeviceManager(config.hardware)
@@ -163,5 +167,6 @@ def prepare_training_environment(
         train_data=train_data,
         val_data=val_data,
         checkpoint_dir=checkpoint_dir,
+        latest_checkpoint_dir=latest_checkpoint_dir,
         model_dir=model_dir,
     )

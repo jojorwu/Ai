@@ -28,6 +28,9 @@ class TrainerCallback(Protocol):
     ) -> None:
         """Called at the end of each training step."""
 
+    def on_interrupt(self, config: Any, state: Any, **kwargs) -> None:
+        """Called when training is interrupted (e.g., Ctrl+C)."""
+
 
 class LoggingCallback:
     """Default callback for logging training progress."""
@@ -79,37 +82,53 @@ class LoggingCallback:
 class CheckpointCallback:
     """Callback for saving model checkpoints."""
 
-    def __init__(self, checkpoint_dir: str):
-        self.checkpoint_dir = checkpoint_dir
-        self.best_val_loss = float("inf")
-        self.epochs_no_improve = 0
+    def __init__(self, best_dir: str, latest_dir: str):
+        self.best_dir = best_dir
+        self.latest_dir = latest_dir
 
     def on_epoch_end(
         self, epoch: int, config: Any, state: Any, metrics: Dict[str, Any], **kwargs
     ) -> None:
         import logging
         import math
+        import os
+
         val_loss = metrics.get("val_loss")
         accelerator = kwargs.get("accelerator")
 
+        if accelerator:
+            # Always save to the latest directory for resuming.
+            os.makedirs(self.latest_dir, exist_ok=True)
+            accelerator.save_state(self.latest_dir)
+            logging.info("    - Latest state saved to %s", self.latest_dir)
+
         if val_loss is None or not math.isfinite(val_loss):
-            logging.warning("Non-finite or missing validation loss. Skipping checkpoint saving.")
+            logging.warning("Non-finite or missing validation loss. Skipping 'best' checkpoint.")
             return
 
-        if val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
-            self.epochs_no_improve = 0
+        if val_loss < state.best_val_loss:
+            state.best_val_loss = val_loss
+            state.epochs_no_improve = 0
             if accelerator:
-                accelerator.save_state(self.checkpoint_dir)
+                os.makedirs(self.best_dir, exist_ok=True)
+                accelerator.save_state(self.best_dir)
                 logging.info(
                     "    - New best checkpoint saved (Val Loss: %.4f)",
-                    self.best_val_loss,
+                    state.best_val_loss,
                 )
         else:
-            self.epochs_no_improve += 1
+            state.epochs_no_improve += 1
             logging.info(
-                "    - No improvement in validation loss for %d epochs.",
-                self.epochs_no_improve,
+                "    - No improvement in validation loss for %d epochs (Best: %.4f).",
+                state.epochs_no_improve,
+                state.best_val_loss,
             )
-            if self.epochs_no_improve >= config.evolution.early_stopping_patience:
-                logging.warning("Early stopping threshold reached.")
+
+    def on_interrupt(self, config: Any, state: Any, **kwargs) -> None:
+        import logging
+        import os
+        accelerator = kwargs.get("accelerator")
+        if accelerator:
+            logging.info("Interrupt detected. Saving current state to %s...", self.latest_dir)
+            os.makedirs(self.latest_dir, exist_ok=True)
+            accelerator.save_state(self.latest_dir)

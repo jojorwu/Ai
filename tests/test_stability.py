@@ -80,7 +80,8 @@ class TestStability(unittest.TestCase):
         mock_trainer.run_validation.return_value = float('nan')
         mock_trainer.train_pretrain_epoch.return_value = (0.5, 1.0)
 
-        loop = TrainingLoop(mock_trainer, self.config)
+        # Mock callbacks to avoid CheckpointCallback initialization issues
+        loop = TrainingLoop(mock_trainer, self.config, callbacks=[MagicMock()])
 
         # Force it to run only 1 epoch
         self.config.evolution.pretrain_epochs = 1
