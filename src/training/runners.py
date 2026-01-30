@@ -71,12 +71,13 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         self.agent_manager.specialize_agents_on_dataset(spec_config, device)
 
         logging.info("Evaluating and selecting best agents...")
-        best_agents = self.agent_manager.collaborative_evaluation(
-            evaluation_data=self.val_data[:50],
-            tokenizer=self.tokenizer,
-            top_k=self.evolution_config.num_survivors,
-            device=device,
-        )
+        with torch.inference_mode():
+            best_agents = self.agent_manager.collaborative_evaluation(
+                evaluation_data=self.val_data[:50],
+                tokenizer=self.tokenizer,
+                top_k=self.evolution_config.num_survivors,
+                device=device,
+            )
 
         if best_agents:
             logging.info(

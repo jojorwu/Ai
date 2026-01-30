@@ -103,6 +103,7 @@ class AgentExecutor:
             stop_tokens=stop_tokens
         )
 
+    @torch.no_grad()
     def _generate_model_response(
         self,
         agent_state: AgentState,

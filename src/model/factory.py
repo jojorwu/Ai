@@ -70,8 +70,9 @@ def load_model_and_tokenizer(
     if quantized or config.hardware.dynamic_quantization:
         if config.hardware.device == "cpu":
             logging.info("Applying dynamic quantization for CPU...")
+            # Quantize both Linear and Embedding layers for better efficiency on CPU.
             model = torch.quantization.quantize_dynamic(
-                model, {torch.nn.Linear}, dtype=torch.qint8
+                model, {torch.nn.Linear, torch.nn.Embedding}, dtype=torch.qint8
             )
         else:
             logging.warning("Dynamic quantization is only supported on CPU device. Skipping.")

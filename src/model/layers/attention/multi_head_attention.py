@@ -60,9 +60,8 @@ class MultiHeadAttention(nn.Module):
     def _combine_heads(self, x: torch.Tensor) -> torch.Tensor:
         """Merges the head and d_k dimensions back."""
         batch_size, _, seq_len, _ = x.shape
-        return x.transpose(
-            1, 2
-        ).contiguous().view(batch_size, seq_len, self.config.d_model)
+        # Performance: Use reshape() to automatically handle contiguity if needed.
+        return x.transpose(1, 2).reshape(batch_size, seq_len, self.config.d_model)
 
     @staticmethod
     def _repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -113,10 +112,9 @@ class MultiHeadAttention(nn.Module):
             k = self._repeat_kv(k, self.n_rep)
             v = self._repeat_kv(v, self.n_rep)
 
-        # Causal masking is required during prompt processing and speculative
-        # decoding chunk validation (seq_len > 1). For single-token generation
-        # (seq_len == 1), is_causal=True is also correct and efficient.
-        is_causal = (kv_cache is None) or (seq_len > 0) # Effectively always True for decoder-only
+        # Causal masking is required when seq_len > 1 (e.g. prompt or speculative chunk).
+        # For single-token generation, masking is a no-op but True remains safe.
+        is_causal = (kv_cache is None) or (seq_len > 1)
 
         attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal)
         attention_output = self.attention(attn_input)
