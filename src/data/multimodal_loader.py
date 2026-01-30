@@ -2,8 +2,8 @@
 Module for loading multimodal data from directories.
 """
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -18,7 +18,11 @@ class MultimodalDataLoader:
     Handles scanning directories and loading text-image pairs.
     """
 
-    def __init__(self, text_handlers: dict = None, image_extensions: set = None):
+    def __init__(
+        self,
+        text_handlers: Optional[dict] = None,
+        image_extensions: Optional[set] = None
+    ) -> None:
         self.text_handlers = text_handlers or {
             '.txt': FileReader.read_txt,
             '.pdf': FileReader.read_pdf,
@@ -32,15 +36,20 @@ class MultimodalDataLoader:
         """
         Scans a directory, finds text-image pairs, and loads them in parallel.
         """
+        path = Path(directory_path)
+        if not path.is_dir():
+            logging.error("Directory path '%s' is not a valid directory.", directory_path)
+            return []
+
         logging.info("Scanning directory '%s' for multimodal data...", directory_path)
 
-        text_files = self._find_text_files(directory_path)
+        text_files = self._find_text_files(path)
         multimodal_data = []
 
         with ThreadPoolExecutor() as executor:
             future_to_path = {
-                executor.submit(self._process_text_file, text_path): text_path
-                for text_path in text_files
+                executor.submit(self._process_text_file, text_file): text_file
+                for text_file in text_files
             }
             for future in as_completed(future_to_path):
                 pair = future.result()
@@ -49,59 +58,55 @@ class MultimodalDataLoader:
 
         return multimodal_data
 
-    def _find_text_files(self, directory_path: str) -> List[str]:
+    def _find_text_files(self, path: Path) -> List[Path]:
         """Finds all text files in a directory based on registered handlers."""
-        text_files = []
-        for filename in os.listdir(directory_path):
-            _, extension = os.path.splitext(filename)
-            if extension.lower() in self.text_handlers:
-                text_files.append(os.path.join(directory_path, filename))
-        return text_files
+        return [
+            p for p in path.iterdir()
+            if p.is_file() and p.suffix.lower() in self.text_handlers
+        ]
 
     def _process_text_file(
-        self, text_path: str
+        self, text_path: Path
     ) -> Optional[Tuple[str, Optional[torch.Tensor]]]:
         """Processes a single text file and its corresponding image."""
         try:
-            base_name, _ = os.path.splitext(text_path)
-            ext = os.path.splitext(text_path)[1].lower()
-            handler = self.text_handlers.get(ext)
+            handler = self.text_handlers.get(text_path.suffix.lower())
             if not handler:
                 return None
 
-            text_content = handler(text_path)
+            text_content = handler(str(text_path))
             if not text_content:
                 return None
 
             image_data = None
             if '<IMAGE>' in text_content:
-                image_data = self._find_and_read_image(base_name, text_path)
+                image_data = self._find_and_read_image(text_path)
 
             return text_content, image_data
         except (IOError, OSError) as e:
             logging.error("Error processing file %s: %s", text_path, e)
             return None
 
-    def _find_and_read_image(self, base_name: str, text_path: str) -> Optional[torch.Tensor]:
+    def _find_and_read_image(self, text_path: Path) -> Optional[torch.Tensor]:
         """Looks for an image file corresponding to a text file."""
         for img_ext in self.image_extensions:
-            image_path = base_name + img_ext
-            if os.path.exists(image_path):
+            image_path = text_path.with_suffix(img_ext)
+            if image_path.exists():
                 logging.info(
                     "Found pair: %s and %s",
-                    os.path.basename(text_path),
-                    os.path.basename(image_path)
+                    text_path.name,
+                    image_path.name
                 )
                 return self._read_image(image_path)
 
         logging.warning(
             "Text %s contains <IMAGE>, but no image was found.",
-            os.path.basename(text_path)
+            text_path.name
         )
         return None
 
     @staticmethod
-    def _read_image(file_path: str) -> Optional[torch.Tensor]:
+    def _read_image(file_path: Path) -> Optional[torch.Tensor]:
         """Loads an image and converts it to a torch.Tensor."""
         try:
             with Image.open(file_path) as img:

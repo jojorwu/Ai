@@ -91,6 +91,12 @@ class EvolutionaryOrchestrator:
             for key, tensor in state.items():
                 avg_state[key].add_(tensor.to(device) * weight)
 
-        # Update the base model's LTM
-        unwrapped_model.layers.long_term_memory.load_state_dict(avg_state)
-        logging.info("Base model's LTM has been updated with merged weights.")
+        # Update the base model's LTM, ensuring all merged weights are finite.
+        if all(torch.isfinite(t).all() for t in avg_state.values()):
+            unwrapped_model.layers.long_term_memory.load_state_dict(avg_state)
+            logging.info("Base model's LTM has been updated with merged weights.")
+        else:
+            logging.error(
+                "Merged LTM state contains non-finite values (NaN/Inf). "
+                "Skipping update to base model to prevent corruption."
+            )

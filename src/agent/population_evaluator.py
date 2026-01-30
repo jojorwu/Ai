@@ -46,8 +46,12 @@ class PopulationEvaluator:
         num_rounds = min(num_prompts, len(agents) * 2)
 
         for i in range(num_rounds):
-            prompt_tokens_list = evaluation_data[i * prompt_len : (i + 1) * prompt_len]
-            prompt_tensor = torch.tensor([prompt_tokens_list], device=device)
+            # Optimized prompt creation: avoid redundant slicing and list creation
+            prompt_tensor = (
+                torch.as_tensor(evaluation_data[i * prompt_len : (i + 1) * prompt_len])
+                .unsqueeze(0)
+                .to(device)
+            )
 
             self._evaluate_prompt(
                 prompt_tensor, agents, scores, tokens, collaborative_evaluator
@@ -70,9 +74,15 @@ class PopulationEvaluator:
             try:
                 response = proposer.generate_response(prompt_tensor)
 
-                # Vectorized token check to avoid expensive tolist() and GPU-CPU sync
-                has_ask_help = (response == tokens["ask_help"]).any().item()
-                has_i_dont_know = (response == tokens["i_dont_know"]).any().item()
+                # Vectorized token check to avoid expensive tolist() and GPU-CPU sync.
+                # Gracefully handle cases where special tokens might be missing (None).
+                has_ask_help = False
+                if tokens["ask_help"] is not None:
+                    has_ask_help = (response == tokens["ask_help"]).any().item()
+
+                has_i_dont_know = False
+                if tokens["i_dont_know"] is not None:
+                    has_i_dont_know = (response == tokens["i_dont_know"]).any().item()
 
                 if has_ask_help:
                     ctx = CollaborationContext(

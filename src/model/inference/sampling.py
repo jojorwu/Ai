@@ -58,8 +58,9 @@ class LogitSampler:
             sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
             sorted_indices_to_remove[..., 0] = 0
 
-            # Scatter the mask back to the original logits
-            indices_to_remove = sorted_indices_to_remove.scatter(
+            # Scatter the mask back to the original logits.
+            # We use a zero tensor as the base to ensure a clean mask.
+            indices_to_remove = torch.zeros_like(sorted_indices_to_remove).scatter(
                 -1, sorted_indices, sorted_indices_to_remove
             )
             logits[indices_to_remove] = -float("Inf")

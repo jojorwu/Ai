@@ -82,6 +82,12 @@ class LongTermMemory(nn.Module):
         # We apply f row-wise to the memory matrix.
         new_mem = f.transpose(1, 2) * prev_mem + i.transpose(1, 2) * torch.matmul(k.transpose(1, 2), v)
 
+        # Numerical stability: normalize the associative matrix to prevent weight explosion.
+        # This keeps the values in the memory matrix within a reasonable range.
+        mem_norm = new_mem.norm(dim=(1, 2), keepdim=True)
+        new_mem = new_mem / (mem_norm.clamp(min=1.0) + 1e-6)
+        new_mem = torch.clamp(new_mem, -1e4, 1e4)
+
         # Retrieval: context = q @ M_t
         context = torch.matmul(q, new_mem)  # [batch, 1, d_model]
 

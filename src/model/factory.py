@@ -3,7 +3,7 @@ Factory functions for creating model-related components.
 """
 import logging
 import os
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 from accelerate import dispatch_model
@@ -21,7 +21,7 @@ def load_model_and_tokenizer(
     load_in_4bit: bool = False,
     quantized: bool = False,
     dispatch: bool = True,
-):
+) -> Tuple[Transformer, Tokenizer]:
     """Loads a model and tokenizer from a given model name."""
     logging.info(
         "Loading model '%s' (4-bit: %s, quantized: %s)...",
@@ -70,8 +70,9 @@ def load_model_and_tokenizer(
     if quantized or config.hardware.dynamic_quantization:
         if config.hardware.device == "cpu":
             logging.info("Applying dynamic quantization for CPU...")
+            # Quantize both Linear and Embedding layers for better efficiency on CPU.
             model = torch.quantization.quantize_dynamic(
-                model, {torch.nn.Linear}, dtype=torch.qint8
+                model, {torch.nn.Linear, torch.nn.Embedding}, dtype=torch.qint8
             )
         else:
             logging.warning("Dynamic quantization is only supported on CPU device. Skipping.")

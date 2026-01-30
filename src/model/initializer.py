@@ -28,10 +28,9 @@ class ModelInitializer:
     Encapsulates the initialization logic for the Transformer model.
     """
 
-    def __init__(self, model: "Transformer"):
+    def __init__(self, model: "Transformer") -> None:
         self.model = model
         self.config = model.config
-        self._config = model._config  # pylint: disable=protected-access
         self.load_in_4bit = model.load_in_4bit
 
     def init_rope_embeddings(self) -> RopeEmbeddings:
@@ -68,7 +67,33 @@ class ModelInitializer:
         # 3. Initialize output and value heads
         layers_dict.update(self._init_head_layers())
 
-        return ModelLayers(layers_dict)
+        model_layers = ModelLayers(layers_dict)
+
+        # 4. Apply robust weight initialization
+        self._init_weights(model_layers)
+
+        return model_layers
+
+    def _init_weights(self, module: nn.Module):
+        """
+        Recursively initializes weights for all sub-modules using a combination
+        of Kaiming (for hidden layers) and specialized strategies.
+        """
+        for m in module.modules():
+            if isinstance(m, nn.Linear):
+                # GPT-2 style small standard deviation for hidden weights
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Embedding):
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            elif isinstance(m, (nn.LayerNorm, RMSNorm)):
+                if hasattr(m, 'gamma') and m.gamma is not None:
+                    nn.init.ones_(m.gamma)
+                if hasattr(m, 'weight') and m.weight is not None:
+                    nn.init.ones_(m.weight)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def _init_core_layers(self, ltm: LongTermMemory | None) -> dict:
         """Initializes input, memory, and gating layers."""
@@ -127,7 +152,7 @@ class ModelInitializer:
         if self.config.model.num_layers < 2:
             return None
 
-        draft_config_dict = self._config.model_dump()
+        draft_config_dict = self.config.model_dump()
         draft_config_dict["model"]["num_layers"] //= 2
         draft_config = TransformerConfig(**draft_config_dict)
 
@@ -135,6 +160,4 @@ class ModelInitializer:
             "Creating a draft model with %d layers.",
             draft_config.model.num_layers,
         )
-        # This will cause a circular import if Transformer is imported directly
-        from src.model.model import Transformer
-        return Transformer(draft_config, self.load_in_4bit)
+        return self.model.__class__(draft_config, self.load_in_4bit)

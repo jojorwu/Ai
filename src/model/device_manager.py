@@ -11,12 +11,12 @@ class DeviceManager:
     availability and configuration.
     """
 
-    def __init__(self, config: HardwareConfig):
+    def __init__(self, config: HardwareConfig) -> None:
         self.config = config
         self.cuda_available = torch.cuda.is_available()
         self.mps_available = torch.backends.mps.is_available()
 
-    def optimize_environment(self):
+    def optimize_environment(self) -> None:
         """Applies hardware-specific optimizations."""
         if self.config.device == "cpu":
             if self.config.num_threads > 0:
@@ -29,11 +29,21 @@ class DeviceManager:
             if self.config.flush_denormals:
                 torch.set_flush_denormal(True)
 
+            # Performance: Preferred BFloat16 for Arm/CPU if supported.
+            if hasattr(torch, "cpu") and hasattr(torch.cpu, "is_bf16_supported"):
+                 # This is just an environment-level hint/check
+                 pass
+
         elif self.config.device == "gpu" or self.cuda_available:
             torch.backends.cudnn.benchmark = True
             # Allows for some more parallelism in CUDA operations
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
+
+        elif self.config.device == "mps" or self.mps_available:
+            # Apple Silicon optimizations
+            import os
+            os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
     def get_device_map(self) -> dict:
         """

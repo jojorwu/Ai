@@ -7,9 +7,11 @@ import math
 from unittest.mock import MagicMock
 
 from src.agent.agent import Agent
+from src.agent.evolution import EvolutionaryOrchestrator
 from src.agent.dataclasses import LTMConfig
 from src.agent.trainer import AgentTrainer
 from src.model.inference.sampling import LogitSampler
+from src.model.structures import ForwardOutput
 from src.training.loop import TrainingLoop, TrainingState
 from tests.test_utils import create_test_config
 
@@ -41,11 +43,11 @@ class TestStability(unittest.TestCase):
 
         # Mock forward to return NaN
         nan_logits = torch.full((1, 1, self.config.model.vocab_size), float('nan'))
-        self.mock_model.forward.return_value = (
-            nan_logits,          # logits
-            torch.tensor([[0.5]]),           # values
-            torch.tensor(0.1),               # aux_loss
-            None                             # ltm_memory
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=nan_logits,
+            value=torch.tensor([[0.5]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
         )
 
         # This should not raise an exception and should skip optimizer.step()
@@ -61,11 +63,11 @@ class TestStability(unittest.TestCase):
 
         # Mock forward to return Inf
         inf_logits = torch.full((1, 1, self.config.model.vocab_size), float('inf'))
-        self.mock_model.forward.return_value = (
-            inf_logits,          # logits
-            torch.tensor([[0.5]]),           # values
-            torch.tensor(0.1),               # aux_loss
-            None                             # ltm_memory
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=inf_logits,
+            value=torch.tensor([[0.5]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
         )
 
         self.trainer.experience(x, y)
@@ -78,7 +80,8 @@ class TestStability(unittest.TestCase):
         mock_trainer.run_validation.return_value = float('nan')
         mock_trainer.train_pretrain_epoch.return_value = (0.5, 1.0)
 
-        loop = TrainingLoop(mock_trainer, self.config)
+        # Mock callbacks to avoid CheckpointCallback initialization issues
+        loop = TrainingLoop(mock_trainer, self.config, callbacks=[MagicMock()])
 
         # Force it to run only 1 epoch
         self.config.evolution.pretrain_epochs = 1
@@ -100,6 +103,49 @@ class TestStability(unittest.TestCase):
         token = sampler.sample(logits, temperature=1.0)
         self.assertEqual(token.shape, (1, 1))
         self.assertTrue(0 <= token.item() < 10)
+
+    def test_merge_population_skips_nan_weights(self):
+        """Tests that EvolutionaryOrchestrator skips merge if weights contain NaN."""
+        # Setup mock agents
+        agent_finite = MagicMock(spec=Agent)
+        agent_finite.get_fitness_score.return_value = 1.0
+        agent_finite.get_ltm_state.return_value = {"w": torch.tensor([1.0])}
+
+        agent_nan = MagicMock(spec=Agent)
+        agent_nan.get_fitness_score.return_value = 2.0
+        agent_nan.get_ltm_state.return_value = {"w": torch.tensor([float('nan')])}
+
+        # Mock base model
+        base_model = MagicMock()
+        del base_model.module
+        mock_param = MagicMock()
+        mock_param.device = torch.device('cpu')
+        base_model.layers.long_term_memory.parameters.return_value = iter([mock_param])
+
+        # This should not crash and should log an error (skipping update)
+        EvolutionaryOrchestrator.merge_population([agent_finite, agent_nan], base_model)
+
+        # Verify load_state_dict was NOT called because of NaN
+        base_model.layers.long_term_memory.load_state_dict.assert_not_called()
+
+    def test_agent_trainer_handles_nan_metrics(self):
+        """Tests that AgentTrainer skips metric updates if values are NaN."""
+        x = torch.randn(1, 1, self.config.model.d_model)
+        y = torch.randint(0, self.config.model.vocab_size, (1, 1))
+
+        # Mock forward to return NaN value but finite logits
+        self.mock_model.forward.return_value = ForwardOutput(
+            logits=torch.randn(1, 1, self.config.model.vocab_size),
+            value=torch.tensor([[float('nan')]]),
+            aux_loss=torch.tensor(0.1),
+            ltm_memory=None
+        )
+
+        initial_count = self.agent.metrics.experience_count
+        self.trainer.experience(x, y)
+
+        # Count should not increment
+        self.assertEqual(self.agent.metrics.experience_count, initial_count)
 
 if __name__ == "__main__":
     unittest.main()

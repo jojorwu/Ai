@@ -35,7 +35,7 @@ class AgentExecutor:
         tokenizer: Tokenizer,
         config: GenerateConfig,
         accelerator: Accelerator,
-    ):
+    ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
@@ -43,18 +43,21 @@ class AgentExecutor:
         self.tool_registry = ToolRegistry()
         self.cache_manager = CacheManager(accelerator)
 
-    def run(self):
-        """Runs the main agent loop."""
+    def run(self) -> None:
+        """
+        Runs the main agent loop, including response generation, history pruning,
+        and tool execution.
+        """
         agent_state = self._initialize_agent_state()
 
         for turn in range(self.config.generation.max_turns):
             logging.info("\n--- Iteration %d ---", turn + 1)
 
-            # Generate model response
+            # 1. Explicit thinking phase
+            self.think(agent_state)
+
+            # 2. Generate model response (action/final answer)
             new_tokens = self._generate_model_response(agent_state)
-            agent_state.append_tokens(new_tokens)
-            # Newly generated tokens are already in the cache because of generate()
-            agent_state.mark_as_processed(len(new_tokens))
             agent_state.prune_history(self.config.generation.context_window_size)
 
             generated_text = self.tokenizer.decode(new_tokens)
@@ -84,8 +87,41 @@ class AgentExecutor:
             complexity_manager=complexity_manager,
         )
 
-    def _generate_model_response(self, agent_state: AgentState) -> List[int]:
-        """Generates a response from the model, utilizing persistent KV caching."""
+    def think(self, agent_state: AgentState) -> List[int]:
+        """
+        Explicitly triggers the thinking phase of the agent.
+        Generates tokens until the </THINK> tag or the max_thought_len is reached.
+        """
+        logging.info("Agent is thinking...")
+
+        # Get the token ID for the closing think tag
+        stop_tokens = self.tokenizer.encode("</THINK>", add_special_tokens=False)
+
+        return self._generate_model_response(
+            agent_state,
+            max_new_tokens=self.config.generation.max_thought_len,
+            stop_tokens=stop_tokens
+        )
+
+    @torch.no_grad()
+    def _generate_model_response(
+        self,
+        agent_state: AgentState,
+        max_new_tokens: int | None = None,
+        stop_tokens: list[int] | None = None,
+    ) -> List[int]:
+        """
+        Generates a sequence of tokens from the model, utilizing persistent KV caching
+        and speculative decoding.
+
+        Args:
+            agent_state: The current state of the agent, including caches and history.
+            max_new_tokens: Optional override for the maximum tokens to generate.
+            stop_tokens: Optional list of token IDs to terminate generation.
+
+        Returns:
+            The newly generated tokens as a list of integers.
+        """
         unwrapped_model = self.accelerator.unwrap_model(self.model)
 
         # Initialize KV Caches if they don't exist yet.
@@ -128,28 +164,21 @@ class AgentExecutor:
         )
         gen_input = GenerateInput(
             start_tokens=input_tokens,
-            max_new_tokens=self.config.generation.max_len,
+            max_new_tokens=max_new_tokens or self.config.generation.max_len,
             sampling_config=sampling_config,
             speculative_config=speculative_config,
             kv_cache=agent_state.main_cache,
             draft_cache=agent_state.draft_cache,
             ltm_memory=agent_state.ltm_memory,
+            stop_tokens=stop_tokens,
         )
 
-        # Accumulate as tensors to minimize GPU-CPU synchronization points.
-        generated_chunks = []
-        for chunk, surprise, new_ltm_memory in unwrapped_model.generate(gen_input):
-            agent_state.ltm_memory = new_ltm_memory
-            generated_chunks.append(chunk)
-            if agent_state.complexity_manager:
-                agent_state.complexity_manager.update_surprise(surprise)
+        for result in unwrapped_model.generate(gen_input):
+            agent_state.accumulate_generation_result(
+                result.tokens, result.surprise, result.ltm_memory
+            )
 
-        if not generated_chunks:
-            return []
-
-        # Perform a single cat and tolist conversion at the end of the turn.
-        newly_generated_tokens_tensor = torch.cat(generated_chunks, dim=1)
-        return newly_generated_tokens_tensor[0].tolist()
+        return agent_state.finalize_turn()
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
         """Processes a tool call if one is present in the conversation history."""

@@ -22,14 +22,14 @@ def calculate_loss(model, x, y, evolution_config):
     """
     Common loss calculation logic for Transformer model with MoE support.
     """
-    logits, _, aux_loss, _ = model(x)
+    outputs = model(x)
     policy_loss = cross_entropy_with_label_smoothing(
-        logits,
+        outputs.logits,
         y,
         smoothing=evolution_config.label_smoothing,
     )
     total_loss = policy_loss + (
-        evolution_config.moe_aux_loss_coeff * aux_loss if aux_loss else 0
+        evolution_config.moe_aux_loss_coeff * outputs.aux_loss if outputs.aux_loss else 0
     )
     return total_loss, policy_loss
 
@@ -71,12 +71,13 @@ class EvolutionRunner:  # pylint: disable=too-few-public-methods
         self.agent_manager.specialize_agents_on_dataset(spec_config, device)
 
         logging.info("Evaluating and selecting best agents...")
-        best_agents = self.agent_manager.collaborative_evaluation(
-            evaluation_data=self.val_data[:50],
-            tokenizer=self.tokenizer,
-            top_k=self.evolution_config.num_survivors,
-            device=device,
-        )
+        with torch.inference_mode():
+            best_agents = self.agent_manager.collaborative_evaluation(
+                evaluation_data=self.val_data[:50],
+                tokenizer=self.tokenizer,
+                top_k=self.evolution_config.num_survivors,
+                device=device,
+            )
 
         if best_agents:
             logging.info(

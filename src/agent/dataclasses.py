@@ -1,7 +1,7 @@
 """
 Dataclasses for the agent module.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, TYPE_CHECKING
 
 import torch
@@ -9,6 +9,15 @@ import torch
 if TYPE_CHECKING:
     from src.model.titans.complexity_manager import ComplexityManager
     from src.model.layers.attention.kv_cache import KVCache
+
+
+@dataclass
+class AgentMetrics:
+    """Keeps track of an agent's performance metrics."""
+    total_surprise: float = 0.0
+    experience_count: int = 0
+    value_score_sum: float = 0.0
+    fitness_score: float = field(default=-float('inf'))
 
 
 @dataclass
@@ -23,20 +32,51 @@ class AgentState:
     ltm_memory: torch.Tensor = None
     # Number of tokens from the current conversation_history_tokens that have been processed.
     _processed_count: int = 0
+    # Temporary list to accumulate generated token chunks during a turn.
+    _generated_chunks: List[torch.Tensor] = field(default_factory=list)
 
     def get_new_tokens(self) -> List[int]:
         """Returns the tokens that have not yet been processed by the KV cache."""
         return self.conversation_history_tokens[self._processed_count:]
 
-    def mark_as_processed(self, count: int):
+    def mark_as_processed(self, count: int) -> None:
         """Marks the given number of tokens as processed."""
         self._processed_count = min(len(self.conversation_history_tokens), self._processed_count + count)
 
-    def append_tokens(self, tokens: List[int]):
+    def append_tokens(self, tokens: List[int]) -> None:
         """Appends new tokens to the conversation history."""
         self.conversation_history_tokens.extend(tokens)
 
-    def prune_history(self, context_window_size: int):
+    def accumulate_generation_result(
+        self, chunk: torch.Tensor, surprise: float, new_ltm_memory: torch.Tensor
+    ) -> None:
+        """
+        Accumulates a generated chunk and updates the agent's LTM and complexity metrics.
+        """
+        self.ltm_memory = new_ltm_memory
+        self._generated_chunks.append(chunk)
+        if self.complexity_manager:
+            self.complexity_manager.update_surprise(surprise)
+
+    def finalize_turn(self) -> List[int]:
+        """
+        Finalizes the generation turn, concatenating chunks and updating history.
+        Returns the list of newly generated tokens.
+        """
+        if not self._generated_chunks:
+            return []
+
+        # Concatenate all chunks and convert to list once to minimize synchronization.
+        new_tokens_tensor = torch.cat(self._generated_chunks, dim=1)
+        new_tokens = new_tokens_tensor[0].tolist()
+
+        self.append_tokens(new_tokens)
+        self.mark_as_processed(len(new_tokens))
+        self._generated_chunks = []
+
+        return new_tokens
+
+    def prune_history(self, context_window_size: int) -> None:
         """
         Prunes the conversation history to fit within the context window
         using the "Attention Sink" principle (Anchors + Sliding Window).
