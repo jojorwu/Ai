@@ -127,6 +127,17 @@ class TextGenerator:
             )
             total_generated += accepted_len
 
+            # Check for stop tokens
+            if inputs.stop_tokens:
+                stop_found = False
+                for token_id in inputs.stop_tokens:
+                    if (accepted_chunk == token_id).any():
+                        stop_found = True
+                        break
+                if stop_found:
+                    logging.info("Stop token encountered. Terminating generation.")
+                    break
+
     def _prepare_caches(
         self, inputs: "GenerateInput", draft_model: "Transformer", tokens: torch.Tensor
     ) -> Tuple["KVCache", "KVCache"]:

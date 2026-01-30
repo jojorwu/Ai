@@ -73,10 +73,33 @@ class Agent:
         self.metrics.fitness_score = score
 
     @torch.no_grad()
+    def think(
+        self,
+        prompt_tokens: torch.Tensor,
+        max_thought_len: int = 50,
+        stop_tokens: list[int] | None = None,
+        kv_cache: 'KVCache' = None,
+        draft_cache: 'KVCache' = None,
+        sampling_config: SamplingConfig | None = None,
+    ) -> torch.Tensor:
+        """
+        Triggers the agent's thinking process.
+        """
+        return self.generate_response(
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_thought_len,
+            stop_tokens=stop_tokens,
+            kv_cache=kv_cache,
+            draft_cache=draft_cache,
+            sampling_config=sampling_config,
+        )
+
+    @torch.no_grad()
     def generate_response(
         self,
         prompt_tokens: torch.Tensor,
         max_new_tokens: int = 50,
+        stop_tokens: list[int] | None = None,
         kv_cache: 'KVCache' = None,
         draft_cache: 'KVCache' = None,
         sampling_config: SamplingConfig | None = None,
@@ -99,6 +122,7 @@ class Agent:
         generate_input = GenerateInput(
             start_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
+            stop_tokens=stop_tokens,
             sampling_config=actual_sampling_config,
             ltm_override=self.long_term_memory,
             kv_cache=kv_cache,

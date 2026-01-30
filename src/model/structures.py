@@ -70,6 +70,7 @@ class GenerateInput:
     kv_cache: Any = None
     draft_cache: Any = None
     ltm_memory: Optional[torch.Tensor] = None
+    stop_tokens: Optional[list[int]] = None
 
 
 @dataclass

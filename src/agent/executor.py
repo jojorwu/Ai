@@ -53,7 +53,10 @@ class AgentExecutor:
         for turn in range(self.config.generation.max_turns):
             logging.info("\n--- Iteration %d ---", turn + 1)
 
-            # Generate model response
+            # 1. Explicit thinking phase
+            self.think(agent_state)
+
+            # 2. Generate model response (action/final answer)
             new_tokens = self._generate_model_response(agent_state)
             agent_state.prune_history(self.config.generation.context_window_size)
 
@@ -84,7 +87,28 @@ class AgentExecutor:
             complexity_manager=complexity_manager,
         )
 
-    def _generate_model_response(self, agent_state: AgentState) -> List[int]:
+    def think(self, agent_state: AgentState) -> List[int]:
+        """
+        Explicitly triggers the thinking phase of the agent.
+        Generates tokens until the </THINK> tag or the max_thought_len is reached.
+        """
+        logging.info("Agent is thinking...")
+
+        # Get the token ID for the closing think tag
+        stop_tokens = self.tokenizer.encode("</THINK>", add_special_tokens=False)
+
+        return self._generate_model_response(
+            agent_state,
+            max_new_tokens=self.config.generation.max_thought_len,
+            stop_tokens=stop_tokens
+        )
+
+    def _generate_model_response(
+        self,
+        agent_state: AgentState,
+        max_new_tokens: int | None = None,
+        stop_tokens: list[int] | None = None,
+    ) -> List[int]:
         """Generates a response from the model, utilizing persistent KV caching."""
         unwrapped_model = self.accelerator.unwrap_model(self.model)
 
@@ -128,12 +152,13 @@ class AgentExecutor:
         )
         gen_input = GenerateInput(
             start_tokens=input_tokens,
-            max_new_tokens=self.config.generation.max_len,
+            max_new_tokens=max_new_tokens or self.config.generation.max_len,
             sampling_config=sampling_config,
             speculative_config=speculative_config,
             kv_cache=agent_state.main_cache,
             draft_cache=agent_state.draft_cache,
             ltm_memory=agent_state.ltm_memory,
+            stop_tokens=stop_tokens,
         )
 
         for result in unwrapped_model.generate(gen_input):
