@@ -4,7 +4,7 @@ PyTorch implementation of the AgentManager for managing the agent lifecycle.
 import logging
 import math
 from dataclasses import dataclass
-from typing import List
+from typing import Any, List
 
 import torch
 from accelerate import Accelerator
@@ -59,7 +59,9 @@ class AgentManager:
         )
         self.specializer = AgentSpecializer()
 
-    def specialize_agents_on_dataset(self, spec_config: SpecializationConfig, device):
+    def specialize_agents_on_dataset(
+        self, spec_config: SpecializationConfig, device: torch.device
+    ) -> None:
         """
         Delegates the specialization phase to the AgentSpecializer.
         """
@@ -67,13 +69,15 @@ class AgentManager:
             self.agents, spec_config, device, self.hardware_config
         )
 
-    def merge_agents(self, best_agents: List[Agent]):
+    def merge_agents(self, best_agents: List[Agent]) -> None:
         """
         Delegates the merging of agent knowledge to the EvolutionaryOrchestrator.
         """
         EvolutionaryOrchestrator.merge_population(best_agents, self.base_model)
 
-    def collaborative_evaluation(self, evaluation_data, tokenizer, top_k, device):
+    def collaborative_evaluation(
+        self, evaluation_data: list, tokenizer: Any, top_k: int, device: torch.device
+    ) -> dict:
         """
         Delegates the collaborative evaluation to the CollaborativeEvaluator.
         """

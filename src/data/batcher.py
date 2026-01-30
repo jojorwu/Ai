@@ -1,6 +1,7 @@
 """
 Handles batch generation for training.
 """
+from typing import Any, Generator, List, Optional, Tuple, Union
 import torch
 
 
@@ -10,9 +11,22 @@ class Batcher:
     """
 
     @staticmethod
-    def get_batches(data, batch_size, seq_len, device, pin_memory=False):
+    def get_batches(
+        data: Union[torch.Tensor, List[int], Any],
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+        pin_memory: bool = False
+    ) -> Generator[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]], None, None]:
         """
-        Generator function to yield batches of data.
+        Generator function to yield batches of data (x, y, image).
+
+        Args:
+            data: Input data as a tensor or list of token IDs.
+            batch_size: Number of sequences per batch.
+            seq_len: Length of each sequence.
+            device: Target device for the batches.
+            pin_memory: Whether to use pinned memory for faster CPU-to-GPU transfers.
         """
         is_cuda = device.type == "cuda" if hasattr(device, "type") else "cuda" in str(device)
         should_pin = pin_memory and is_cuda

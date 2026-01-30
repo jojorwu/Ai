@@ -11,17 +11,36 @@ class FileReader:
 
     @staticmethod
     def read_txt(file_path: str) -> str:
-        """Extracts text from a .txt file."""
+        """
+        Extracts text from a .txt file.
+
+        Args:
+            file_path: Path to the .txt file.
+
+        Returns:
+            Extracted text content or an empty string if reading fails.
+        """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return f.read()
+        except UnicodeDecodeError as e:
+            logging.error("Encoding error in TXT file %s: %s", file_path, e)
+            return ""
         except (IOError, OSError) as e:
             logging.error("Error reading TXT file %s: %s", file_path, e)
             return ""
 
     @staticmethod
     def read_pdf(file_path: str) -> str:
-        """Extracts text from a .pdf file."""
+        """
+        Extracts text from a .pdf file.
+
+        Args:
+            file_path: Path to the .pdf file.
+
+        Returns:
+            Extracted text content or an empty string if reading fails.
+        """
         text = []
         try:
             reader = PyPDF2.PdfReader(file_path)
@@ -36,7 +55,15 @@ class FileReader:
 
     @staticmethod
     def read_docx(file_path: str) -> str:
-        """Extracts text from a .docx file."""
+        """
+        Extracts text from a .docx file.
+
+        Args:
+            file_path: Path to the .docx file.
+
+        Returns:
+            Extracted text content or an empty string if reading fails.
+        """
         text = []
         try:
             doc = docx.Document(file_path)

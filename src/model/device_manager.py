@@ -11,12 +11,12 @@ class DeviceManager:
     availability and configuration.
     """
 
-    def __init__(self, config: HardwareConfig):
+    def __init__(self, config: HardwareConfig) -> None:
         self.config = config
         self.cuda_available = torch.cuda.is_available()
         self.mps_available = torch.backends.mps.is_available()
 
-    def optimize_environment(self):
+    def optimize_environment(self) -> None:
         """Applies hardware-specific optimizations."""
         if self.config.device == "cpu":
             if self.config.num_threads > 0:

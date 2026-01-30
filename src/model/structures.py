@@ -24,7 +24,7 @@ class RopeEmbeddings:
 class ModelLayers(nn.Module):
     """Container for model layers."""
 
-    def __init__(self, layers: dict[str, nn.Module]):
+    def __init__(self, layers: dict[str, nn.Module]) -> None:
         super().__init__()
         self.embedding: Embedding = layers["embedding"]
         self.long_term_memory: LongTermMemory = layers["long_term_memory"]

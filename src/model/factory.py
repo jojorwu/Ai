@@ -3,7 +3,7 @@ Factory functions for creating model-related components.
 """
 import logging
 import os
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 from accelerate import dispatch_model
@@ -21,7 +21,7 @@ def load_model_and_tokenizer(
     load_in_4bit: bool = False,
     quantized: bool = False,
     dispatch: bool = True,
-):
+) -> Tuple[Transformer, Tokenizer]:
     """Loads a model and tokenizer from a given model name."""
     logging.info(
         "Loading model '%s' (4-bit: %s, quantized: %s)...",

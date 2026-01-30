@@ -23,15 +23,20 @@ class AgentFactory:
         """
         Creates a population of agents by cloning the base model.
         Each agent shares the base model's weights but has a unique LTM.
+
+        Args:
+            base_model: The base Transformer model to share weights from.
+            num_agents: Number of agents to create in the population.
+            ltm_config: Configuration for the agents' Long-Term Memory.
         """
         logging.info("Cloning %d agents from the base model...", num_agents)
-        agents = []
-        for i in range(num_agents):
-            agent = Agent(
+        agents = [
+            Agent(
                 base_model=base_model,
                 ltm_config=ltm_config,
                 agent_id=f"agent_{i}",
             )
-            agents.append(agent)
+            for i in range(num_agents)
+        ]
         logging.info("Agents cloned successfully.")
         return agents
