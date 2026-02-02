@@ -89,6 +89,7 @@ class Transformer(nn.Module, GenerationMixin):
         dynamic_top_k: int | None = None,
         ltm_override: nn.Module | None = None,
         kv_cache: KVCache | None = None,
+        images: torch.Tensor | None = None,
     ) -> ForwardOutput:
         """
         Performs the forward pass of the Transformer model.
@@ -100,6 +101,7 @@ class Transformer(nn.Module, GenerationMixin):
             dynamic_top_k: Optional override for MoE top_k.
             ltm_override: Optional LTM module to use instead of the model's own.
             kv_cache: Optional persistent Key-Value cache for inference.
+            images: Optional input images of shape [batch, channels, height, width].
 
         Returns:
             A ForwardOutput dataclass containing logits, value, and memory states.
@@ -107,7 +109,13 @@ class Transformer(nn.Module, GenerationMixin):
         # 1. Embed input sequence
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
-        # 2. Delegate sequence processing to the TitansForwardEngine
+        # 2. Integrate image embeddings if provided
+        if images is not None and self.layers.vision_encoder is not None:
+            image_embeds = self.layers.vision_encoder(images)
+            # Prepend image embeddings to text embeddings
+            h = torch.cat([image_embeds, h], dim=1)
+
+        # 3. Delegate sequence processing to the TitansForwardEngine
         h, total_aux_loss, new_ltm_memory = self.titans_engine.process_sequence(
             h=h,
             ltm_state=ltm_state,
@@ -117,10 +125,11 @@ class Transformer(nn.Module, GenerationMixin):
             kv_cache=kv_cache,
         )
 
-        # 3. Final normalization and head projections.
+        # 4. Final normalization and head projections.
         h = self.layers.final_norm(h)
-        # Policy head: projects the final hidden states to the vocabulary size
-        # to get logits. It shares weights with the embedding layer (weight tying).
+        # Policy head: projects the final hidden states to the vocabulary size.
+        # We only take the logits for the text tokens if images were prepended?
+        # Actually, standard multimodal LLMs provide logits for all positions.
         logits = F.linear(  # pylint: disable=not-callable
             h, self.layers.embedding.weight
         )
@@ -130,7 +139,7 @@ class Transformer(nn.Module, GenerationMixin):
 
         # Increment the KV cache position if it's being used.
         if kv_cache is not None:
-            kv_cache.increment_pos(x.shape[1])
+            kv_cache.increment_pos(h.shape[1])
 
         return ForwardOutput(
             logits=logits,

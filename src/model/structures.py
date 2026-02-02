@@ -13,6 +13,7 @@ from src.model.layers.titans.long_term_memory import LongTermMemory
 from src.model.layers.titans.gating import GatingNetwork
 from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.heads.value_head import ValueHead
+from src.model.layers.core.vision import VisionEncoder
 
 
 @dataclass
@@ -50,6 +51,7 @@ class ModelLayers(nn.Module):
         self.decoder: nn.ModuleList = layers["decoder"]
         self.final_norm: RMSNorm = layers["final_norm"]
         self.value_head: ValueHead = layers["value_head"]
+        self.vision_encoder: VisionEncoder | None = layers.get("vision_encoder")
 
     def forward(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -112,6 +114,7 @@ class GenerateInput:
         draft_cache: Optional persistent Key-Value cache for the draft model.
         ltm_memory: Optional persistent LTM memory matrix.
         stop_tokens: Optional list of token IDs that terminate generation.
+        images: Optional image data [batch, channels, height, width].
     """
     start_tokens: torch.Tensor
     max_new_tokens: int
@@ -122,6 +125,7 @@ class GenerateInput:
     draft_cache: Any | None = None
     ltm_memory: torch.Tensor | None = None
     stop_tokens: list[int] | None = None
+    images: torch.Tensor | None = None
 
 
 @dataclass

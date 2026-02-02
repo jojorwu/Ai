@@ -18,6 +18,7 @@ from src.model.layers.titans.long_term_memory import LongTermMemory
 from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.attention.rotary_embedding import precompute_rope_embeddings
 from src.model.layers.heads.value_head import ValueHead
+from src.model.layers.core.vision import VisionEncoder
 from src.model.structures import ModelLayers, RopeEmbeddings
 
 if TYPE_CHECKING:
@@ -130,6 +131,9 @@ class ModelInitializer:
         """
         return {
             "embedding": Embedding(self.config.vocab_size, self.config.model.d_model),
+            "vision_encoder": VisionEncoder(
+                self.config.vision, self.config.model.d_model
+            ),
             "long_term_memory": ltm,
             "gating_network": GatingNetwork(
                 d_model=self.config.model.d_model,
@@ -166,6 +170,7 @@ class ModelInitializer:
                 d_model=self.config.model.d_model,
                 d_hidden=cfg.d_hidden,
                 num_layers=cfg.num_layers,
+                num_heads=cfg.num_heads,
             )
         return None
 

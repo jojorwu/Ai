@@ -229,6 +229,7 @@ class TextGenerator:
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
+                    images=inputs.images,
                 )
                 current_ltm_memory = outputs.ltm_memory
                 last_logit = outputs.logits[:, -1:, :]
@@ -236,7 +237,6 @@ class TextGenerator:
             # Assume cache is already in sync with prompt
             with torch.no_grad():
                 # We need the last logit from the current cache state
-                # The easiest way is to run a small forward pass on the last token.
                 main_cache.rollback(1)
                 outputs = self.model(
                     tokens[:, -1:],

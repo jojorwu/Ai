@@ -65,6 +65,8 @@ class LTMArchitectureConfig(BaseModel):
         None, description="Размерность ассоциативного пространства LTM.")
     num_layers: int | None = Field(
         None, description="Количество слоев в LTM (применимо для MLP-компонентов).")
+    num_heads: int = Field(
+        1, description="Количество голов в модуле Long-Term Memory.")
 
 
 class ModelConfig(BaseModel):
