@@ -1,6 +1,7 @@
 """
-PyTorch implementation of the Feed-Forward Network (FFN) layer.
+PyTorch implementation of the standard Feed-Forward Network (FFN) layer.
 """
+from __future__ import annotations
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -11,26 +12,40 @@ from src.model.layers.core.linear import Linear
 
 class FeedForward(nn.Module):
     """
-    Implements the SwiGLU Feed-Forward Network layer, migrated to PyTorch.
-    FFN = SwiGLU(x, W1, V, W2) = (SiLU(x @ W1) * (x @ V)) @ W2
-    """
-    def __init__(self, config: FeedForwardConfig, linear_class=Linear):
-        super().__init__()
-        # Combine w1 and w3 into one projection to increase throughput
-        self.w1_w3 = linear_class(
-            config.d_model, 2 * config.d_ff, bias=config.bias
-        )
-        self.w2 = linear_class(
-            config.d_ff, config.d_model, bias=config.bias
-        )
+    Implements a standard 2-layer Feed-Forward Network with SwiGLU activation.
 
-        # Apply special initialization for the output layer as in GPT-2
-        if hasattr(self.w2, 'special_residual_init'):
+    This architecture uses a combined projection for W1 and W3 for efficiency,
+    following the Llama-style SwiGLU FFN.
+    """
+
+    def __init__(
+        self, config: FeedForwardConfig, linear_class: nn.Module = Linear
+    ) -> None:
+        """
+        Initializes the FeedForward layer.
+
+        Args:
+            config: Configuration for the FFN layer.
+            linear_class: The linear layer class to use.
+        """
+        super().__init__()
+        # Combined projection: [d_model, 2 * d_ff] to increase throughput.
+        self.w1_w3 = linear_class(config.d_model, 2 * config.d_ff, bias=config.bias)
+        # Final projection: [d_ff, d_model]
+        self.w2 = linear_class(config.d_ff, config.d_model, bias=config.bias)
+
+        if hasattr(self.w2, "special_residual_init"):
             self.w2.special_residual_init(config.num_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass for the SwiGLU FFN using a combined projection for efficiency.
+        Forward pass through the SwiGLU FFN using a combined projection.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            The processed output tensor.
         """
         # Combined projection: [batch, seq, 2 * d_ff]
         w1_w3_out = self.w1_w3(x)
@@ -38,8 +53,5 @@ class FeedForward(nn.Module):
         # Split into w1 (gate) and w3 (value) paths
         w1_out, w3_out = w1_w3_out.chunk(2, dim=-1)
 
-        # Gating mechanism: SiLU(x @ W1) * (x @ W3)
-        gate_output = F.silu(w1_out) * w3_out
-
-        # Final projection
-        return self.w2(gate_output)
+        # SwiGLU: SiLU(xW1) * (xW3) @ W2
+        return self.w2(F.silu(w1_out) * w3_out)
