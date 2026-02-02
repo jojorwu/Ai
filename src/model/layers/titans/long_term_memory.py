@@ -1,6 +1,7 @@
 """
 PyTorch implementation of the Long-Term Memory (LTM) module using Gated Linear Associative Memory.
 """
+from __future__ import annotations
 import torch
 from torch import nn
 
@@ -11,9 +12,20 @@ from src.model.layers.core.rms_norm import RMSNorm
 class LongTermMemory(nn.Module):
     """
     Gated Linear Associative Memory (Fast Weights) implementation for LTM.
-    This architecture uses input-dependent gating to manage information persistence.
+
+    This architecture uses input-dependent gating to manage information
+    persistence and retrieval from an associative memory matrix.
     """
-    def __init__(self, d_model: int, d_hidden: int, num_layers: int = 1):
+
+    def __init__(self, d_model: int, d_hidden: int, num_layers: int = 1) -> None:
+        """
+        Initializes the LongTermMemory module.
+
+        Args:
+            d_model: Dimension of the model's hidden states.
+            d_hidden: Dimension of the associative memory space.
+            num_layers: Number of layers (not used in current simplified gated version).
+        """
         super().__init__()
         self.d_model = d_model
         self.d_hidden = d_hidden
@@ -51,18 +63,29 @@ class LongTermMemory(nn.Module):
             )
 
     def forward(
-        self, x: torch.Tensor, prev_mem: torch.Tensor = None
+        self, x: torch.Tensor, prev_mem: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass for the Gated Linear Associative LTM.
+
         Args:
-            x: Input tensor summary [batch, 1, d_model]
-            prev_mem: Previous memory matrix [batch, d_hidden, d_model]
+            x: Input tensor summary of shape [batch, 1, d_model].
+            prev_mem: Previous memory matrix of shape [batch, d_hidden, d_model].
+
         Returns:
-            context: Retrieved information [batch, 1, d_model]
-            complexity_score: Difficulty estimate [batch, 1, 1]
-            new_mem: Updated memory matrix [batch, d_hidden, d_model]
+            A tuple containing:
+                - context: Retrieved information [batch, 1, d_model].
+                - complexity_score: Difficulty estimate [batch, 1, 1].
+                - new_mem: Updated memory matrix [batch, d_hidden, d_model].
+
+        Raises:
+            ValueError: If the input tensor x does not have the expected shape.
         """
+        if x.ndim != 3 or x.size(1) != 1:
+            raise ValueError(
+                f"Expected input x of shape [batch, 1, d_model], got {list(x.shape)}"
+            )
+
         batch_size = x.size(0)
 
         q = self.q_proj(x)  # [batch, 1, d_hidden]
@@ -80,7 +103,9 @@ class LongTermMemory(nn.Module):
 
         # Gated update: M_t = f * M_{t-1} + i * (k^T @ v)
         # We apply f row-wise to the memory matrix.
-        new_mem = f.transpose(1, 2) * prev_mem + i.transpose(1, 2) * torch.matmul(k.transpose(1, 2), v)
+        new_mem = f.transpose(1, 2) * prev_mem + i.transpose(1, 2) * torch.matmul(
+            k.transpose(1, 2), v
+        )
 
         # Numerical stability: normalize the associative matrix to prevent weight explosion.
         # This keeps the values in the memory matrix within a reasonable range.

@@ -1,9 +1,16 @@
 """
 Implements the core forward pass logic for the Titans Transformer architecture.
 """
+from __future__ import annotations
+from typing import TYPE_CHECKING, Tuple
+
 import torch
 from torch import nn
+
 from src.model.layers.blocks.decoder_block import ForwardPassInput
+
+if TYPE_CHECKING:
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 class TitansForwardEngine:
@@ -12,21 +19,43 @@ class TitansForwardEngine:
     specific to the Titans architecture.
     """
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module) -> None:
+        """
+        Initializes the TitansForwardEngine.
+
+        Args:
+            model: The main Transformer model instance.
+        """
         self.model = model
 
     def process_sequence(
         self,
         h: torch.Tensor,
-        ltm_state: torch.Tensor = None,
-        ltm_memory: torch.Tensor = None,
-        dynamic_top_k: int = None,
-        ltm_override: nn.Module = None,
-        kv_cache: 'KVCache' = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        ltm_state: torch.Tensor | None = None,
+        ltm_memory: torch.Tensor | None = None,
+        dynamic_top_k: int | None = None,
+        ltm_override: nn.Module | None = None,
+        kv_cache: KVCache | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """
         Processes the embedded sequence through the dynamic Titans layers.
-        Supports sequential (chunked) LTM updates for long sequences.
+
+        Supports sequential (chunked) LTM updates for long sequences and
+        dynamic layer skipping.
+
+        Args:
+            h: Input hidden states of shape [batch, seq_len, d_model].
+            ltm_state: Optional pre-calculated Long-Term Memory state.
+            ltm_memory: Optional persistent LTM associative matrix.
+            dynamic_top_k: Optional override for MoE top_k.
+            ltm_override: Optional LTM module to use.
+            kv_cache: Optional persistent Key-Value cache.
+
+        Returns:
+            A tuple containing:
+                - h: The processed hidden states.
+                - total_aux_loss: Combined auxiliary loss from MoE layers.
+                - new_ltm_memory: Updated LTM memory matrix.
         """
         # 1. Determine and compute the Long-Term Memory (LTM) state.
         long_term_memory = ltm_override or self.model.layers.long_term_memory
@@ -40,17 +69,25 @@ class TitansForwardEngine:
                 # in chunks to better capture context and maintain stability.
                 chunk_size = 512
                 if seq_len > chunk_size:
-                    # Sequential update through chunks for better long-range dependency capture.
+                    # Sequential update through chunks.
                     for i in range(0, seq_len, chunk_size):
                         chunk = h[:, i : i + chunk_size, :]
                         # Perform pooling in float32 for numerical precision
-                        chunk_summary = chunk.mean(dim=1, keepdim=True, dtype=torch.float32).to(h.dtype)
+                        chunk_summary = chunk.mean(
+                            dim=1, keepdim=True, dtype=torch.float32
+                        ).to(h.dtype)
                         # Update LTM state sequentially
-                        ltm_state, _, new_ltm_memory = long_term_memory(chunk_summary, prev_mem=new_ltm_memory)
+                        ltm_state, _, new_ltm_memory = long_term_memory(
+                            chunk_summary, prev_mem=new_ltm_memory
+                        )
                 else:
                     # Single update for short sequences or single tokens
-                    summary = h.mean(dim=1, keepdim=True, dtype=torch.float32).to(h.dtype)
-                    ltm_state, _, new_ltm_memory = long_term_memory(summary, prev_mem=new_ltm_memory)
+                    summary = h.mean(dim=1, keepdim=True, dtype=torch.float32).to(
+                        h.dtype
+                    )
+                    ltm_state, _, new_ltm_memory = long_term_memory(
+                        summary, prev_mem=new_ltm_memory
+                    )
             else:
                 # Placeholder zero tensor
                 ltm_state = torch.zeros(
@@ -63,9 +100,7 @@ class TitansForwardEngine:
         # Determine the number of layers once per forward pass.
         active_layers = int(active_layers_tensor.max().item())
 
-        final_dynamic_top_k = (
-            dynamic_top_k if dynamic_top_k is not None else moe_top_k
-        )
+        final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else moe_top_k
 
         # 3. Pass through the dynamically selected number of decoder blocks.
         aux_losses = []

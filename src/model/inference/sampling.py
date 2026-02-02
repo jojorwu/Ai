@@ -1,31 +1,39 @@
 """
 Implements logit sampling techniques for the Transformer model.
 """
+from __future__ import annotations
 import torch
 from torch.nn import functional as F
 
 
 class LogitSampler:
     """
-    Handles sampling tokens from logits using various methods like
-    temperature, top-k, and top-p (nucleus) sampling.
+    Handles sampling tokens from logits.
+
+    This class provides various methods such as temperature sampling,
+    top-k, top-p (nucleus), and min-p filtering.
     """
 
     @staticmethod
-    def sample(logits, temperature: float = 1.0, top_k: int = 0, top_p: float = 0.0, min_p: float = 0.0):
+    def sample(
+        logits: torch.Tensor,
+        temperature: float = 1.0,
+        top_k: int = 0,
+        top_p: float = 0.0,
+        min_p: float = 0.0,
+    ) -> torch.Tensor:
         """
         Samples a token from the given logits.
 
         Args:
-            logits: Raw logits from the model (batch, seq, vocab) or (batch, vocab).
-            temperature: Higher values make output more random, lower more deterministic.
-            top_k: If > 0, only sample from the top-k most likely tokens.
-            top_p: If > 0.0, only sample from the smallest set of tokens whose cumulative
-                   probability exceeds top_p.
-            min_p: If > 0.0, any token with probability less than min_p * max_prob is removed.
+            logits: Raw logits from the model [batch, seq, vocab] or [batch, vocab].
+            temperature: Randomness control. 0.0 for greedy sampling.
+            top_k: Keep only top-k most likely tokens.
+            top_p: Keep only tokens with cumulative probability up to top_p.
+            min_p: Keep tokens with probability at least min_p * max_prob.
 
         Returns:
-            A tensor containing the index of the sampled token.
+            A tensor containing the index of the sampled token [batch, 1].
         """
         if temperature == 0.0:
             # Greedy sampling
@@ -55,7 +63,9 @@ class LogitSampler:
             # Remove tokens with cumulative probability above the threshold
             sorted_indices_to_remove = cumulative_probs > top_p
             # Shift the indices to the right to keep at least one token
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[
+                ..., :-1
+            ].clone()
             sorted_indices_to_remove[..., 0] = 0
 
             # Scatter the mask back to the original logits.
@@ -68,7 +78,7 @@ class LogitSampler:
         # Sample from the filtered distribution
         probs = F.softmax(logits, dim=-1)
 
-        # Safety check: if all probabilities are zero or NaN (due to extreme filtering or numerical instability)
+        # Safety check: if all probabilities are zero or NaN
         # fallback to greedy sampling from the original (unfiltered) logits.
         if torch.isnan(probs).any() or (probs.sum(dim=-1) <= 0).any():
             _, next_token = torch.topk(logits, k=1, dim=-1)

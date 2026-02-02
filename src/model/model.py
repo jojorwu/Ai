@@ -38,17 +38,24 @@ from src.model.layers.heads.value_head import ValueHead
 
 class Transformer(nn.Module, GenerationMixin):
     """
-    A decoder-only Transformer model with a dual-head architecture for policy and
-    value prediction. It supports dynamic layer skipping and Mixture of Experts (MoE)
-    allocation based on a complexity score from its Long-Term Memory (LTM).
+    A decoder-only Transformer model with a dual-head architecture.
 
-    The model is designed for agent-based learning and supports speculative decoding
+    It supports dynamic layer skipping and Mixture of Experts (MoE) allocation
+    based on a complexity score from its Long-Term Memory (LTM). The model
+    is designed for agent-based learning and supports speculative decoding
     to accelerate generation.
     """
 
     _no_split_modules = ["DecoderBlock"]
 
     def __init__(self, config: TransformerConfig, load_in_4bit: bool = False) -> None:
+        """
+        Initializes the Transformer model.
+
+        Args:
+            config: Configuration object for the Transformer.
+            load_in_4bit: Whether to load the model in 4-bit precision.
+        """
         super().__init__()
         self.config = config
         self.load_in_4bit = load_in_4bit
@@ -56,7 +63,7 @@ class Transformer(nn.Module, GenerationMixin):
         self.initializer = ModelInitializer(self)
         self.rope_embeddings = self.initializer.init_rope_embeddings()
         self.layers = self.initializer.init_layers()
-        self._draft_model = None
+        self._draft_model: Transformer | None = None
 
         # Weight tying: share weights between embedding and policy head
         self.layers.embedding.weight = self.layers.embedding.embedding.weight
@@ -66,7 +73,12 @@ class Transformer(nn.Module, GenerationMixin):
         self.titans_engine = TitansForwardEngine(self)
 
     def count_parameters(self) -> int:
-        """Counts the number of trainable parameters in the model."""
+        """
+        Counts the number of trainable parameters in the model.
+
+        Returns:
+            The total number of trainable parameters.
+        """
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(
@@ -82,7 +94,7 @@ class Transformer(nn.Module, GenerationMixin):
         Performs the forward pass of the Transformer model.
 
         Args:
-            x: Input token IDs [batch, seq_len].
+            x: Input token IDs of shape [batch, seq_len].
             ltm_state: Optional pre-calculated Long-Term Memory state.
             ltm_memory: Optional persistent LTM associative matrix.
             dynamic_top_k: Optional override for MoE top_k.
@@ -131,22 +143,37 @@ class Transformer(nn.Module, GenerationMixin):
         self, inputs: GenerateInput
     ) -> Generator[GenerationResult, None, None]:
         """
-        Generates a sequence of tokens, delegating to the TextGenerator pipeline.
+        Generates a sequence of tokens.
+
+        Args:
+            inputs: Input parameters for the generation process.
+
+        Yields:
+            GenerationResult objects containing tokens and metadata.
         """
         return self.generator.generate(inputs)
 
-    def train(self, mode: bool = True):
+    def train(self, mode: bool = True) -> Transformer:
         """
-        Overrides the default `train` method to also set the mode for the draft model.
+        Sets the model and its draft model to training mode.
+
+        Args:
+            mode: Whether to set training mode (True) or evaluation mode (False).
+
+        Returns:
+            The model instance.
         """
         super().train(mode)
         if self._draft_model:
             self._draft_model.train(mode)
         return self
 
-    def eval(self):
+    def eval(self) -> Transformer:
         """
-        Overrides the default `eval` method to also set the mode for the draft model.
+        Sets the model and its draft model to evaluation mode.
+
+        Returns:
+            The model instance.
         """
         super().eval()
         if self._draft_model:
@@ -154,13 +181,23 @@ class Transformer(nn.Module, GenerationMixin):
         return self
 
     @property
-    def draft_model(self) -> "Transformer | None":
-        """Lazy-initializes the draft model for speculative decoding."""
+    def draft_model(self) -> Transformer | None:
+        """
+        Lazy-initializes the draft model for speculative decoding.
+
+        Returns:
+            The draft model instance or None if not applicable.
+        """
         if self._draft_model is None:
             self._draft_model = self.initializer.init_draft_model()
         return self._draft_model
 
     @property
     def device(self) -> torch.device:
-        """Returns the device of the model's embedding layer."""
+        """
+        Returns the device where the model's parameters are located.
+
+        Returns:
+            The torch.device of the embedding layer.
+        """
         return self.layers.embedding.embedding.weight.device

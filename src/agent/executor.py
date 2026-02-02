@@ -2,6 +2,7 @@
 This module contains the AgentExecutor class, which is responsible for
 running the main agent loop.
 """
+from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import List
@@ -25,8 +26,10 @@ from src.model.structures import (
 
 class AgentExecutor:
     """
-    Handles the main execution loop of the agent, including the
-    "thought -> tool -> observation" cycle.
+    Handles the main execution loop of the agent.
+
+    This includes the "thought -> tool -> observation" cycle, managing
+    the conversation history, and interfacing with the Transformer model.
     """
 
     def __init__(
@@ -36,6 +39,15 @@ class AgentExecutor:
         config: GenerateConfig,
         accelerator: Accelerator,
     ) -> None:
+        """
+        Initializes the AgentExecutor.
+
+        Args:
+            model: The Transformer model to use.
+            tokenizer: Tokenizer for encoding/decoding.
+            config: Configuration for generation and agent behavior.
+            accelerator: Accelerator object for device management.
+        """
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
@@ -45,8 +57,10 @@ class AgentExecutor:
 
     def run(self) -> None:
         """
-        Runs the main agent loop, including response generation, history pruning,
-        and tool execution.
+        Runs the main agent loop.
+
+        This iterates through the thought-action-observation cycle until
+        a final answer is produced or the maximum number of turns is reached.
         """
         agent_state = self._initialize_agent_state()
 
@@ -74,7 +88,12 @@ class AgentExecutor:
             logging.warning("Maximum number of iterations reached.")
 
     def _initialize_agent_state(self) -> AgentState:
-        """Initializes the agent's state."""
+        """
+        Initializes the agent's state for a new task.
+
+        Returns:
+            A new AgentState instance.
+        """
         start_text = self.config.generation.start_text
         logging.info("Initial task: %s", start_text)
         complexity_manager = (
@@ -90,7 +109,14 @@ class AgentExecutor:
     def think(self, agent_state: AgentState) -> List[int]:
         """
         Explicitly triggers the thinking phase of the agent.
+
         Generates tokens until the </THINK> tag or the max_thought_len is reached.
+
+        Args:
+            agent_state: The current state of the agent.
+
+        Returns:
+            The generated "thought" tokens as a list of integers.
         """
         logging.info("Agent is thinking...")
 
@@ -111,8 +137,9 @@ class AgentExecutor:
         stop_tokens: list[int] | None = None,
     ) -> List[int]:
         """
-        Generates a sequence of tokens from the model, utilizing persistent KV caching
-        and speculative decoding.
+        Generates a sequence of tokens from the model.
+
+        Utilizes persistent KV caching and speculative decoding.
 
         Args:
             agent_state: The current state of the agent, including caches and history.
@@ -181,7 +208,15 @@ class AgentExecutor:
         return agent_state.finalize_turn()
 
     def _process_tool_call(self, agent_state: AgentState) -> bool:
-        """Processes a tool call if one is present in the conversation history."""
+        """
+        Processes a tool call if one is present in the conversation history.
+
+        Args:
+            agent_state: The current state of the agent.
+
+        Returns:
+            True if a tool call was found and executed, False otherwise.
+        """
         full_history_text = self.tokenizer.decode(agent_state.conversation_history_tokens)
         tool_name, args = parse_tool_call(full_history_text)
 
