@@ -1,6 +1,6 @@
 """
-PyTorch implementation of Multi-Head Attention with Grouped-Query Attention (GQA)
-and Rotary Positional Embeddings (RoPE).
+PyTorch implementation of Multi-Head Attention with Grouped-Query Attention (GQA),
+Rotary Positional Embeddings (RoPE), and Query-Key Normalization (QK Norm).
 """
 from __future__ import annotations
 from typing import TYPE_CHECKING, Tuple
@@ -14,6 +14,7 @@ from src.model.layers.attention.attention import (
     ScaledDotProductAttention,
 )
 from src.model.layers.core.linear import Linear
+from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.attention.rotary_embedding import apply_rope_embeddings
 
 if TYPE_CHECKING:
@@ -22,10 +23,11 @@ if TYPE_CHECKING:
 
 class MultiHeadAttention(nn.Module):
     """
-    Implements Grouped-Query Attention (GQA) with RoPE.
+    Implements Grouped-Query Attention (GQA) with RoPE and QK Norm.
 
     GQA allows for faster inference and smaller KV cache by sharing Key/Value
-    heads among multiple Query heads.
+    heads among multiple Query heads. QK Norm applies normalization to heads
+    to improve training stability.
     """
 
     def __init__(
@@ -52,6 +54,10 @@ class MultiHeadAttention(nn.Module):
 
         self.attention = ScaledDotProductAttention()
         self.qkv_proj, self.wo = self._create_projections(config, linear_class)
+
+        # QK Norm: normalize heads separately to improve stability
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
 
     def _validate_config(self, config: MultiHeadAttentionConfig) -> None:
         """Validates that dimensions are compatible with head counts."""
@@ -111,6 +117,11 @@ class MultiHeadAttention(nn.Module):
         q_proj = self._split_heads(q_proj, self.num_heads)
         k_proj = self._split_heads(k_proj, self.num_kv_heads)
         v_proj = self._split_heads(v_proj, self.num_kv_heads)
+
+        # Apply QK Norm
+        q_proj = self.q_norm(q_proj)
+        k_proj = self.k_norm(k_proj)
+
         return q_proj, k_proj, v_proj, seq_len, seq_offset
 
     def _apply_rope(

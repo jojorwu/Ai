@@ -73,19 +73,15 @@ class TitansForwardEngine:
                     # Sequential update through chunks.
                     for i in range(0, seq_len, chunk_size):
                         chunk = h[:, i : i + chunk_size, :]
-                        # Perform pooling in float32 for numerical precision
-                        chunk_summary = chunk.mean(
-                            dim=1, keepdim=True, dtype=torch.float32
-                        ).to(h.dtype)
+                        # Use SummaryNetwork for better information extraction
+                        chunk_summary = self.model.layers.summary_network(chunk)
                         # Update LTM state sequentially
                         ltm_state, last_complexity_score, new_ltm_memory = long_term_memory(
                             chunk_summary, prev_mem=new_ltm_memory
                         )
                 else:
                     # Single update for short sequences or single tokens
-                    summary = h.mean(dim=1, keepdim=True, dtype=torch.float32).to(
-                        h.dtype
-                    )
+                    summary = self.model.layers.summary_network(h)
                     ltm_state, last_complexity_score, new_ltm_memory = long_term_memory(
                         summary, prev_mem=new_ltm_memory
                     )
@@ -102,9 +98,6 @@ class TitansForwardEngine:
         )
 
         # Determine the number of layers once per forward pass.
-        # Note: We use .item() which makes the routing discrete and non-differentiable
-        # with respect to the loop itself, but the gating network still gets gradients
-        # from moe_top_k (if used in MoE) and through its own internal differentiable paths.
         active_layers = int(active_layers_tensor.max().item())
 
         final_dynamic_top_k = dynamic_top_k if dynamic_top_k is not None else moe_top_k

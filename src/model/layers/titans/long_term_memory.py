@@ -72,13 +72,13 @@ class LongTermMemory(nn.Module):
 
         Args:
             x: Input tensor summary of shape [batch, 1, d_model].
-            prev_mem: Previous memory matrix of shape [batch, num_heads, head_dim, d_model].
+            prev_mem: Previous memory matrix of shape [batch, num_heads, head_dim, v_head_dim].
 
         Returns:
             A tuple containing:
                 - context: Retrieved information [batch, 1, d_model].
                 - complexity_score: Difficulty estimate [batch, 1, 1].
-                - new_mem: Updated memory matrix [batch, num_heads, head_dim, d_model].
+                - new_mem: Updated memory matrix [batch, num_heads, head_dim, v_head_dim].
 
         Raises:
             ValueError: If the input tensor x does not have the expected shape.
@@ -98,11 +98,7 @@ class LongTermMemory(nn.Module):
         # 2. Reshape for Multi-Head: [batch, heads, 1, head_dim]
         q = q.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
-        # v is shared or also head-specific? Usually v is head-specific in transformer.
-        # But here LTM projects back to d_model. Let's keep v as [batch, 1, d_model]
-        # and it will be shared across heads, or each head retrieves a part of d_model?
-        # Standard Associative Memory: M = k^T @ v.
-        # Let's make each head retrieve a part of d_model.
+
         v_heads = v.view(batch_size, 1, self.num_heads, -1).transpose(1, 2)
         v_head_dim = self.d_model // self.num_heads
 
@@ -121,8 +117,6 @@ class LongTermMemory(nn.Module):
             )
 
         # 3. Gated update: M_t = f * M_{t-1} + i * (k^T @ v)
-        # f and i are [batch, heads, 1, head_dim]. We apply them row-wise.
-        # k.transpose(-2, -1) @ v_heads -> [batch, heads, head_dim, v_head_dim]
         kv_prod = torch.matmul(k.transpose(-2, -1), v_heads)
         new_mem = f.transpose(-2, -1) * prev_mem + i.transpose(-2, -1) * kv_prod
 
@@ -132,7 +126,6 @@ class LongTermMemory(nn.Module):
         new_mem = torch.clamp(new_mem, -1e4, 1e4)
 
         # 4. Retrieval: context = q @ M_t
-        # [batch, heads, 1, head_dim] @ [batch, heads, head_dim, v_head_dim] -> [batch, heads, 1, v_head_dim]
         context = torch.matmul(q, new_mem)
 
         # 5. Merge heads: [batch, 1, d_model]

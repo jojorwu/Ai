@@ -14,6 +14,7 @@ from src.model.layers.titans.gating import GatingNetwork
 from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.heads.value_head import ValueHead
 from src.model.layers.core.vision import VisionEncoder
+from src.model.titans.summary import SummaryNetwork
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ModelLayers(nn.Module):
         self.embedding: Embedding = layers["embedding"]
         self.long_term_memory: LongTermMemory = layers["long_term_memory"]
         self.gating_network: GatingNetwork = layers["gating_network"]
+        self.summary_network: SummaryNetwork = layers["summary_network"]
         self.decoder: nn.ModuleList = layers["decoder"]
         self.final_norm: RMSNorm = layers["final_norm"]
         self.value_head: ValueHead = layers["value_head"]

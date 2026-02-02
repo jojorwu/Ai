@@ -19,6 +19,7 @@ from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.attention.rotary_embedding import precompute_rope_embeddings
 from src.model.layers.heads.value_head import ValueHead
 from src.model.layers.core.vision import VisionEncoder
+from src.model.titans.summary import SummaryNetwork
 from src.model.structures import ModelLayers, RopeEmbeddings
 
 if TYPE_CHECKING:
@@ -140,6 +141,7 @@ class ModelInitializer:
                 num_layers=self.config.model.num_layers,
                 num_experts=self.config.model.num_experts,
             ),
+            "summary_network": SummaryNetwork(self.config.model.d_model),
         }
 
     def _init_head_layers(self) -> dict[str, Any]:
