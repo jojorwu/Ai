@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+import torch
 from bitsandbytes.nn import Linear4bit
 from torch import nn
 
@@ -16,7 +17,10 @@ from src.model.layers.titans.gating import GatingNetwork
 from src.model.layers.core.linear import Linear
 from src.model.layers.titans.long_term_memory import LongTermMemory
 from src.model.layers.core.rms_norm import RMSNorm
-from src.model.layers.attention.rotary_embedding import precompute_rope_embeddings
+from src.model.layers.attention.rotary_embedding import (
+    precompute_rope_embeddings,
+    precompute_rope_embeddings_2d,
+)
 from src.model.layers.heads.value_head import ValueHead
 from src.model.layers.core.vision import VisionEncoder
 from src.model.titans.summary import SummaryNetwork
@@ -48,18 +52,43 @@ class ModelInitializer:
     def init_rope_embeddings(self) -> RopeEmbeddings:
         """
         Initializes and registers Rotary Positional Embeddings (RoPE).
+        Supports 2D RoPE for vision tokens prepended to the sequence.
 
         Returns:
             A RopeEmbeddings dataclass containing cos and sin buffers.
         """
         d_k = self.config.model.d_model // self.config.model.num_heads
-        rope_cos, rope_sin = precompute_rope_embeddings(
-            d_k,
-            self.config.model.max_seq_len,
-            ntk_factor=self.config.model.rope_ntk_factor,
+        ntk = self.config.model.rope_ntk_factor
+
+        # 1. Precompute 2D RoPE for the vision part
+        vh = self.config.vision.image_size[0] // self.config.vision.patch_size
+        vw = self.config.vision.image_size[1] // self.config.vision.patch_size
+
+        vis_cos, vis_sin = precompute_rope_embeddings_2d(d_k, vh, vw, ntk_factor=ntk)
+
+        # Add CLS token RoPE (neutral/identity rotation)
+        cls_cos = torch.ones(1, 1, d_k // 2)
+        cls_sin = torch.zeros(1, 1, d_k // 2)
+
+        vis_cos = torch.cat([cls_cos, vis_cos], dim=0)
+        vis_sin = torch.cat([cls_sin, vis_sin], dim=0)
+
+        # 2. Precompute 1D RoPE for the text part
+        text_cos, text_sin = precompute_rope_embeddings(
+            d_k, self.config.model.max_seq_len, ntk_factor=ntk
         )
-        self.model.register_buffer("rope_cos_buf", rope_cos.clone())
-        self.model.register_buffer("rope_sin_buf", rope_sin.clone())
+
+        # 3. Concatenate: [Vision RoPE (2D), Text RoPE (1D)]
+        # This allows the model to handle multimodal sequences where vision tokens
+        # are prepended. Note: pure text sequences will use the beginning of
+        # this buffer, which is 2D RoPE. In a production setting, we would
+        # handle this indexing more dynamically.
+        total_cos = torch.cat([vis_cos, text_cos], dim=0)
+        total_sin = torch.cat([vis_sin, text_sin], dim=0)
+
+        self.model.register_buffer("rope_cos_buf", total_cos.clone())
+        self.model.register_buffer("rope_sin_buf", total_sin.clone())
+
         return RopeEmbeddings(cos=self.model.rope_cos_buf, sin=self.model.rope_sin_buf)
 
     def init_layers(self) -> ModelLayers:

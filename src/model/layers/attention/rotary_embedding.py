@@ -43,6 +43,50 @@ def precompute_rope_embeddings(d_k: int, max_seq_len: int, ntk_factor: float = 1
     return cos, sin
 
 
+def precompute_rope_embeddings_2d(
+    d_k: int, height: int, width: int, ntk_factor: float = 1.0
+):
+    """
+    Precomputes 2D RoPE frequencies and embeddings.
+    Splits the dimension d_k into two halves for vertical and horizontal positions.
+
+    Args:
+        d_k: Dimension of the keys/queries. Must be divisible by 4.
+        height: Number of patches in height.
+        width: Number of patches in width.
+        ntk_factor: Scaling factor for NTK-aware RoPE.
+
+    Returns:
+        A tuple of (cosines, sines) tensors of shape (height * width, 1, d_k/2).
+    """
+    if d_k % 4 != 0:
+        raise ValueError("d_k must be divisible by 4 for 2D RoPE.")
+
+    d_k_half = d_k // 2
+
+    # Precompute 1D RoPE for height and width independently
+    cos_h, sin_h = precompute_rope_embeddings(d_k_half, height, ntk_factor)
+    cos_w, sin_w = precompute_rope_embeddings(d_k_half, width, ntk_factor)
+
+    # cos_h/sin_h shape: (height, 1, d_k_half/2)
+    # We want to broadcast them to (height, width, 1, d_k/2)
+
+    # Repeat height embeddings across width
+    cos_h_2d = cos_h.view(height, 1, 1, -1).expand(-1, width, 1, -1)
+    sin_h_2d = sin_h.view(height, 1, 1, -1).expand(-1, width, 1, -1)
+
+    # Repeat width embeddings across height
+    cos_w_2d = cos_w.view(1, width, 1, -1).expand(height, -1, 1, -1)
+    sin_w_2d = sin_w.view(1, width, 1, -1).expand(height, -1, 1, -1)
+
+    # Concatenate to get (height, width, 1, d_k/2)
+    cos_2d = torch.cat([cos_h_2d, cos_w_2d], dim=-1)
+    sin_2d = torch.cat([sin_h_2d, sin_w_2d], dim=-1)
+
+    # Flatten the grid dimensions: (height * width, 1, d_k/2)
+    return cos_2d.reshape(-1, 1, d_k // 2), sin_2d.reshape(-1, 1, d_k // 2)
+
+
 def apply_rope_embeddings(
     x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, seq_offset: int = 0
 ):

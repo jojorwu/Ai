@@ -60,16 +60,16 @@ class TestDecoderBlock(unittest.TestCase):
         self.assertIsNotNone(
             decoder_block.attention_sublayer.mha.wo.weight.grad
         )
-        # Norm gradients
-        self.assertIsNotNone(decoder_block.attention_sublayer.norm.gamma.grad)
-        self.assertIsNotNone(decoder_block.ff_sublayer.norm.gamma.grad)
+        # Norm and LayerScale gradients
+        self.assertIsNotNone(decoder_block.norm.gamma.grad)
+        self.assertIsNotNone(decoder_block.attention_sublayer.layer_scale.grad)
+        self.assertIsNotNone(decoder_block.ff_sublayer.layer_scale.grad)
+        if decoder_block.ltm_cross_attn:
+            self.assertIsNotNone(decoder_block.ltm_cross_attn.gate.grad)
         # FiLM gradients
-        if decoder_block.attention_sublayer.film:
+        if decoder_block.film:
             self.assertIsNotNone(
-                decoder_block.attention_sublayer.film.projection.weight.grad
-            )
-            self.assertIsNotNone(
-                decoder_block.ff_sublayer.film.projection.weight.grad
+                decoder_block.film.projection.weight.grad
             )
         # MoE/FFN gradients
         if decoder_block.use_moe:

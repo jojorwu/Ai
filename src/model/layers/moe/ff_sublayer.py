@@ -42,6 +42,9 @@ class FeedForwardSubLayer(nn.Module):
         )
         self.use_moe = use_moe
 
+        # LayerScale parameter: initialized to a small value for deep models
+        self.layer_scale = nn.Parameter(torch.ones(config.d_model) * 1e-5)
+
     def _create_ff_layer(
         self, config: DecoderBlockConfig, use_moe: bool, linear_class: nn.Module
     ) -> nn.Module:
@@ -85,7 +88,37 @@ class FeedForwardSubLayer(nn.Module):
         Returns:
             A tuple of (output_tensor, auxiliary_loss).
         """
+        return self.forward_direct(x, ltm_state, dynamic_top_k)
+
+    def forward_direct(
+        self,
+        x: torch.Tensor,
+        ltm_state: torch.Tensor,
+        dynamic_top_k: int | None,
+        skip_norm: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass directly using parameters to avoid object creation overhead.
+
+        Args:
+            x: Input hidden states.
+            ltm_state: Long-Term Memory state.
+            dynamic_top_k: Number of experts to activate.
+            skip_norm: Whether to skip internal normalization and residual.
+
+        Returns:
+            A tuple of (output_tensor, auxiliary_loss).
+        """
         aux_loss = torch.zeros((), device=x.device, dtype=x.dtype)
+
+        if skip_norm:
+            # Parallel path: skip internal norm/film and residual sum
+            if self.use_moe:
+                ffn_output, aux_loss = self.ff_layer(x, dynamic_top_k=dynamic_top_k)
+            else:
+                ffn_output = self.ff_layer(x)
+            return self.layer_scale * self.dropout(ffn_output), aux_loss
+
         x_norm = self.norm(x)
         if self.film:
             x_norm = self.film(x_norm, ltm_state)
@@ -93,4 +126,4 @@ class FeedForwardSubLayer(nn.Module):
             ffn_output, aux_loss = self.ff_layer(x_norm, dynamic_top_k=dynamic_top_k)
         else:
             ffn_output = self.ff_layer(x_norm)
-        return x + self.dropout(ffn_output), aux_loss
+        return x + self.layer_scale * self.dropout(ffn_output), aux_loss

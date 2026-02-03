@@ -58,6 +58,9 @@ class AttentionSubLayer(nn.Module):
             else None
         )
 
+        # LayerScale parameter: initialized to a small value for deep models
+        self.layer_scale = nn.Parameter(torch.ones(config.d_model) * 1e-5)
+
     def _create_mha(
         self, config: DecoderBlockConfig, linear_class: nn.Module
     ) -> MultiHeadAttention:
@@ -101,6 +104,7 @@ class AttentionSubLayer(nn.Module):
         ltm_state: torch.Tensor,
         kv_cache: KVCache | None,
         layer_idx: int | None,
+        skip_norm: bool = False,
     ) -> torch.Tensor:
         """
         Forward pass directly using parameters to avoid object creation overhead.
@@ -110,12 +114,18 @@ class AttentionSubLayer(nn.Module):
             ltm_state: Long-Term Memory state.
             kv_cache: Key-Value cache.
             layer_idx: Index of the layer.
+            skip_norm: Whether to skip internal normalization and residual.
 
         Returns:
-            The output tensor after attention and residual connection.
+            The output tensor after attention (and optional residual).
         """
+        if skip_norm:
+            # Parallel path: skip internal norm/film and residual sum
+            attn_output = self.mha(x, kv_cache=kv_cache, layer_idx=layer_idx)
+            return self.layer_scale * self.dropout(attn_output)
+
         x_norm = self.norm(x)
         if self.film:
             x_norm = self.film(x_norm, ltm_state)
         attn_output = self.mha(x_norm, kv_cache=kv_cache, layer_idx=layer_idx)
-        return x + self.dropout(attn_output)
+        return x + self.layer_scale * self.dropout(attn_output)
