@@ -1,6 +1,6 @@
 """
 PyTorch implementation of the Long-Term Memory (LTM) module using
-Multi-Head Gated Linear Associative Memory.
+Multi-Head Gated Linear Associative Memory with learnable decay.
 """
 from __future__ import annotations
 import torch
@@ -16,7 +16,7 @@ class LongTermMemory(nn.Module):
 
     This architecture uses input-dependent gating to manage information
     persistence and retrieval from an associative memory matrix, with multiple
-    heads for enhanced representational capacity.
+    heads for enhanced representational capacity and a learnable decay bias.
     """
 
     def __init__(
@@ -46,9 +46,13 @@ class LongTermMemory(nn.Module):
         self.v_proj = Linear(d_model, d_model, bias=False)
 
         # Gating projections for selective forgetting and updating
-        # Each head has its own gates
-        self.forget_gate = nn.Sequential(Linear(d_model, d_hidden), nn.Sigmoid())
+        # We separate the linear layer to inject a learnable decay bias
+        self.forget_gate_proj = Linear(d_model, d_hidden)
         self.input_gate = nn.Sequential(Linear(d_model, d_hidden), nn.Sigmoid())
+
+        # Learnable decay bias per head to provide a baseline forgetting rate
+        # Initialized to a small positive value so that sigmoid starts around 0.5-0.9
+        self.decay_bias = nn.Parameter(torch.ones(1, num_heads, 1, self.head_dim) * 2.0)
 
         # Retrieval normalization for stability
         self.retrieval_norm = RMSNorm(d_model)
@@ -103,8 +107,15 @@ class LongTermMemory(nn.Module):
         v_head_dim = self.d_model // self.num_heads
 
         # Compute gates [batch, heads, 1, head_dim]
-        f = self.forget_gate(x).view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
-        i = self.input_gate(x).view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
+        # Forget gate incorporates learnable decay bias
+        f_proj = self.forget_gate_proj(x).view(
+            batch_size, 1, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        f = torch.sigmoid(f_proj + self.decay_bias)
+
+        i = self.input_gate(x).view(
+            batch_size, 1, self.num_heads, self.head_dim
+        ).transpose(1, 2)
 
         if prev_mem is None:
             prev_mem = torch.zeros(
@@ -140,6 +151,8 @@ class LongTermMemory(nn.Module):
         context = self.out_proj(context)
 
         # Complexity head uses the full query to score the input
-        complexity_score = self.complexity_head(q.transpose(1, 2).reshape(batch_size, 1, -1))
+        complexity_score = self.complexity_head(
+            q.transpose(1, 2).reshape(batch_size, 1, -1)
+        )
 
         return context, complexity_score, new_mem

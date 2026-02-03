@@ -59,5 +59,24 @@ class TestTransformer(unittest.TestCase):
                 final_call_args = mock_decoder.call_args[0]
                 self.assertEqual(final_call_args[4], 5)
 
+    def test_logit_soft_clamping(self):
+        """Tests that logits are soft-clamped when configured."""
+        config = create_test_config()
+        config.model.logit_soft_cap = 10.0
+        model = Transformer(config.to_transformer_config())
+
+        # Large inputs that would normally produce large logits
+        x = torch.randint(0, config.model.vocab_size, (1, 5))
+
+        # Force large weights to produce large logits
+        with torch.no_grad():
+            model.layers.embedding.embedding.weight.fill_(100.0)
+
+        output = model(x)
+        logits = output.logits
+
+        # Logits should be bounded by approximately the soft_cap
+        self.assertLessEqual(logits.abs().max().item(), 10.0 + 1e-4)
+
 if __name__ == "__main__":
     unittest.main()

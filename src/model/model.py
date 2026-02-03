@@ -133,6 +133,12 @@ class Transformer(nn.Module, GenerationMixin):
         logits = F.linear(  # pylint: disable=not-callable
             h, self.layers.embedding.weight
         )
+
+        # Apply logit soft-clamping if configured
+        if self.config.model.logit_soft_cap is not None:
+            logits = self.config.model.logit_soft_cap * torch.tanh(
+                logits / self.config.model.logit_soft_cap
+            )
         # Value head: projects the final hidden state of the last token to a
         # single scalar value, predicting the "usefulness" of the sequence.
         value = self.layers.value_head(h[:, -1, :])

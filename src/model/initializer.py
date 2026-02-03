@@ -112,6 +112,13 @@ class ModelInitializer:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Embedding):
                 nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            elif isinstance(m, VisionEncoder):
+                nn.init.trunc_normal_(m.cls_token, std=0.02)
+                nn.init.trunc_normal_(m.pos_embed, std=0.02)
+            elif isinstance(m, LongTermMemory):
+                # Ensure decay bias starts at a reasonable value
+                if hasattr(m, "decay_bias"):
+                    nn.init.constant_(m.decay_bias, 2.0)
             elif isinstance(m, (nn.LayerNorm, RMSNorm)):
                 if hasattr(m, "gamma") and m.gamma is not None:
                     nn.init.ones_(m.gamma)
@@ -198,6 +205,7 @@ class ModelInitializer:
             long_term_memory=ltm,
             num_experts=model_cfg.num_experts,
             top_k_experts=model_cfg.top_k_experts,
+            use_shared_expert=model_cfg.use_shared_expert,
             load_in_4bit=self.load_in_4bit,
         )
 

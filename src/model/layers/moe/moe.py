@@ -15,11 +15,13 @@ from src.model.layers.core.linear import Linear
 
 class MixtureOfExperts(nn.Module):
     """
-    Implements a Sparsely-Gated Mixture of Experts layer.
+    Implements a Sparsely-Gated Mixture of Experts layer with an optional Shared Expert.
 
     This implementation uses a router (gate) to assign tokens to a subset of
     available experts, maximizing model capacity while maintaining constant
     computational cost per token. Each expert is a SwiGLU FeedForward network.
+    An optional Shared Expert can be used to capture general, non-specialized
+    knowledge by processing all tokens.
     """
 
     def __init__(self, config: MoEConfig, linear_class: nn.Module = Linear) -> None:
@@ -49,6 +51,13 @@ class MixtureOfExperts(nn.Module):
                 FeedForward(ffn_config, linear_class=linear_class)
                 for _ in range(config.num_experts)
             ]
+        )
+
+        # Optional shared expert that processes all tokens
+        self.shared_expert = (
+            FeedForward(ffn_config, linear_class=linear_class)
+            if getattr(config, "use_shared_expert", False)
+            else None
         )
 
     def _compute_aux_loss(
@@ -149,5 +158,9 @@ class MixtureOfExperts(nn.Module):
         final_output.scatter_add_(
             0, token_indices.unsqueeze(-1).expand(-1, d_model), weighted_outputs
         )
+
+        # 8. Add shared expert output if enabled
+        if self.shared_expert is not None:
+            final_output = final_output + self.shared_expert(x_reshaped)
 
         return final_output.view(batch_size, seq_len, d_model), aux_loss

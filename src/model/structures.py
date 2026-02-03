@@ -77,12 +77,14 @@ class SamplingConfig:
         top_k: Filters top-k tokens by probability.
         top_p: Filters tokens by cumulative probability (nucleus sampling).
         min_p: Minimum probability threshold relative to the max probability.
+        logit_soft_cap: Optional threshold for logit soft-clamping.
         dynamic_top_k: Optional dynamic override for top_k.
     """
     temperature: float = 1.0
     top_k: int = 0
     top_p: float = 0.9
     min_p: float = 0.05
+    logit_soft_cap: float | None = None
     dynamic_top_k: int | None = None
 
 

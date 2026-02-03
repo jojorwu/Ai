@@ -63,6 +63,7 @@ class FeedForwardSubLayer(nn.Module):
                 num_experts=config.num_experts,
                 top_k=config.top_k_experts,
                 bias=False,
+                use_shared_expert=getattr(config, "use_shared_expert", False),
             )
             return MixtureOfExperts(moe_config, linear_class=linear_class)
         ffn_config = FeedForwardConfig(

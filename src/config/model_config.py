@@ -26,6 +26,9 @@ class MoEConfig(BaseModel):
     num_experts: int = Field(..., description="Общее количество экспертов.")
     top_k: int = Field(..., description="Количество экспертов для каждого токена.")
     bias: bool = Field(False, description="Использовать ли смещение в слоях экспертов.")
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
+    )
 
 
 class FeedForwardConfig(BaseModel):
@@ -47,6 +50,9 @@ class DecoderBlockConfig(BaseModel):
     num_experts: Optional[int] = Field(None, description="Количество экспертов для MoE.")
     top_k_experts: Optional[int] = Field(
         None, description="Количество выбираемых экспертов на токен."
+    )
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
     )
     rotary_emb: Optional[Tuple[Any, Any]] = Field(
         None, description="Кортеж эмбеддингов RoPE."
@@ -93,6 +99,9 @@ class ModelConfig(BaseModel):
         None, description="Количество 'экспертов' в слое MoE.")
     top_k_experts: int | None = Field(
         None, description="Количество 'экспертов', выбираемых для каждого токена.")
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
+    )
     gradient_checkpointing: bool = Field(
         False, description="Включить чекпоинты градиентов для экономии памяти.")
     anchor_window_size: int = Field(
@@ -100,6 +109,9 @@ class ModelConfig(BaseModel):
     )
     rope_ntk_factor: float = Field(
         1.0, description="Фактор масштабирования NTK-aware RoPE для расширения контекста."
+    )
+    logit_soft_cap: float | None = Field(
+        None, description="Порог для мягкого ограничения логитов (logit soft-clamping)."
     )
 
 

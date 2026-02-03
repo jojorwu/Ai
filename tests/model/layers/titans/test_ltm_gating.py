@@ -71,8 +71,9 @@ class TestLTMGating(unittest.TestCase):
         loss = context.sum() + complexity.sum() + new_mem.sum()
         loss.backward()
 
-        # Check that gradients flowed to gates
-        self.assertIsNotNone(self.ltm.forget_gate[0].weight.grad)
+        # Check that gradients flowed to gates and parameters
+        self.assertIsNotNone(self.ltm.forget_gate_proj.weight.grad)
+        self.assertIsNotNone(self.ltm.decay_bias.grad)
         self.assertIsNotNone(self.ltm.input_gate[0].weight.grad)
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(prev_mem.grad)

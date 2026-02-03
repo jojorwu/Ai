@@ -21,6 +21,7 @@ class LogitSampler:
         top_k: int = 0,
         top_p: float = 0.0,
         min_p: float = 0.0,
+        logit_soft_cap: float | None = None,
     ) -> torch.Tensor:
         """
         Samples a token from the given logits.
@@ -31,10 +32,15 @@ class LogitSampler:
             top_k: Keep only top-k most likely tokens.
             top_p: Keep only tokens with cumulative probability up to top_p.
             min_p: Keep tokens with probability at least min_p * max_prob.
+            logit_soft_cap: Threshold for logit soft-clamping.
 
         Returns:
             A tensor containing the index of the sampled token [batch, 1].
         """
+        # Apply soft-clamping if requested at sampling time
+        if logit_soft_cap is not None:
+            logits = logit_soft_cap * torch.tanh(logits / logit_soft_cap)
+
         if temperature == 0.0:
             # Greedy sampling
             _, next_token = torch.topk(logits, k=1, dim=-1)
