@@ -78,5 +78,36 @@ class TestTransformer(unittest.TestCase):
         # Logits should be bounded by approximately the soft_cap
         self.assertLessEqual(logits.abs().max().item(), 10.0 + 1e-4)
 
+    def test_multimodal_kv_cache_no_redundancy(self):
+        """Tests that vision tokens are not redundantly processed if already cached."""
+        config = create_test_config()
+        model = Transformer(config.to_transformer_config())
+
+        # 1. First pass with images
+        images = torch.randn(1, 3, 224, 224)
+        x = torch.randint(0, config.model.vocab_size, (1, 5))
+
+        from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
+        d_k = config.model.d_model // config.model.num_heads
+        kv_cache = KVCache(KVCacheConfig(
+            num_layers=config.model.num_layers,
+            batch_size=1,
+            num_kv_heads=config.model.num_kv_heads,
+            d_k=d_k,
+            max_seq_len=1024
+        ))
+
+        # Initial forward
+        model(x, images=images, kv_cache=kv_cache)
+        pos_after_first = kv_cache.current_pos
+
+        # 2. Second pass with same images and new token
+        x2 = torch.randint(0, config.model.vocab_size, (1, 1))
+        # Even if we pass images again, they should not be added to cache
+        model(x2, images=images, kv_cache=kv_cache)
+
+        # current_pos should only increase by 1 (the new text token)
+        self.assertEqual(kv_cache.current_pos, pos_after_first + 1)
+
 if __name__ == "__main__":
     unittest.main()

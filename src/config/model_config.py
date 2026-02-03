@@ -37,6 +37,7 @@ class FeedForwardConfig(BaseModel):
     d_ff: int = Field(..., description="Размерность скрытого слоя.")
     bias: bool = Field(False, description="Использовать ли смещение в линейных слоях.")
     num_layers: int = Field(1, description="Количество подслоев FFN.")
+    use_internal_norm: bool = Field(False, description="Использовать ли RMSNorm внутри FFN.")
 
 
 class DecoderBlockConfig(BaseModel):

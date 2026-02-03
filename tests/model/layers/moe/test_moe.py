@@ -74,6 +74,24 @@ class TestMoE(unittest.TestCase):
         except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
+    def test_z_loss_contribution(self):
+        """Tests that auxiliary loss includes a Z-loss component."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(1, 1, 16)
+
+        # Large logits should increase Z-loss
+        with torch.no_grad():
+            moe.gate.weight.fill_(100.0)
+
+        _, loss_large = moe(x)
+
+        with torch.no_grad():
+            moe.gate.weight.fill_(0.01)
+
+        _, loss_small = moe(x)
+
+        self.assertGreater(loss_large.item(), loss_small.item())
 
 if __name__ == "__main__":
     unittest.main()

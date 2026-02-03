@@ -111,9 +111,12 @@ class Transformer(nn.Module, GenerationMixin):
 
         # 2. Integrate image embeddings if provided
         if images is not None and self.layers.vision_encoder is not None:
-            image_embeds = self.layers.vision_encoder(images)
-            # Prepend image embeddings to text embeddings
-            h = torch.cat([image_embeds, h], dim=1)
+            # ONLY prepend image embeddings if they are NOT already in the cache.
+            # This prevents redundant vision processing during auto-regressive generation.
+            if kv_cache is None or kv_cache.current_pos == 0:
+                image_embeds = self.layers.vision_encoder(images)
+                # Prepend image embeddings to text embeddings
+                h = torch.cat([image_embeds, h], dim=1)
 
         # 3. Delegate sequence processing to the TitansForwardEngine
         h, total_aux_loss, new_ltm_memory = self.titans_engine.process_sequence(

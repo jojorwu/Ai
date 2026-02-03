@@ -68,7 +68,7 @@ class MixtureOfExperts(nn.Module):
         seq_len: int,
     ) -> torch.Tensor:
         """
-        Computes the auxiliary load balancing loss to prevent expert collapse.
+        Computes the auxiliary load balancing loss and Router Z-loss.
 
         Args:
             router_logits: Raw logits from the gate.
@@ -77,15 +77,23 @@ class MixtureOfExperts(nn.Module):
             seq_len: Sequence length of the input.
 
         Returns:
-            The auxiliary loss scalar.
+            The combined auxiliary loss scalar.
         """
+        # 1. Load balancing loss (Switch Transformer style)
         gate_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
         p_i = gate_probs.mean(dim=0)
         top_k_mask = F.one_hot(
             top_k_indices, num_classes=self.num_experts
         ).float()  # pylint: disable=not-callable
         f_i = top_k_mask.sum(dim=0).sum(dim=0) / (batch_size * seq_len)
-        return self.num_experts * (p_i * f_i).sum()
+        load_balancing_loss = self.num_experts * (p_i * f_i).sum()
+
+        # 2. Router Z-loss (PaLM style)
+        # Helps keep logits small and prevents overflow/instability
+        # Loss = 0.001 * mean(logsumexp(logits)^2)
+        z_loss = torch.logsumexp(router_logits, dim=-1).pow(2).mean()
+
+        return load_balancing_loss + 0.001 * z_loss
 
     def forward(
         self, x: torch.Tensor, dynamic_top_k: int | None = None
@@ -111,6 +119,11 @@ class MixtureOfExperts(nn.Module):
 
         # 1. Route tokens to experts
         router_logits = self.gate(x_reshaped)
+
+        if self.training:
+            # Add small noise to router logits to encourage expert exploration
+            noise = torch.randn_like(router_logits) * 0.01
+            router_logits = router_logits + noise
 
         if current_top_k == 1:
             # Optimized path for top_k=1. We use the actual gate probability
