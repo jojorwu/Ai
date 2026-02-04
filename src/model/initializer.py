@@ -25,6 +25,7 @@ from src.model.layers.heads.value_head import ValueHead
 from src.model.layers.core.vision import VisionEncoder
 from src.model.titans.summary import SummaryNetwork
 from src.model.structures import ModelLayers, RopeEmbeddings
+from src.utils.exceptions import InitializationError
 
 if TYPE_CHECKING:
     from src.model.model import Transformer
@@ -201,15 +202,21 @@ class ModelInitializer:
 
         Returns:
             An initialized LongTermMemory module or None.
+
+        Raises:
+            InitializationError: If the LTM configuration is incomplete.
         """
         cfg = self.config.model.ltm
         if cfg.d_hidden and cfg.num_layers:
-            return LongTermMemory(
-                d_model=self.config.model.d_model,
-                d_hidden=cfg.d_hidden,
-                num_layers=cfg.num_layers,
-                num_heads=cfg.num_heads,
-            )
+            try:
+                return LongTermMemory(
+                    d_model=self.config.model.d_model,
+                    d_hidden=cfg.d_hidden,
+                    num_layers=cfg.num_layers,
+                    num_heads=cfg.num_heads,
+                )
+            except Exception as e:
+                raise InitializationError(f"Failed to initialize LTM: {e}") from e
         return None
 
     def _create_decoder_block_config(self, ltm: nn.Module | None) -> DecoderBlockConfig:

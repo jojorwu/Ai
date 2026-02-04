@@ -10,6 +10,7 @@ import torch
 from src.model.inference.sampling import LogitSampler
 from src.model.inference.speculative import SpeculativeEngine
 from src.model.structures import GenerationResult
+from src.utils.exceptions import GenerationError
 
 if TYPE_CHECKING:
     from src.model.model import Transformer
@@ -69,6 +70,11 @@ class TextGenerator:
         last_logit, current_ltm_memory = self._initial_sync(inputs, main_cache, tokens)
 
         while total_generated < inputs.max_new_tokens:
+            if main_cache.current_pos >= main_cache.config.max_seq_len:
+                raise GenerationError(
+                    f"Maximum sequence length ({main_cache.config.max_seq_len}) reached."
+                )
+
             # 1. Generate speculative chunk
             speculative_chunk, _ = self.speculative_engine.generate_chunk(
                 draft_model,

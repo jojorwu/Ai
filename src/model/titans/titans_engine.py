@@ -71,18 +71,14 @@ class TitansForwardEngine:
                 chunk_size = 512
                 if seq_len > chunk_size:
                     # Sequential update through chunks.
-                    complexity_scores = []
                     for i in range(0, seq_len, chunk_size):
                         chunk = h[:, i : i + chunk_size, :]
                         # Use SummaryNetwork for better information extraction
                         chunk_summary = self.model.layers.summary_network(chunk)
                         # Update LTM state sequentially
-                        ltm_state, complexity, new_ltm_memory = long_term_memory(
+                        ltm_state, last_complexity_score, new_ltm_memory = long_term_memory(
                             chunk_summary, prev_mem=new_ltm_memory
                         )
-                        complexity_scores.append(complexity)
-                    # Average complexity across chunks for a more stable gating signal
-                    last_complexity_score = torch.stack(complexity_scores).mean(dim=0)
                 else:
                     # Single update for short sequences or single tokens
                     summary = self.model.layers.summary_network(h)

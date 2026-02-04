@@ -109,5 +109,32 @@ class TestTransformer(unittest.TestCase):
         # current_pos should only increase by 1 (the new text token)
         self.assertEqual(kv_cache.current_pos, pos_after_first + 1)
 
+    def test_multimodal_error_raised(self):
+        """Tests that MultimodalError is raised if images provided but no encoder."""
+        config = create_test_config()
+        model = Transformer(config.to_transformer_config())
+        model.layers.vision_encoder = None
+
+        images = torch.randn(1, 3, 224, 224)
+        x = torch.randint(0, config.model.vocab_size, (1, 5))
+
+        from src.utils.exceptions import MultimodalError
+        with self.assertRaises(MultimodalError):
+            model(x, images=images)
+
+    def test_ltm_initialization_error(self):
+        """Tests that InitializationError is raised on LTM failure."""
+        config = create_test_config()
+        # Directly pass incompatible values to the initializer bypass config validation
+        # to test the error handling in ModelInitializer.
+        t_config = config.to_transformer_config()
+        t_config.model.ltm.d_hidden = 11
+        t_config.model.ltm.num_heads = 4 # 11 is not divisible by 4
+        t_config.model.ltm.num_layers = 1
+
+        from src.utils.exceptions import InitializationError
+        with self.assertRaises(InitializationError):
+            Transformer(t_config)
+
 if __name__ == "__main__":
     unittest.main()

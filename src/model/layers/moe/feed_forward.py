@@ -8,7 +8,6 @@ from torch.nn import functional as F
 
 from src.config.model_config import FeedForwardConfig
 from src.model.layers.core.linear import Linear
-from src.model.layers.core.rms_norm import RMSNorm
 
 
 class FeedForward(nn.Module):
@@ -35,11 +34,6 @@ class FeedForward(nn.Module):
         # Final projection: [d_ff, d_model]
         self.w2 = linear_class(config.d_ff, config.d_model, bias=config.bias)
 
-        # Internal normalization for improved gradient flow in high-capacity FFNs
-        self.internal_norm = (
-            RMSNorm(config.d_ff) if config.use_internal_norm else None
-        )
-
         if hasattr(self.w2, "special_residual_init"):
             self.w2.special_residual_init(config.num_layers)
 
@@ -59,11 +53,5 @@ class FeedForward(nn.Module):
         # Split into w1 (gate) and w3 (value) paths
         w1_out, w3_out = w1_w3_out.chunk(2, dim=-1)
 
-        # SwiGLU: SiLU(xW1) * (xW3)
-        hidden = F.silu(w1_out) * w3_out
-
-        if self.internal_norm:
-            hidden = self.internal_norm(hidden)
-
-        # Final projection
-        return self.w2(hidden)
+        # SwiGLU: SiLU(xW1) * (xW3) @ W2
+        return self.w2(F.silu(w1_out) * w3_out)

@@ -15,6 +15,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from src.config.core import TransformerConfig
+from src.utils.exceptions import MultimodalError
 from src.model.inference.generation import GenerationMixin
 from src.model.inference.generator import TextGenerator
 from src.model.initializer import ModelInitializer
@@ -110,7 +111,11 @@ class Transformer(nn.Module, GenerationMixin):
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
         # 2. Integrate image embeddings if provided
-        if images is not None and self.layers.vision_encoder is not None:
+        if images is not None:
+            if self.layers.vision_encoder is None:
+                raise MultimodalError(
+                    "Images provided but VisionEncoder is not initialized."
+                )
             # ONLY prepend image embeddings if they are NOT already in the cache.
             # This prevents redundant vision processing during auto-regressive generation.
             if kv_cache is None or kv_cache.current_pos == 0:

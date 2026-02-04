@@ -2,7 +2,7 @@
 Pydantic models for model architecture and vision configuration.
 """
 from typing import Any, Literal, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -12,6 +12,19 @@ class MultiHeadAttentionConfig(BaseModel):
     num_kv_heads: int = Field(
         ..., description="Количество голов для Key/Value (для GQA)."
     )
+
+    @model_validator(mode="after")
+    def validate_heads(self) -> "MultiHeadAttentionConfig":
+        if self.d_model % self.num_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by num_heads ({self.num_heads})."
+            )
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads ({self.num_kv_heads})."
+            )
+        return self
+
     rotary_emb: Optional[Tuple[Any, Any]] = Field(
         None, description="Предварительно вычисленные эмбеддинги RoPE."
     )
@@ -115,6 +128,23 @@ class ModelConfig(BaseModel):
         None, description="Порог для мягкого ограничения логитов (logit soft-clamping)."
     )
 
+    @model_validator(mode="after")
+    def validate_architecture(self) -> "ModelConfig":
+        if self.d_model % self.num_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by num_heads ({self.num_heads})."
+            )
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads ({self.num_kv_heads})."
+            )
+        if self.num_experts is not None and self.top_k_experts is not None:
+            if self.top_k_experts > self.num_experts:
+                raise ValueError(
+                    f"top_k_experts ({self.top_k_experts}) cannot exceed num_experts ({self.num_experts})."
+                )
+        return self
+
 
 class VisionConfig(BaseModel):
     """Configuration for the Vision Encoder."""
@@ -124,6 +154,18 @@ class VisionConfig(BaseModel):
                             description="Размер одного патча изображения.")
     num_channels: int = Field(
         3, description="Количество каналов в изображении (например, 3 для RGB).")
+
+    @model_validator(mode="after")
+    def validate_patches(self) -> "VisionConfig":
+        if self.image_size[0] % self.patch_size != 0:
+            raise ValueError(
+                f"Image height ({self.image_size[0]}) must be divisible by patch_size ({self.patch_size})."
+            )
+        if self.image_size[1] % self.patch_size != 0:
+            raise ValueError(
+                f"Image width ({self.image_size[1]}) must be divisible by patch_size ({self.patch_size})."
+            )
+        return self
 
 
 class ComplexityConfig(BaseModel):

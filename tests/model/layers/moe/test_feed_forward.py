@@ -45,16 +45,6 @@ class TestFeedForward(unittest.TestCase):
 
         self.assertIsNotNone(x.grad)
 
-    def test_internal_norm(self):
-        """Tests that internal RMSNorm correctly modulates activations."""
-        config = FeedForwardConfig(d_model=16, d_ff=32, use_internal_norm=True)
-        ff = FeedForward(config)
-        self.assertIsNotNone(ff.internal_norm)
-
-        x = torch.randn(1, 1, 16)
-        output = ff(x)
-        self.assertEqual(output.shape, (1, 1, 16))
-
 
 if __name__ == "__main__":
     unittest.main()
