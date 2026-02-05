@@ -51,6 +51,7 @@ class ModelLayers(nn.Module):
         self.gating_network: GatingNetwork = layers["gating_network"]
         self.summary_network: SummaryNetwork = layers["summary_network"]
         self.decoder: nn.ModuleList = layers["decoder"]
+        self.post_embedding_norm: RMSNorm = layers["post_embedding_norm"]
         self.final_norm: RMSNorm = layers["final_norm"]
         self.value_head: ValueHead = layers["value_head"]
         self.vision_encoder: VisionEncoder | None = layers.get("vision_encoder")

@@ -55,6 +55,10 @@ class MultiHeadAttention(nn.Module):
         self.attention = ScaledDotProductAttention()
         self.qkv_proj, self.wo = self._create_projections(config, linear_class)
 
+        # Adaptive Attention Scaling: learnable scale for dot-product attention.
+        # Initialized to the standard 1 / sqrt(head_dim).
+        self.q_k_scale = nn.Parameter(torch.tensor(self.head_dim**-0.5))
+
         # QK Norm: normalize heads separately to improve stability
         self.q_norm = RMSNorm(self.head_dim)
         self.k_norm = RMSNorm(self.head_dim)
@@ -176,10 +180,15 @@ class MultiHeadAttention(nn.Module):
             k = self._repeat_kv(k, self.n_rep)
             v = self._repeat_kv(v, self.n_rep)
 
+        # Adaptive Attention Scaling: scale queries by learnable parameter.
+        # We multiply by self.q_k_scale so that dot product (q*scale)@k.T
+        # effectively applies the scale.
+        q = q * self.q_k_scale
+
         # Causal masking is required when seq_len > 1 (e.g. prompt or speculative chunk).
         is_causal = (kv_cache is None) or (seq_len > 1)
 
-        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal)
+        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal, scale=1.0)
         attention_output = self.attention(attn_input)
         combined_output = self._combine_heads(attention_output)
         return self.wo(combined_output)

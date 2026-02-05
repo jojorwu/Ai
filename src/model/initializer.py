@@ -179,6 +179,7 @@ class ModelInitializer:
                 num_experts=self.config.model.num_experts,
             ),
             "summary_network": SummaryNetwork(self.config.model.d_model),
+            "post_embedding_norm": RMSNorm(self.config.model.d_model),
         }
 
     def _init_head_layers(self) -> dict[str, Any]:

@@ -110,6 +110,9 @@ class Transformer(nn.Module, GenerationMixin):
         # 1. Embed input sequence
         h = self.layers.embedding(x) * math.sqrt(self.config.model.d_model)
 
+        # Apply stable embedding normalization
+        h = self.layers.post_embedding_norm(h)
+
         # 2. Integrate image embeddings if provided
         if images is not None:
             if self.layers.vision_encoder is None:
@@ -120,6 +123,8 @@ class Transformer(nn.Module, GenerationMixin):
             # This prevents redundant vision processing during auto-regressive generation.
             if kv_cache is None or kv_cache.current_pos == 0:
                 image_embeds = self.layers.vision_encoder(images)
+                # Apply stable embedding normalization to vision tokens as well
+                image_embeds = self.layers.post_embedding_norm(image_embeds)
                 # Prepend image embeddings to text embeddings
                 h = torch.cat([image_embeds, h], dim=1)
 

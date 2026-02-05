@@ -40,10 +40,11 @@ class LongTermMemory(nn.Module):
         if d_hidden % num_heads != 0:
             raise ValueError("d_hidden must be divisible by num_heads.")
 
-        # Projections to associative space
-        self.q_proj = Linear(d_model, d_hidden, bias=False)
-        self.k_proj = Linear(d_model, d_hidden, bias=False)
-        self.v_proj = Linear(d_model, d_model, bias=False)
+        # GLU-based Projections to associative space
+        # We project to 2x the dimension to support gating (split into gate and value)
+        self.q_proj = Linear(d_model, 2 * d_hidden, bias=False)
+        self.k_proj = Linear(d_model, 2 * d_hidden, bias=False)
+        self.v_proj = Linear(d_model, 2 * d_model, bias=False)
 
         # Gating projections for selective forgetting and updating
         # We separate the linear layer to inject a learnable decay bias
@@ -94,10 +95,15 @@ class LongTermMemory(nn.Module):
 
         batch_size = x.size(0)
 
-        # 1. Projections
-        q = self.q_proj(x)  # [batch, 1, d_hidden]
-        k = self.k_proj(x)  # [batch, 1, d_hidden]
-        v = self.v_proj(x)  # [batch, 1, d_model]
+        # 1. GLU-based Projections: SiLU(gate) * value
+        q_gate, q_val = self.q_proj(x).chunk(2, dim=-1)
+        q = torch.nn.functional.silu(q_gate) * q_val  # [batch, 1, d_hidden]
+
+        k_gate, k_val = self.k_proj(x).chunk(2, dim=-1)
+        k = torch.nn.functional.silu(k_gate) * k_val  # [batch, 1, d_hidden]
+
+        v_gate, v_val = self.v_proj(x).chunk(2, dim=-1)
+        v = torch.nn.functional.silu(v_gate) * v_val  # [batch, 1, d_model]
 
         # 2. Reshape for Multi-Head: [batch, heads, 1, head_dim]
         q = q.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
