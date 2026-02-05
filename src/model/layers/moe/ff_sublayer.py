@@ -114,7 +114,9 @@ class FeedForwardSubLayer(nn.Module):
         if skip_norm:
             # Parallel path: skip internal norm/film and residual sum
             if self.use_moe:
-                ffn_output, aux_loss = self.ff_layer(x, dynamic_top_k=dynamic_top_k)
+                ffn_output, aux_loss = self.ff_layer(
+                    x, dynamic_top_k=dynamic_top_k, ltm_context=ltm_state
+                )
             else:
                 ffn_output = self.ff_layer(x)
             return self.layer_scale * self.dropout(ffn_output), aux_loss
@@ -123,7 +125,9 @@ class FeedForwardSubLayer(nn.Module):
         if self.film:
             x_norm = self.film(x_norm, ltm_state)
         if self.use_moe:
-            ffn_output, aux_loss = self.ff_layer(x_norm, dynamic_top_k=dynamic_top_k)
+            ffn_output, aux_loss = self.ff_layer(
+                x_norm, dynamic_top_k=dynamic_top_k, ltm_context=ltm_state
+            )
         else:
             ffn_output = self.ff_layer(x_norm)
         return x + self.layer_scale * self.dropout(ffn_output), aux_loss

@@ -18,6 +18,7 @@ from src.model.layers.moe.ff_sublayer import FeedForwardSubLayer
 from src.model.layers.attention.cross_attention import GatedCrossAttention
 from src.model.layers.core.linear import Linear
 from src.model.layers.core.rms_norm import RMSNorm
+from src.model.layers.core.dropout import DropPath
 from src.model.layers.core.film import FiLMLayer
 
 if TYPE_CHECKING:
@@ -86,6 +87,9 @@ class DecoderBlock(nn.Module):
             else None
         )
 
+        # Stochastic Depth (DropPath)
+        self.drop_path = DropPath(config.drop_path_rate)
+
         # Residual scaling for deep stability: learnable multiplier for all sub-layers
         # Initialized to 1.0 to start with standard behavior
         self.residual_scale = nn.Parameter(torch.ones(config.d_model))
@@ -149,9 +153,9 @@ class DecoderBlock(nn.Module):
             # Attend to LTM state
             ltm_fused_out = self.ltm_cross_attn(x_norm, ltm_state) - x_norm
 
-        # 4. Combine with residual connection and learnable scaling
+        # 4. Combine with residual connection, learnable scaling and DropPath
         # Note: individual LayerScale is still applied internally by sublayers
         combined_parallel_out = attn_out + ffn_out + ltm_fused_out
-        x = x + self.residual_scale * combined_parallel_out
+        x = x + self.residual_scale * self.drop_path(combined_parallel_out)
 
         return x, aux_loss

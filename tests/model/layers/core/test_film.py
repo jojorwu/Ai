@@ -37,3 +37,22 @@ class TestFiLMLayer(unittest.TestCase):
         self.assertIsNotNone(film.projection.bias.grad)
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(ltm_state.grad)
+
+    def test_gating_behavior(self):
+        """Tests that gating is applied correctly."""
+        d_model = 64
+        film = FiLMLayer(d_model)
+        x = torch.ones(1, 1, d_model)
+        ltm_state = torch.randn(1, 1, d_model)
+
+        # Manually set weights to produce specific gate value
+        with torch.no_grad():
+            # Project to [gamma, beta, gate]
+            # Set gate_logits to a very large negative number -> gate close to 0
+            film.projection.bias.fill_(0.0)
+            # gate_logits are the last chunk of 3*d_model
+            film.projection.bias[2*d_model:].fill_(-1000.0)
+
+        output = film(x, ltm_state)
+        # If gate is 0, output should be x
+        self.assertTrue(torch.allclose(output, x, atol=1e-5))

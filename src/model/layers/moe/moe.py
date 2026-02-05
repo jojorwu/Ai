@@ -18,10 +18,7 @@ class MixtureOfExperts(nn.Module):
     Implements a Sparsely-Gated Mixture of Experts layer with an optional Shared Expert.
 
     This implementation uses a router (gate) to assign tokens to a subset of
-    available experts, maximizing model capacity while maintaining constant
-    computational cost per token. Each expert is a SwiGLU FeedForward network.
-    An optional Shared Expert can be used to capture general, non-specialized
-    knowledge by processing all tokens.
+    available experts. It supports LTM-conditioned routing and Entropy loss.
     """
 
     def __init__(self, config: MoEConfig, linear_class: nn.Module = Linear) -> None:
@@ -39,6 +36,9 @@ class MixtureOfExperts(nn.Module):
 
         # The gating network (router)
         self.gate = linear_class(config.d_model, config.num_experts, bias=config.bias)
+
+        # LTM-Conditioned Routing: project LTM state to router logits space
+        self.ltm_router_proj = linear_class(config.d_model, config.num_experts, bias=False)
 
         # The experts are implemented using the FeedForward (SwiGLU) class.
         ffn_config = FeedForwardConfig(
@@ -68,7 +68,7 @@ class MixtureOfExperts(nn.Module):
         seq_len: int,
     ) -> torch.Tensor:
         """
-        Computes the auxiliary load balancing loss and Router Z-loss.
+        Computes the auxiliary load balancing loss, Router Z-loss, and Entropy loss.
 
         Args:
             router_logits: Raw logits from the gate.
@@ -89,24 +89,25 @@ class MixtureOfExperts(nn.Module):
         load_balancing_loss = self.num_experts * (p_i * f_i).sum()
 
         # 2. Router Z-loss (PaLM style)
-        # Helps keep logits small and prevents overflow/instability
-        # Loss = 0.001 * mean(logsumexp(logits)^2)
         z_loss = torch.logsumexp(router_logits, dim=-1).pow(2).mean()
 
-        return load_balancing_loss + 0.001 * z_loss
+        # 3. Entropy loss: encourage diversity in expert selection
+        # Maximize entropy = Minimize -entropy
+        entropy = -torch.sum(p_i * torch.log(p_i + 1e-6))
+        entropy_loss = -0.01 * entropy
+
+        return load_balancing_loss + 0.001 * z_loss + entropy_loss
 
     def forward(
-        self, x: torch.Tensor, dynamic_top_k: int | None = None
+        self, x: torch.Tensor, dynamic_top_k: int | None = None, ltm_context: torch.Tensor | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the MoE layer.
 
-        Uses fully vectorized operations and groups tokens by expert for
-        performance on parallel hardware.
-
         Args:
             x: Input tensor of shape [batch, seq, d_model].
             dynamic_top_k: Optional override for top-k selection.
+            ltm_context: Optional context from Long-Term Memory [batch, 1, d_model].
 
         Returns:
             A tuple of (output_tensor, auxiliary_loss).
@@ -120,14 +121,28 @@ class MixtureOfExperts(nn.Module):
         # 1. Route tokens to experts
         router_logits = self.gate(x_reshaped)
 
+        # Apply LTM-conditioned bias to routing if provided
+        if ltm_context is not None:
+            # Project ltm_context to num_experts
+            ltm_bias = self.ltm_router_proj(ltm_context)  # [batch, seq_ltm, num_experts]
+
+            if ltm_bias.size(1) == 1:
+                # Standard case: one bias vector per batch, broadcast to all tokens
+                ltm_bias = ltm_bias.expand(-1, seq_len, -1).reshape(-1, self.num_experts)
+            else:
+                # Per-token context (ensure it matches seq_len or can be reshaped)
+                ltm_bias = ltm_bias.reshape(-1, self.num_experts)
+
+            if ltm_bias.shape[0] == router_logits.shape[0]:
+                router_logits = router_logits + ltm_bias
+
         if self.training:
             # Add small noise to router logits to encourage expert exploration
             noise = torch.randn_like(router_logits) * 0.01
             router_logits = router_logits + noise
 
         if current_top_k == 1:
-            # Optimized path for top_k=1. We use the actual gate probability
-            # to maintain differentiability.
+            # Optimized path for top_k=1.
             gate_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
             routing_weights, selected_experts = gate_probs.max(dim=-1, keepdim=True)
         else:

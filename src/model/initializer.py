@@ -244,6 +244,7 @@ class ModelInitializer:
             top_k_experts=model_cfg.top_k_experts,
             use_shared_expert=model_cfg.use_shared_expert,
             load_in_4bit=self.load_in_4bit,
+            drop_path_rate=model_cfg.drop_path_rate,
         )
 
     def init_draft_model(self) -> Transformer | None:

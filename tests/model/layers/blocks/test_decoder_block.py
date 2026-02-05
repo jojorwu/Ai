@@ -33,7 +33,7 @@ class TestDecoderBlock(unittest.TestCase):
         config = self._get_config()
         decoder_block = DecoderBlock(config)
         x = torch.randn(4, 10, config.d_model) # Batch, SeqLen, Dim
-        ltm_state = torch.zeros_like(x)
+        ltm_state = torch.zeros(4, 1, config.d_model)
         inputs = ForwardPassInput(x=x, ltm_state=ltm_state)
         output, aux_loss = decoder_block(inputs)
         self.assertEqual(x.shape, output.shape)

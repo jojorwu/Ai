@@ -73,6 +73,7 @@ class DecoderBlockConfig(BaseModel):
     )
     long_term_memory: Optional[Any] = Field(None, description="Экземпляр модуля LTM.")
     load_in_4bit: bool = Field(False, description="Использовать ли 4-битную квантование.")
+    drop_path_rate: float = Field(0.0, description="Вероятность DropPath (stochastic depth).")
 
     class Config:  # pylint: disable=too-few-public-methods
         """Pydantic config."""
@@ -124,6 +125,7 @@ class ModelConfig(BaseModel):
     rope_ntk_factor: float = Field(
         1.0, description="Фактор масштабирования NTK-aware RoPE для расширения контекста."
     )
+    drop_path_rate: float = Field(0.0, description="Вероятность DropPath (stochastic depth).")
     logit_soft_cap: float | None = Field(
         None, description="Порог для мягкого ограничения логитов (logit soft-clamping)."
     )

@@ -1,6 +1,7 @@
 """
-PyTorch implementation of the FiLM (Feature-wise Linear Modulation) layer.
+PyTorch implementation of the Gated FiLM (Feature-wise Linear Modulation) layer.
 """
+import torch
 from torch import nn
 
 from src.model.layers.core.linear import Linear
@@ -8,11 +9,11 @@ from src.model.layers.core.linear import Linear
 
 class FiLMLayer(nn.Module):
     """
-    A FiLM (Feature-wise Linear Modulation) layer.
+    A Gated FiLM (Feature-wise Linear Modulation) layer.
 
-    This layer generates scale (gamma) and shift (beta) parameters from a
-    conditioning vector (e.g., from a Long-Term Memory module) and applies
-    them to an input tensor.
+    This layer generates scale (gamma), shift (beta), and a gating parameter
+    from a conditioning vector (e.g., from a Long-Term Memory module)
+    and applies them to an input tensor via a gated residual connection.
     """
 
     def __init__(self, d_model: int, linear_class=Linear):
@@ -24,13 +25,13 @@ class FiLMLayer(nn.Module):
             linear_class: The class to use for the linear projection.
         """
         super().__init__()
-        # Project the LTM state to get gamma and beta (2 * d_model)
-        self.projection = linear_class(d_model, 2 * d_model, bias=True)
+        # Project the LTM state to get gamma, beta, and gate (3 * d_model)
+        self.projection = linear_class(d_model, 3 * d_model, bias=True)
         self.d_model = d_model
 
-    def forward(self, x, ltm_state):
+    def forward(self, x: torch.Tensor, ltm_state: torch.Tensor) -> torch.Tensor:
         """
-        Applies the FiLM transformation.
+        Applies the Gated FiLM transformation.
 
         Args:
             x: The input tensor of shape (batch, seq_len, d_model).
@@ -40,9 +41,13 @@ class FiLMLayer(nn.Module):
         Returns:
             The modulated tensor of the same shape as x.
         """
-        # Project LTM state and split into gamma and beta
+        # Project LTM state and split into gamma, beta, and gate
         projected = self.projection(ltm_state)
-        gamma, beta = projected.chunk(2, dim=-1)
+        gamma, beta, gate_logits = projected.chunk(3, dim=-1)
 
-        # Apply modulation
-        return gamma * x + beta
+        # Apply gated modulation as a residual: x + sigmoid(gate) * (gamma * x + beta)
+        # We use torch.sigmoid for the gate
+        gate = torch.sigmoid(gate_logits)
+
+        modulated = gamma * x + beta
+        return x + gate * modulated
