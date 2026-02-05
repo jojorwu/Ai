@@ -75,13 +75,28 @@ class GatingNetwork(nn.Module):
 
         # 1. Determine number of layers
         layer_logits = self.layer_head(hidden)
-        active_layers = self._differentiable_selection(layer_logits, self.num_layers)
 
         # 2. Determine number of experts
-        if self.expert_head is None:
+        expert_logits = self.expert_head(hidden) if self.expert_head is not None else None
+
+        # Apply adaptive noise during training to encourage exploration
+        if self.training:
+            # Base noise level
+            noise_scale = 0.01
+            if complexity_score is not None:
+                # Higher complexity -> more exploration (up to 5x base noise)
+                # Reshape complexity_score to match logits if necessary
+                noise_scale = noise_scale * (1.0 + 4.0 * complexity_score)
+
+            layer_logits = layer_logits + torch.randn_like(layer_logits) * noise_scale
+            if expert_logits is not None:
+                expert_logits = expert_logits + torch.randn_like(expert_logits) * noise_scale
+
+        active_layers = self._differentiable_selection(layer_logits, self.num_layers)
+
+        if expert_logits is None:
             top_k_experts = torch.ones_like(active_layers)
         else:
-            expert_logits = self.expert_head(hidden)
             top_k_experts = self._differentiable_selection(
                 expert_logits, self.num_experts
             )

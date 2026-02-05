@@ -86,6 +86,10 @@ class DecoderBlock(nn.Module):
             else None
         )
 
+        # Residual scaling for deep stability: learnable multiplier for all sub-layers
+        # Initialized to 1.0 to start with standard behavior
+        self.residual_scale = nn.Parameter(torch.ones(config.d_model))
+
     def forward(self, inputs: ForwardPassInput) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Performs the forward pass of the Decoder Block.
@@ -145,8 +149,9 @@ class DecoderBlock(nn.Module):
             # Attend to LTM state
             ltm_fused_out = self.ltm_cross_attn(x_norm, ltm_state) - x_norm
 
-        # 4. Combine with residual connection
-        # Note: LayerScale is applied internally by sublayers
-        x = x + attn_out + ffn_out + ltm_fused_out
+        # 4. Combine with residual connection and learnable scaling
+        # Note: individual LayerScale is still applied internally by sublayers
+        combined_parallel_out = attn_out + ffn_out + ltm_fused_out
+        x = x + self.residual_scale * combined_parallel_out
 
         return x, aux_loss

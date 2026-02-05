@@ -44,6 +44,10 @@ class SummaryNetwork(nn.Module):
         # Output projection
         self.out_proj = Linear(d_model, d_model, bias=False)
 
+        # Gating parameter for residual pooling
+        # Initialized to 0 so that sigmoid starts at 0.5 (equal mix)
+        self.summary_gate = nn.Parameter(torch.zeros(1))
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Summarizes a sequence using multi-head attention pooling.
@@ -72,6 +76,13 @@ class SummaryNetwork(nn.Module):
         # [batch, num_heads, 1, head_dim]
         summary_heads = torch.matmul(attn_weights, v)
 
-        # 3. Concatenate and project
-        summary = summary_heads.transpose(1, 2).contiguous().view(batch_size, 1, self.d_model)
-        return self.out_proj(summary)
+        # 3. Concatenate and project learned features
+        learned_summary = summary_heads.transpose(1, 2).contiguous().view(batch_size, 1, self.d_model)
+        learned_summary = self.out_proj(learned_summary)
+
+        # 4. Residual mean pooling: always preserve the global mean signal
+        mean_summary = torch.mean(x, dim=1, keepdim=True)
+
+        # 5. Gated fusion: learn how much to trust learned features vs mean
+        gate = torch.sigmoid(self.summary_gate)
+        return (1.0 - gate) * mean_summary + gate * learned_summary

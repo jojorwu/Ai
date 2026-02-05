@@ -64,6 +64,7 @@ class TestDecoderBlock(unittest.TestCase):
         self.assertIsNotNone(decoder_block.norm.gamma.grad)
         self.assertIsNotNone(decoder_block.attention_sublayer.layer_scale.grad)
         self.assertIsNotNone(decoder_block.ff_sublayer.layer_scale.grad)
+        self.assertIsNotNone(decoder_block.residual_scale.grad)
         if decoder_block.ltm_cross_attn:
             self.assertIsNotNone(decoder_block.ltm_cross_attn.gate.grad)
         # FiLM gradients

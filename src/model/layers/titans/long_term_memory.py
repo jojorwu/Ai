@@ -55,6 +55,10 @@ class LongTermMemory(nn.Module):
         # Initialized to a small positive value so that sigmoid starts around 0.5-0.9
         self.decay_bias = nn.Parameter(torch.ones(1, num_heads, 1, self.head_dim) * 2.0)
 
+        # QK Norm: normalize heads separately to improve stability
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
+
         # Retrieval normalization for stability
         self.retrieval_norm = RMSNorm(d_model)
 
@@ -108,6 +112,10 @@ class LongTermMemory(nn.Module):
         # 2. Reshape for Multi-Head: [batch, heads, 1, head_dim]
         q = q.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Apply QK Norm to heads
+        q = self.q_norm(q)
+        k = self.k_norm(k)
 
         v_heads = v.view(batch_size, 1, self.num_heads, -1).transpose(1, 2)
         v_head_dim = self.d_model // self.num_heads
