@@ -57,7 +57,13 @@ class TestScaledDotProductAttention(unittest.TestCase):
         attention(inputs)
         # Check if the backend function was called with is_causal=True
         mock_attention.assert_called_with(
-            inputs.q, inputs.k, inputs.v, attn_mask=None, is_causal=True
+            inputs.q,
+            inputs.k,
+            inputs.v,
+            attn_mask=None,
+            dropout_p=0.0,
+            is_causal=True,
+            scale=None,
         )
 
 

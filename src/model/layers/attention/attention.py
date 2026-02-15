@@ -20,6 +20,7 @@ class AttentionInput:
     v: torch.Tensor
     mask: Optional[torch.Tensor] = None
     is_causal: bool = False
+    scale: Optional[float] = None
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -45,5 +46,11 @@ class ScaledDotProductAttention(nn.Module):
         # like FlashAttention if available.
         # pylint: disable=not-callable
         return F.scaled_dot_product_attention(
-            inputs.q, inputs.k, inputs.v, attn_mask=inputs.mask, is_causal=inputs.is_causal
+            inputs.q,
+            inputs.k,
+            inputs.v,
+            attn_mask=inputs.mask,
+            dropout_p=0.0,
+            is_causal=inputs.is_causal,
+            scale=inputs.scale,
         )

@@ -51,6 +51,7 @@ class SpeculativeEngine:
                     sampling_config.dynamic_top_k or sampling_config.top_k,
                     sampling_config.top_p,
                     sampling_config.min_p,
+                    sampling_config.logit_soft_cap,
                 )
                 generated_chunks.append(next_token)
 
@@ -82,6 +83,7 @@ class SpeculativeEngine:
             sampling_config.dynamic_top_k or sampling_config.top_k,
             sampling_config.top_p,
             sampling_config.min_p,
+            sampling_config.logit_soft_cap,
         ).view(speculative_chunk.shape)
 
         mismatches = (speculative_chunk != verification_tokens).long()

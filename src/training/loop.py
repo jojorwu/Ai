@@ -1,64 +1,122 @@
 """
 Implements the main training loop and training state management.
 """
+from __future__ import annotations
 import gc
 import logging
 import math
 import os
+from typing import TYPE_CHECKING, Any
 
 import torch
 from src.training.callbacks import TrainerCallback, LoggingCallback, CheckpointCallback
 
+if TYPE_CHECKING:
+    from src.training.trainer import Trainer
+    from src.config.core import TrainConfig
+
 
 class TrainingState:
-    """A simple class to hold and manage the training state like epoch."""
+    """
+    A class to hold and manage the training state.
 
-    def __init__(self, epoch=0, best_val_loss=float('inf'), epochs_no_improve=0):
+    Attributes:
+        epoch: The current training epoch.
+        best_val_loss: The best validation loss achieved so far.
+        epochs_no_improve: Number of consecutive epochs without improvement.
+    """
+
+    def __init__(
+        self, epoch: int = 0, best_val_loss: float = float('inf'), epochs_no_improve: int = 0
+    ) -> None:
+        """
+        Initializes the TrainingState.
+
+        Args:
+            epoch: Initial epoch.
+            best_val_loss: Initial best validation loss.
+            epochs_no_improve: Initial count of epochs without improvement.
+        """
         self.epoch = epoch
         self.best_val_loss = best_val_loss
         self.epochs_no_improve = epochs_no_improve
 
-    def state_dict(self):
-        """Returns the state of the training."""
+    def state_dict(self) -> dict[str, Any]:
+        """
+        Returns the state as a dictionary for serialization.
+
+        Returns:
+            A dictionary containing the current state.
+        """
         return {
             "epoch": self.epoch,
             "best_val_loss": self.best_val_loss,
             "epochs_no_improve": self.epochs_no_improve
         }
 
-    def load_state_dict(self, state_dict):
-        """Loads the training state."""
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """
+        Loads the training state from a dictionary.
+
+        Args:
+            state_dict: A dictionary containing the saved state.
+        """
         self.epoch = state_dict.get("epoch", 0)
         self.best_val_loss = state_dict.get("best_val_loss", float('inf'))
         self.epochs_no_improve = state_dict.get("epochs_no_improve", 0)
 
 
 class TrainingLoop:
-    """Encapsulates the main training loop logic."""
+    """
+    Encapsulates the main training loop logic.
+
+    This class orchestrates the pretraining and evolution cycles,
+    manages checkpoints, and invokes callbacks.
+    """
 
     def __init__(
         self,
-        trainer: "Trainer",
-        config: "TrainConfig",
-        callbacks: list[TrainerCallback] = None
-    ):
+        trainer: Trainer,
+        config: TrainConfig,
+        callbacks: list[TrainerCallback] | None = None
+    ) -> None:
+        """
+        Initializes the TrainingLoop.
+
+        Args:
+            trainer: The trainer object to use for training steps.
+            config: Configuration object for training.
+            callbacks: List of callbacks to invoke during training.
+        """
         self.trainer = trainer
         self.config = config
         self.accelerator = trainer.accelerator
         self.callbacks = callbacks or []
 
-    def _invoke_callbacks(self, method_name: str, *args, **kwargs):
+    def _invoke_callbacks(self, method_name: str, *args: Any, **kwargs: Any) -> None:
+        """
+        Invokes all registered callbacks for a specific lifecycle event.
+
+        Args:
+            method_name: The name of the callback method to invoke.
+            *args: Positional arguments to pass to the callback.
+            **kwargs: Keyword arguments to pass to the callback.
+        """
         for callback in self.callbacks:
             method = getattr(callback, method_name, None)
             if callable(method):
                 method(*args, **kwargs)
 
-    def run(self, checkpoint_dir: str, resume_from: str | None):
-        """Runs the main training loop."""
+    def run(self, checkpoint_dir: str, resume_from: str | None) -> None:
+        """
+        Runs the main training loop.
+
+        Args:
+            checkpoint_dir: Directory to save checkpoints.
+            resume_from: Optional model name to resume training from.
+        """
         if not self.callbacks:
             # Default callbacks if none provided.
-            # We assume standard structure if not provided.
-            import os
             self.callbacks = [
                 LoggingCallback(),
                 CheckpointCallback(

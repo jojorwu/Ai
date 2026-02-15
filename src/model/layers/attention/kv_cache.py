@@ -1,15 +1,27 @@
 """
 PyTorch implementation of the K-V Cache for efficient Transformer generation.
 """
+from __future__ import annotations
 from dataclasses import dataclass
 import logging
+from typing import Tuple
 
 import torch
 
 
 @dataclass
 class KVCacheConfig:
-    """Configuration for the KVCache."""
+    """
+    Configuration for the KVCache.
+
+    Attributes:
+        num_layers: Number of layers in the model.
+        batch_size: Batch size for inference.
+        num_kv_heads: Number of Key-Value heads.
+        d_k: Dimension of each head.
+        max_seq_len: Maximum sequence length supported by the cache.
+        anchor_size: Number of initial tokens to keep as fixed anchors (Attention Sinks).
+    """
     num_layers: int
     batch_size: int
     num_kv_heads: int
@@ -17,14 +29,31 @@ class KVCacheConfig:
     max_seq_len: int
     anchor_size: int = 4
 
+
 class KVCache:
     """
     A Key-Value cache for the Transformer, implemented as a fixed-size ring buffer
     with support for fixed anchors (Attention Sinks).
     """
-    def __init__(self, config: KVCacheConfig, device="cpu", dtype=torch.float32):
+
+    def __init__(
+        self, config: KVCacheConfig, device: str | torch.device = "cpu", dtype: torch.dtype = torch.float32
+    ) -> None:
+        """
+        Initializes the KVCache.
+
+        Args:
+            config: Configuration object for the cache.
+            device: Device to allocate the cache on.
+            dtype: Data type for the cache tensors.
+        """
         self.config = config
-        # Ensure anchor_size is reasonable
+
+        # Harden anchor_size validation
+        if not isinstance(self.config.anchor_size, int) or self.config.anchor_size < 0:
+            logging.warning("anchor_size must be a non-negative integer. Resetting to 0.")
+            self.config.anchor_size = 0
+
         if self.config.anchor_size >= self.config.max_seq_len:
             logging.warning("anchor_size >= max_seq_len. Disabling anchors for stability.")
             self.config.anchor_size = 0
@@ -40,10 +69,14 @@ class KVCache:
         self.v_cache = torch.zeros(cache_shape, device=device, dtype=dtype)
         self.current_pos = 0
 
-    def update(self, k: torch.Tensor, v: torch.Tensor, layer_idx: int):
+    def update(self, k: torch.Tensor, v: torch.Tensor, layer_idx: int) -> None:
         """
         Updates the cache with new key and value tensors for a specific layer.
-        Preserves anchors and uses a ring buffer for the rest.
+
+        Args:
+            k: New key tensor of shape [batch, heads, seq_len, d_k].
+            v: New value tensor of shape [batch, heads, seq_len, d_k].
+            layer_idx: Index of the layer being updated.
         """
         if k.numel() == 0:
             return
@@ -55,8 +88,6 @@ class KVCache:
 
         # Safety check for sliding capacity
         if sliding_capacity <= 0:
-            # If no sliding window is possible, we just fill up to max_seq_len and stop updating
-            # or treat everything as an anchor. Here we treat everything as an anchor.
             fill_len = min(seq_len, max_seq_len - self.current_pos)
             if fill_len > 0:
                 indices = torch.arange(fill_len, device=k.device) + self.current_pos
@@ -91,17 +122,34 @@ class KVCache:
         self.k_cache[layer_idx, :, :, cache_indices, :] = k
         self.v_cache[layer_idx, :, :, cache_indices, :] = v
 
-    def increment_pos(self, seq_len: int):
-        """Increments the current position in the cache."""
+    def increment_pos(self, seq_len: int) -> None:
+        """
+        Increments the current position in the cache.
+
+        Args:
+            seq_len: Number of tokens added to the cache.
+        """
         self.current_pos += seq_len
 
-    def rollback(self, num_tokens: int):
-        """Rolls back the cache position by a certain number of tokens."""
+    def rollback(self, num_tokens: int) -> None:
+        """
+        Rolls back the cache position.
+
+        Args:
+            num_tokens: Number of tokens to roll back.
+        """
         self.current_pos = max(0, self.current_pos - num_tokens)
 
-    def get(self, layer_idx: int, seq_len: int = 0):
+    def get(self, layer_idx: int, seq_len: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Retrieves the cached keys and values for a specific layer in correct chronological order.
+        Retrieves the cached keys and values for a specific layer.
+
+        Args:
+            layer_idx: Index of the layer to retrieve.
+            seq_len: Additional sequence length to include in retrieval.
+
+        Returns:
+            A tuple of (key_cache, value_cache) tensors.
         """
         effective_pos = self.current_pos + seq_len
         anchor_size = self.config.anchor_size
@@ -158,13 +206,13 @@ class KVCache:
             torch.cat([v_anchors, v_sliding], dim=2)
         )
 
-    def detach(self):
+    def detach(self) -> None:
         """Detaches the cache tensors from the current computation graph."""
         self.k_cache.detach_()
         self.v_cache.detach_()
 
-    def clear(self):
-        """Resets the cache."""
+    def clear(self) -> None:
+        """Resets the cache position and clears the stored tensors."""
         self.k_cache.zero_()
         self.v_cache.zero_()
         self.current_pos = 0

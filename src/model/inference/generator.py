@@ -1,30 +1,45 @@
 """
 Implements the main text generation pipeline for the Transformer model.
 """
+from __future__ import annotations
 import logging
 from typing import Generator, Tuple, TYPE_CHECKING
 
 import torch
 
+from src.model.inference.sampling import LogitSampler
+from src.model.inference.speculative import SpeculativeEngine
+from src.model.structures import GenerationResult
+from src.utils.exceptions import GenerationError
+
 if TYPE_CHECKING:
     from src.model.model import Transformer
     from src.model.structures import GenerateInput
-    from src.model.layers.attention.kv_cache import KVCache
-from src.model.inference.sampling import LogitSampler
-from src.model.inference.speculative import SpeculativeEngine
+    from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
 
 
 class TextGenerator:
     """
-    Orchestrates the generation process, including KV caching and speculative decoding.
+    Orchestrates the generation process.
+
+    This includes handling KV caching, speculative decoding, and surprise
+    calculation to manage the generation lifecycle.
     """
 
     def __init__(
         self,
-        model,
-        sampler: LogitSampler = None,
-        speculative_engine: SpeculativeEngine = None,
-    ):
+        model: Transformer,
+        sampler: LogitSampler | None = None,
+        speculative_engine: SpeculativeEngine | None = None,
+    ) -> None:
+        """
+        Initializes the TextGenerator.
+
+        Args:
+            model: The Transformer model to use for generation.
+            sampler: Optional LogitSampler for token selection.
+            speculative_engine: Optional SpeculativeEngine for acceleration.
+        """
         self.model = model
         self.sampler = sampler or LogitSampler()
         self.speculative_engine = (
@@ -32,13 +47,16 @@ class TextGenerator:
         )
 
     def generate(
-        self, inputs: "GenerateInput"
-    ) -> Generator["GenerationResult", None, None]:
+        self, inputs: GenerateInput
+    ) -> Generator[GenerationResult, None, None]:
         """
         Generates a sequence of tokens.
 
         Args:
             inputs: Configuration and initial state for generation.
+
+        Yields:
+            GenerationResult objects containing tokens, surprise, and LTM memory.
         """
         self.model.eval()
         draft_model = self.model.draft_model or self.model
@@ -52,6 +70,11 @@ class TextGenerator:
         last_logit, current_ltm_memory = self._initial_sync(inputs, main_cache, tokens)
 
         while total_generated < inputs.max_new_tokens:
+            if main_cache.current_pos >= main_cache.config.max_seq_len:
+                raise GenerationError(
+                    f"Maximum sequence length ({main_cache.config.max_seq_len}) reached."
+                )
+
             # 1. Generate speculative chunk
             speculative_chunk, _ = self.speculative_engine.generate_chunk(
                 draft_model,
@@ -73,11 +96,12 @@ class TextGenerator:
                 current_ltm_memory = outputs.ltm_memory
 
             # 3. Surprise calculation (remains a model-specific detail for now)
-            # We assume the model has a way to calculate surprise from its heads.
             surprise = self.model.calculate_surprise(outputs.value, inputs.ltm_override)
 
             # 4. Validate chunk
-            all_validation_logits = torch.cat([last_logit, outputs.logits[:, :-1, :]], dim=1)
+            all_validation_logits = torch.cat(
+                [last_logit, outputs.logits[:, :-1, :]], dim=1
+            )
             accepted_chunk = self.speculative_engine.validate_chunk(
                 all_validation_logits,
                 speculative_chunk,
@@ -119,7 +143,6 @@ class TextGenerator:
             if draft_cache is not main_cache:
                 draft_cache.detach()
 
-            from src.model.structures import GenerationResult
             yield GenerationResult(
                 tokens=accepted_chunk,
                 surprise=surprise,
@@ -139,9 +162,19 @@ class TextGenerator:
                     break
 
     def _prepare_caches(
-        self, inputs: "GenerateInput", draft_model: "Transformer", tokens: torch.Tensor
-    ) -> Tuple["KVCache", "KVCache"]:
-        """Prepares or initializes KV caches for main and draft models."""
+        self, inputs: GenerateInput, draft_model: Transformer, tokens: torch.Tensor
+    ) -> Tuple[KVCache, KVCache]:
+        """
+        Prepares or initializes KV caches for main and draft models.
+
+        Args:
+            inputs: Generation inputs containing optional existing caches.
+            draft_model: The draft model to prepare a cache for.
+            tokens: Initial tokens to determine batch size.
+
+        Returns:
+            A tuple of (main_cache, draft_cache).
+        """
         from src.model.layers.attention.kv_cache import KVCache, KVCacheConfig
 
         if inputs.kv_cache is not None:
@@ -180,9 +213,19 @@ class TextGenerator:
         return main_cache, draft_cache
 
     def _initial_sync(
-        self, inputs: "GenerateInput", main_cache: "KVCache", tokens: torch.Tensor
+        self, inputs: GenerateInput, main_cache: KVCache, tokens: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor | None]:
-        """Performs initial forward pass to synchronize the main cache."""
+        """
+        Performs initial forward pass to synchronize the main cache with the prompt.
+
+        Args:
+            inputs: Generation inputs.
+            main_cache: The main KV cache to synchronize.
+            tokens: Initial prompt tokens.
+
+        Returns:
+            A tuple containing the last logit and current LTM memory.
+        """
         current_ltm_memory = inputs.ltm_memory
         if main_cache.current_pos == 0:
             with torch.no_grad():
@@ -192,6 +235,7 @@ class TextGenerator:
                     ltm_override=inputs.ltm_override,
                     ltm_memory=current_ltm_memory,
                     kv_cache=main_cache,
+                    images=inputs.images,
                 )
                 current_ltm_memory = outputs.ltm_memory
                 last_logit = outputs.logits[:, -1:, :]
@@ -199,9 +243,6 @@ class TextGenerator:
             # Assume cache is already in sync with prompt
             with torch.no_grad():
                 # We need the last logit from the current cache state
-                # The easiest way is to run a small forward pass on the last token.
-                # But wait, if the cache is already at current_pos, we need to rollback by 1
-                # to get the logits for that last token without duplicating it.
                 main_cache.rollback(1)
                 outputs = self.model(
                     tokens[:, -1:],

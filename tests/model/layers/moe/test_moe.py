@@ -74,6 +74,47 @@ class TestMoE(unittest.TestCase):
         except RuntimeError as e:
             self.fail(f"Forward pass with dynamic_top_k failed with exception: {e}")
 
+    def test_z_loss_contribution(self):
+        """Tests that auxiliary loss includes a Z-loss component."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(1, 1, 16)
+
+        # Large logits should increase Z-loss
+        with torch.no_grad():
+            moe.gate.weight.fill_(100.0)
+
+        _, loss_large = moe(x)
+
+        with torch.no_grad():
+            moe.gate.weight.fill_(0.01)
+
+        _, loss_small = moe(x)
+
+        self.assertGreater(loss_large.item(), loss_small.item())
+
+    def test_ltm_conditioned_routing(self):
+        """Tests that LTM context influences routing."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=1)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(1, 1, 16)
+        ltm_context = torch.randn(1, 1, 16)
+
+        # Should run without error
+        output, _ = moe(x, ltm_context=ltm_context)
+        self.assertEqual(output.shape, x.shape)
+
+    def test_entropy_loss_backprop(self):
+        """Tests that gradients flow through entropy loss."""
+        config = MoEConfig(d_model=16, d_ff=32, num_experts=4, top_k=2)
+        moe = MixtureOfExperts(config)
+        x = torch.randn(1, 1, 16, requires_grad=True)
+
+        _, aux_loss = moe(x)
+        aux_loss.backward()
+
+        self.assertIsNotNone(moe.gate.weight.grad)
+
 
 if __name__ == "__main__":
     unittest.main()

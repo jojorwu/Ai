@@ -33,7 +33,7 @@ class TestDecoderBlock(unittest.TestCase):
         config = self._get_config()
         decoder_block = DecoderBlock(config)
         x = torch.randn(4, 10, config.d_model) # Batch, SeqLen, Dim
-        ltm_state = torch.zeros_like(x)
+        ltm_state = torch.zeros(4, 1, config.d_model)
         inputs = ForwardPassInput(x=x, ltm_state=ltm_state)
         output, aux_loss = decoder_block(inputs)
         self.assertEqual(x.shape, output.shape)
@@ -60,16 +60,17 @@ class TestDecoderBlock(unittest.TestCase):
         self.assertIsNotNone(
             decoder_block.attention_sublayer.mha.wo.weight.grad
         )
-        # Norm gradients
-        self.assertIsNotNone(decoder_block.attention_sublayer.norm.gamma.grad)
-        self.assertIsNotNone(decoder_block.ff_sublayer.norm.gamma.grad)
+        # Norm and LayerScale gradients
+        self.assertIsNotNone(decoder_block.norm.gamma.grad)
+        self.assertIsNotNone(decoder_block.attention_sublayer.layer_scale.grad)
+        self.assertIsNotNone(decoder_block.ff_sublayer.layer_scale.grad)
+        self.assertIsNotNone(decoder_block.residual_scale.grad)
+        if decoder_block.ltm_cross_attn:
+            self.assertIsNotNone(decoder_block.ltm_cross_attn.gate.grad)
         # FiLM gradients
-        if decoder_block.attention_sublayer.film:
+        if decoder_block.film:
             self.assertIsNotNone(
-                decoder_block.attention_sublayer.film.projection.weight.grad
-            )
-            self.assertIsNotNone(
-                decoder_block.ff_sublayer.film.projection.weight.grad
+                decoder_block.film.projection.weight.grad
             )
         # MoE/FFN gradients
         if decoder_block.use_moe:

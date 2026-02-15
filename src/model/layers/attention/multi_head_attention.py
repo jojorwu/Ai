@@ -1,27 +1,50 @@
 """
-PyTorch implementation of Multi-Head Attention with Grouped-Query Attention (GQA)
-and Rotary Positional Embeddings (RoPE).
+PyTorch implementation of Multi-Head Attention with Grouped-Query Attention (GQA),
+Rotary Positional Embeddings (RoPE), and Query-Key Normalization (QK Norm).
 """
+from __future__ import annotations
+from typing import TYPE_CHECKING, Tuple
+
 import torch
 from torch import nn
 
 from src.config.model_config import MultiHeadAttentionConfig
-from src.model.layers.attention.attention import AttentionInput, ScaledDotProductAttention
+from src.model.layers.attention.attention import (
+    AttentionInput,
+    ScaledDotProductAttention,
+)
 from src.model.layers.core.linear import Linear
+from src.model.layers.core.rms_norm import RMSNorm
 from src.model.layers.attention.rotary_embedding import apply_rope_embeddings
+
+if TYPE_CHECKING:
+    from src.model.layers.attention.kv_cache import KVCache
 
 
 class MultiHeadAttention(nn.Module):
     """
-    Implements Grouped-Query Attention (GQA) with RoPE, migrated to PyTorch.
+    Implements Grouped-Query Attention (GQA) with RoPE and QK Norm.
+
+    GQA allows for faster inference and smaller KV cache by sharing Key/Value
+    heads among multiple Query heads. QK Norm applies normalization to heads
+    to improve training stability.
     """
-    def __init__(self, config: MultiHeadAttentionConfig, linear_class=Linear):
+
+    def __init__(
+        self, config: MultiHeadAttentionConfig, linear_class: nn.Module = Linear
+    ) -> None:
+        """
+        Initializes the MultiHeadAttention layer.
+
+        Args:
+            config: Configuration for the attention layer.
+            linear_class: The linear layer class to use.
+        """
         super().__init__()
         self._validate_config(config)
         self.config = config
 
-        # Store frequently used attributes as instance variables to avoid
-        # repeated dictionary lookups in the forward pass.
+        # Store frequently used attributes as instance variables
         self.num_heads = config.num_heads
         self.num_kv_heads = config.num_kv_heads
         self.n_rep = config.num_heads // config.num_kv_heads
@@ -32,23 +55,33 @@ class MultiHeadAttention(nn.Module):
         self.attention = ScaledDotProductAttention()
         self.qkv_proj, self.wo = self._create_projections(config, linear_class)
 
-    def _validate_config(self, config):
+        # Adaptive Attention Scaling: learnable scale for dot-product attention.
+        # Initialized to the standard 1 / sqrt(head_dim).
+        self.q_k_scale = nn.Parameter(torch.tensor(self.head_dim**-0.5))
+
+        # QK Norm: normalize heads separately to improve stability
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
+
+    def _validate_config(self, config: MultiHeadAttentionConfig) -> None:
+        """Validates that dimensions are compatible with head counts."""
         if config.d_model % config.num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads.")
         if config.num_heads % config.num_kv_heads != 0:
             raise ValueError("num_heads must be divisible by num_kv_heads.")
 
-    def _create_projections(self, config, linear_class):
+    def _create_projections(
+        self, config: MultiHeadAttentionConfig, linear_class: nn.Module
+    ) -> Tuple[nn.Module, nn.Module]:
+        """Creates Query, Key, Value and Output linear projections."""
         d_k = config.d_model // config.num_heads
         q_dim = d_k * config.num_heads
         kv_dim = d_k * config.num_kv_heads
-        qkv_proj = linear_class(
-            config.d_model, q_dim + 2 * kv_dim, bias=config.bias
-        )
-        if hasattr(qkv_proj, 'special_residual_init'):
+        qkv_proj = linear_class(config.d_model, q_dim + 2 * kv_dim, bias=config.bias)
+        if hasattr(qkv_proj, "special_residual_init"):
             qkv_proj.special_residual_init(config.num_layers)
         wo = linear_class(config.d_model, config.d_model, bias=config.bias)
-        if hasattr(wo, 'special_residual_init'):
+        if hasattr(wo, "special_residual_init"):
             wo.special_residual_init(config.num_layers)
         return qkv_proj, wo
 
@@ -71,22 +104,33 @@ class MultiHeadAttention(nn.Module):
         batch, num_kv_heads, seq_len, head_dim = x.shape
         return (
             x.unsqueeze(2)
-             .expand(batch, num_kv_heads, n_rep, seq_len, head_dim)
-             .reshape(batch, num_kv_heads * n_rep, seq_len, head_dim)
+            .expand(batch, num_kv_heads, n_rep, seq_len, head_dim)
+            .reshape(batch, num_kv_heads * n_rep, seq_len, head_dim)
         )
 
-    def _prepare_qkv(self, x, kv_cache):
+    def _prepare_qkv(
+        self, x: torch.Tensor, kv_cache: KVCache | None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
         """Prepares the query, key, and value projections."""
         seq_len = x.shape[1]
         seq_offset = kv_cache.current_pos if kv_cache is not None else 0
         qkv = self.qkv_proj(x)
-        q_proj, k_proj, v_proj = qkv.split([self.q_dim, self.kv_dim, self.kv_dim], dim=-1)
+        q_proj, k_proj, v_proj = qkv.split(
+            [self.q_dim, self.kv_dim, self.kv_dim], dim=-1
+        )
         q_proj = self._split_heads(q_proj, self.num_heads)
         k_proj = self._split_heads(k_proj, self.num_kv_heads)
         v_proj = self._split_heads(v_proj, self.num_kv_heads)
+
+        # Apply QK Norm
+        q_proj = self.q_norm(q_proj)
+        k_proj = self.k_norm(k_proj)
+
         return q_proj, k_proj, v_proj, seq_len, seq_offset
 
-    def _apply_rope(self, q: torch.Tensor, k: torch.Tensor, seq_offset: int):
+    def _apply_rope(
+        self, q: torch.Tensor, k: torch.Tensor, seq_offset: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Applies Rotary Positional Embeddings to Q and K."""
         if self.config.rotary_emb is not None:
             cos, sin = self.config.rotary_emb
@@ -94,15 +138,39 @@ class MultiHeadAttention(nn.Module):
             k = apply_rope_embeddings(k, cos, sin, seq_offset)
         return q, k
 
-    def _get_updated_kv(self, k: torch.Tensor, v: torch.Tensor, kv_cache, layer_idx, seq_len: int):
+    def _get_updated_kv(
+        self,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        kv_cache: KVCache | None,
+        layer_idx: int | None,
+        seq_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Updates and retrieves K and V from the cache."""
         if kv_cache is not None:
+            if layer_idx is None:
+                raise ValueError("layer_idx must be provided when using kv_cache")
             kv_cache.update(k, v, layer_idx)
             k, v = kv_cache.get(layer_idx, seq_len=seq_len)
         return k, v
 
-    def forward(self, x: torch.Tensor, kv_cache=None, layer_idx=None):
-        """Forward pass of the GQA layer."""
+    def forward(
+        self,
+        x: torch.Tensor,
+        kv_cache: KVCache | None = None,
+        layer_idx: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass of the GQA layer.
+
+        Args:
+            x: Input hidden states [batch, seq_len, d_model].
+            kv_cache: Optional persistent Key-Value cache.
+            layer_idx: Index of the current layer (required if kv_cache is used).
+
+        Returns:
+            The output tensor after attention and projection.
+        """
         seq_len = x.shape[1]
         q, k, v, _, seq_offset = self._prepare_qkv(x, kv_cache)
         q, k = self._apply_rope(q, k, seq_offset)
@@ -112,11 +180,15 @@ class MultiHeadAttention(nn.Module):
             k = self._repeat_kv(k, self.n_rep)
             v = self._repeat_kv(v, self.n_rep)
 
+        # Adaptive Attention Scaling: scale queries by learnable parameter.
+        # We multiply by self.q_k_scale so that dot product (q*scale)@k.T
+        # effectively applies the scale.
+        q = q * self.q_k_scale
+
         # Causal masking is required when seq_len > 1 (e.g. prompt or speculative chunk).
-        # For single-token generation, masking is a no-op but True remains safe.
         is_causal = (kv_cache is None) or (seq_len > 1)
 
-        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal)
+        attn_input = AttentionInput(q=q, k=k, v=v, is_causal=is_causal, scale=1.0)
         attention_output = self.attention(attn_input)
         combined_output = self._combine_heads(attention_output)
         return self.wo(combined_output)

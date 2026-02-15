@@ -2,7 +2,7 @@
 Pydantic models for model architecture and vision configuration.
 """
 from typing import Any, Literal, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MultiHeadAttentionConfig(BaseModel):
@@ -12,6 +12,19 @@ class MultiHeadAttentionConfig(BaseModel):
     num_kv_heads: int = Field(
         ..., description="Количество голов для Key/Value (для GQA)."
     )
+
+    @model_validator(mode="after")
+    def validate_heads(self) -> "MultiHeadAttentionConfig":
+        if self.d_model % self.num_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by num_heads ({self.num_heads})."
+            )
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads ({self.num_kv_heads})."
+            )
+        return self
+
     rotary_emb: Optional[Tuple[Any, Any]] = Field(
         None, description="Предварительно вычисленные эмбеддинги RoPE."
     )
@@ -26,6 +39,9 @@ class MoEConfig(BaseModel):
     num_experts: int = Field(..., description="Общее количество экспертов.")
     top_k: int = Field(..., description="Количество экспертов для каждого токена.")
     bias: bool = Field(False, description="Использовать ли смещение в слоях экспертов.")
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
+    )
 
 
 class FeedForwardConfig(BaseModel):
@@ -34,6 +50,7 @@ class FeedForwardConfig(BaseModel):
     d_ff: int = Field(..., description="Размерность скрытого слоя.")
     bias: bool = Field(False, description="Использовать ли смещение в линейных слоях.")
     num_layers: int = Field(1, description="Количество подслоев FFN.")
+    use_internal_norm: bool = Field(False, description="Использовать ли RMSNorm внутри FFN.")
 
 
 class DecoderBlockConfig(BaseModel):
@@ -48,11 +65,15 @@ class DecoderBlockConfig(BaseModel):
     top_k_experts: Optional[int] = Field(
         None, description="Количество выбираемых экспертов на токен."
     )
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
+    )
     rotary_emb: Optional[Tuple[Any, Any]] = Field(
         None, description="Кортеж эмбеддингов RoPE."
     )
     long_term_memory: Optional[Any] = Field(None, description="Экземпляр модуля LTM.")
     load_in_4bit: bool = Field(False, description="Использовать ли 4-битную квантование.")
+    drop_path_rate: float = Field(0.0, description="Вероятность DropPath (stochastic depth).")
 
     class Config:  # pylint: disable=too-few-public-methods
         """Pydantic config."""
@@ -65,6 +86,8 @@ class LTMArchitectureConfig(BaseModel):
         None, description="Размерность ассоциативного пространства LTM.")
     num_layers: int | None = Field(
         None, description="Количество слоев в LTM (применимо для MLP-компонентов).")
+    num_heads: int = Field(
+        1, description="Количество голов в модуле Long-Term Memory.")
 
 
 class ModelConfig(BaseModel):
@@ -91,6 +114,9 @@ class ModelConfig(BaseModel):
         None, description="Количество 'экспертов' в слое MoE.")
     top_k_experts: int | None = Field(
         None, description="Количество 'экспертов', выбираемых для каждого токена.")
+    use_shared_expert: bool = Field(
+        False, description="Использовать ли общий эксперт (shared expert)."
+    )
     gradient_checkpointing: bool = Field(
         False, description="Включить чекпоинты градиентов для экономии памяти.")
     anchor_window_size: int = Field(
@@ -99,6 +125,27 @@ class ModelConfig(BaseModel):
     rope_ntk_factor: float = Field(
         1.0, description="Фактор масштабирования NTK-aware RoPE для расширения контекста."
     )
+    drop_path_rate: float = Field(0.0, description="Вероятность DropPath (stochastic depth).")
+    logit_soft_cap: float | None = Field(
+        None, description="Порог для мягкого ограничения логитов (logit soft-clamping)."
+    )
+
+    @model_validator(mode="after")
+    def validate_architecture(self) -> "ModelConfig":
+        if self.d_model % self.num_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by num_heads ({self.num_heads})."
+            )
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads ({self.num_kv_heads})."
+            )
+        if self.num_experts is not None and self.top_k_experts is not None:
+            if self.top_k_experts > self.num_experts:
+                raise ValueError(
+                    f"top_k_experts ({self.top_k_experts}) cannot exceed num_experts ({self.num_experts})."
+                )
+        return self
 
 
 class VisionConfig(BaseModel):
@@ -109,6 +156,18 @@ class VisionConfig(BaseModel):
                             description="Размер одного патча изображения.")
     num_channels: int = Field(
         3, description="Количество каналов в изображении (например, 3 для RGB).")
+
+    @model_validator(mode="after")
+    def validate_patches(self) -> "VisionConfig":
+        if self.image_size[0] % self.patch_size != 0:
+            raise ValueError(
+                f"Image height ({self.image_size[0]}) must be divisible by patch_size ({self.patch_size})."
+            )
+        if self.image_size[1] % self.patch_size != 0:
+            raise ValueError(
+                f"Image width ({self.image_size[1]}) must be divisible by patch_size ({self.patch_size})."
+            )
+        return self
 
 
 class ComplexityConfig(BaseModel):
